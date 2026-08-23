@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { useApp } from "../store";
 import { fmtTime, isProfane } from "../lib/captions";
 
@@ -9,8 +9,9 @@ interface Props {
 export default function TranscriptPanel({ videoRef }: Props) {
   const segments = useApp((s) => s.segments);
   const updateWord = useApp((s) => s.updateWord);
-  const addWord = useApp((s) => s.addWord);
+  const insertWord = useApp((s) => s.insertWord);
   const removeWord = useApp((s) => s.removeWord);
+  const setWordTime = useApp((s) => s.setWordTime);
   const censor = useApp((s) => s.censor);
   const setCensor = useApp((s) => s.setCensor);
   const transcribeJob = useApp((s) => s.transcribeJob);
@@ -20,6 +21,8 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const transcriptSourceRank = useApp((s) => s.transcriptSourceRank);
   const highlights = useApp((s) => s.highlights);
   const clipOverrides = useApp((s) => s.clipOverrides);
+
+  const [tuning, setTuning] = useState<{ segId: string; idx: number } | null>(null);
 
   const model = models.find((m) => m.name === selectedModel);
 
@@ -58,6 +61,28 @@ export default function TranscriptPanel({ videoRef }: Props) {
     ? (clipOverrides[sourceHighlight.rank] ?? { start: sourceHighlight.start, end: sourceHighlight.end })
     : null;
 
+  const nudgeWord = (segId: string, idx: number, field: "start" | "end", delta: number) => {
+    const w = segments.find((s) => s.id === segId)?.words[idx];
+    if (w) setWordTime(segId, idx, field, w[field] + delta);
+  };
+
+  const syncWordToPlayhead = (segId: string, idx: number, field: "start" | "end") => {
+    const v = videoRef.current;
+    if (v) setWordTime(segId, idx, field, v.currentTime);
+  };
+
+  // Inserting/removing shifts every later index in the segment, so the
+  // tuning panel (keyed by index) would silently start pointing at the
+  // wrong word — safer to just close it and let the user re-open it.
+  const doInsert = (segId: string, atIndex: number) => {
+    insertWord(segId, atIndex);
+    if (tuning?.segId === segId) setTuning(null);
+  };
+  const doRemove = (segId: string, idx: number) => {
+    removeWord(segId, idx);
+    if (tuning?.segId === segId) setTuning(null);
+  };
+
   return (
     <div className="transcript">
       {transcriptSourceRank != null && (
@@ -74,6 +99,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
         <input type="checkbox" checked={censor} onChange={(e) => setCensor(e.target.checked)} />
         <span>Censor profanity (f***)</span>
       </label>
+      <p className="muted small">
+        Click a word to jump the preview there. If a caption's timing is off, scrub/play to the
+        exact moment it's spoken, then use “here” below to snap it.
+      </p>
       <div className="transcript-list">
         {segments.map((seg) => (
           <div key={seg.id} className="seg">
@@ -87,35 +116,98 @@ export default function TranscriptPanel({ videoRef }: Props) {
               {seg.words.length ? fmtTime(seg.words[0].start) : "–"}
             </button>
             <div className="seg-words">
+              <button
+                className="word-gap"
+                title="Insert a word here"
+                onClick={() => doInsert(seg.id, 0)}
+              >
+                +
+              </button>
               {seg.words.map((w, i) => (
-                <div key={i} className="word-box">
-                  <input
-                    className={`word-input ${isProfane(w.text) ? "profane" : ""}`}
-                    value={w.text}
-                    size={Math.max(w.text.length, 1)}
-                    onChange={(e) => updateWord(seg.id, i, e.target.value)}
-                    onBlur={(e) => {
-                      if (e.target.value.trim() === "") removeWord(seg.id, i);
-                    }}
-                    onFocus={() => {
-                      const v = videoRef.current;
-                      if (v) v.currentTime = w.start + 0.001;
-                    }}
-                  />
+                <span key={i} className="word-unit">
+                  <span className="word-box">
+                    <input
+                      className={`word-input ${isProfane(w.text) ? "profane" : ""} ${
+                        tuning?.segId === seg.id && tuning.idx === i ? "tuning" : ""
+                      }`}
+                      value={w.text}
+                      size={Math.max(w.text.length, 1)}
+                      onChange={(e) => updateWord(seg.id, i, e.target.value)}
+                      onBlur={(e) => {
+                        if (e.target.value.trim() === "") doRemove(seg.id, i);
+                      }}
+                      onFocus={() => {
+                        setTuning({ segId: seg.id, idx: i });
+                        const v = videoRef.current;
+                        if (v) v.currentTime = w.start + 0.001;
+                      }}
+                    />
+                    <button
+                      className="word-del"
+                      title="Remove this word"
+                      tabIndex={-1}
+                      onClick={() => doRemove(seg.id, i)}
+                    >
+                      ×
+                    </button>
+                  </span>
                   <button
-                    className="word-del"
-                    title="Remove this word"
-                    tabIndex={-1}
-                    onClick={() => removeWord(seg.id, i)}
+                    className="word-gap"
+                    title="Insert a word here"
+                    onClick={() => doInsert(seg.id, i + 1)}
                   >
-                    ×
+                    +
+                  </button>
+                </span>
+              ))}
+            </div>
+
+            {tuning?.segId === seg.id && seg.words[tuning.idx] && (
+              <div className="word-tune">
+                <span className="muted small">Tuning “{seg.words[tuning.idx].text}”</span>
+                <div className="word-tune-row">
+                  <span className="hl-nudge-label">Start</span>
+                  <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "start", -0.2)}>
+                    −0.2s
+                  </button>
+                  <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "start", -0.05)}>
+                    −0.05s
+                  </button>
+                  <span className="hl-nudge-val">{seg.words[tuning.idx].start.toFixed(2)}s</span>
+                  <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "start", 0.05)}>
+                    +0.05s
+                  </button>
+                  <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "start", 0.2)}>
+                    +0.2s
+                  </button>
+                  <button className="btn btn-small" onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "start")}>
+                    📍 here
                   </button>
                 </div>
-              ))}
-              <button className="btn btn-ghost btn-small word-add" onClick={() => addWord(seg.id)}>
-                + word
-              </button>
-            </div>
+                <div className="word-tune-row">
+                  <span className="hl-nudge-label">End</span>
+                  <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "end", -0.2)}>
+                    −0.2s
+                  </button>
+                  <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "end", -0.05)}>
+                    −0.05s
+                  </button>
+                  <span className="hl-nudge-val">{seg.words[tuning.idx].end.toFixed(2)}s</span>
+                  <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "end", 0.05)}>
+                    +0.05s
+                  </button>
+                  <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "end", 0.2)}>
+                    +0.2s
+                  </button>
+                  <button className="btn btn-small" onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "end")}>
+                    📍 here
+                  </button>
+                </div>
+                <button className="btn btn-ghost btn-small" onClick={() => setTuning(null)}>
+                  Done
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>

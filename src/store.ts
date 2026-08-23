@@ -110,8 +110,10 @@ interface AppState {
   setStyle: (s: CaptionStyle) => void;
   setCensor: (v: boolean) => void;
   updateWord: (segId: string, wordIdx: number, text: string) => void;
-  addWord: (segId: string) => void;
+  /** Inserts a new word box at `atIndex` (0 = before the first word, words.length = append). */
+  insertWord: (segId: string, atIndex: number) => void;
   removeWord: (segId: string, wordIdx: number) => void;
+  setWordTime: (segId: string, wordIdx: number, field: "start" | "end", time: number) => void;
   setSelectedModel: (m: string) => void;
   setEncoder: (e: string) => void;
   setFpsOverride: (fps: number | null) => void;
@@ -359,13 +361,20 @@ export const useApp = create<AppState>((set, get) => ({
     });
   },
 
-  addWord: (segId) => {
+  insertWord: (segId, atIndex) => {
     set({
       segments: get().segments.map((s) => {
         if (s.id !== segId) return s;
-        const last = s.words[s.words.length - 1];
-        const start = last ? last.end : 0;
-        return { ...s, words: [...s.words, { text: "word", start, end: start + 0.4 }] };
+        const words = s.words;
+        const i = Math.max(0, Math.min(atIndex, words.length));
+        // Split the gap the new word lands in: right after the previous word
+        // (or just before the next one, if inserting at the very start),
+        // with a short default duration so it doesn't swallow the whole gap.
+        const prevEnd = i > 0 ? words[i - 1].end : Math.max(0, (words[0]?.start ?? 0.4) - 0.4);
+        const nextStart = i < words.length ? words[i].start : prevEnd + 0.4;
+        const dur = Math.max(0.05, Math.min(0.4, nextStart - prevEnd));
+        const word = { text: "word", start: prevEnd, end: prevEnd + dur };
+        return { ...s, words: [...words.slice(0, i), word, ...words.slice(i)] };
       }),
     });
   },
@@ -378,6 +387,26 @@ export const useApp = create<AppState>((set, get) => ({
           s.id !== segId ? s : { ...s, words: s.words.filter((_, i) => i !== wordIdx) }
         )
         .filter((s) => s.words.length > 0),
+    });
+  },
+
+  /** Manually re-times a word (nudge, or "sync to playhead") so captions can
+   * be tuned to match the actual voice when whisper's own timestamp is off. */
+  setWordTime: (segId, wordIdx, field, time) => {
+    set({
+      segments: get().segments.map((s) => {
+        if (s.id !== segId) return s;
+        return {
+          ...s,
+          words: s.words.map((w, i) => {
+            if (i !== wordIdx) return w;
+            const t = Math.max(0, time);
+            return field === "start"
+              ? { ...w, start: Math.min(t, w.end - 0.02) }
+              : { ...w, end: Math.max(t, w.start + 0.02) };
+          }),
+        };
+      }),
     });
   },
 
