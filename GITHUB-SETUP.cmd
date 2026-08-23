@@ -1,7 +1,8 @@
 @echo off
 cd /d "%~dp0"
 
-if exist ".git" (
+git rev-parse --verify -q HEAD >nul 2>&1
+if not errorlevel 1 (
     echo A git repo is already set up here.
     echo If you just want to push again, run BACKUP.cmd instead.
     pause
@@ -9,8 +10,8 @@ if exist ".git" (
 )
 
 echo Importing full project history from clipcaption.git.bundle...
-git init -q
-git fetch clipcaption.git.bundle master:master
+if not exist ".git" git init -q
+git fetch clipcaption.git.bundle master
 if errorlevel 1 (
     echo.
     echo Something went wrong importing the bundle. Make sure
@@ -18,7 +19,7 @@ if errorlevel 1 (
     pause
     exit /b
 )
-git checkout master -q
+git reset --hard FETCH_HEAD -q
 echo History imported.
 echo.
 

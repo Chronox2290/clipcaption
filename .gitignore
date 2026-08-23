@@ -7,3 +7,6 @@ src-tauri/gen/
 *.log
 .DS_Store
 src-tauri/binaries/*-unknown-linux-gnu
+*.bundle
+whisper-diag.txt
+setup-log.txt
