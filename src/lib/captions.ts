@@ -4,7 +4,14 @@ import type { CaptionPage, Segment, WordSpan } from "../types";
 export function paginate(
   segments: Segment[],
   maxWordsPerPage: number,
-  maxGapSec = 0.8
+  // Any silence longer than this starts a new caption page — which is what
+  // actually clears the screen, since nothing is drawn between pages. Too
+  // high and captions bridge real pauses (dead air, punchline beats) and
+  // just sit there; too low and normal mid-sentence breathing gaps would
+  // fragment captions into flashy, hard-to-read shards. 0.45s comfortably
+  // bridges natural word-to-word gaps in speech while still clearing for a
+  // genuine pause.
+  maxGapSec = 0.45
 ): CaptionPage[] {
   const pages: CaptionPage[] = [];
   for (const seg of segments) {
