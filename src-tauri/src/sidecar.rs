@@ -32,6 +32,16 @@ pub fn resolve(name: &str) -> PathBuf {
         return PathBuf::from(p);
     }
 
+    // In dev builds, prefer src-tauri/binaries: Tauri copies the sidecar EXE
+    // next to target/debug/clipcaption.exe, but NOT its companion DLLs
+    // (whisper-cli needs ggml.dll etc.), so the copy crashes at startup.
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(format!("{name}-{TARGET_TRIPLE}{EXE_SUFFIX}"));
+    if cfg!(debug_assertions) && dev.exists() {
+        return dev;
+    }
+
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let p = dir.join(format!("{name}{EXE_SUFFIX}"));
@@ -41,9 +51,6 @@ pub fn resolve(name: &str) -> PathBuf {
         }
     }
 
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("binaries")
-        .join(format!("{name}-{TARGET_TRIPLE}{EXE_SUFFIX}"));
     if dev.exists() {
         return dev;
     }

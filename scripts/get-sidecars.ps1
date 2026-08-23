@@ -52,7 +52,12 @@ if (Done "whisper-cli") {
     $wDir = Join-Path $tmp "whisper"
     if (Test-Path $wDir) { Remove-Item -Recurse -Force $wDir }
     Expand-Archive -Path $wZip -DestinationPath $wDir
-    $cli = Get-ChildItem -Path $wDir -Recurse -Include "whisper-cli.exe", "main.exe" | Select-Object -First 1
+    # IMPORTANT: the zip also ships deprecation STUBS (e.g. main.exe) that just
+    # print a warning and exit 1 — match the real whisper-cli.exe exactly.
+    $cli = Get-ChildItem -Path $wDir -Recurse -Filter "whisper-cli.exe" | Select-Object -First 1
+    if (-not $cli) {
+        $cli = Get-ChildItem -Path $wDir -Recurse -Filter "whisper-command.exe" | Select-Object -First 1
+    }
     if (-not $cli) { Write-Error "whisper-cli.exe not found inside $($asset.name)" }
     Copy-Item $cli.FullName (Join-Path $binDir "whisper-cli-$triple.exe") -Force
     # whisper-cli needs its DLLs next to it (ggml.dll, whisper.dll, ...)

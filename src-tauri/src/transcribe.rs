@@ -157,6 +157,7 @@ fn run_inner(
     let stderr = child.stderr.take();
     handle.set_child(child);
 
+    let mut err_tail: std::collections::VecDeque<String> = std::collections::VecDeque::new();
     if let Some(stderr) = stderr {
         let reader = BufReader::new(stderr);
         for line in reader.lines().map_while(Result::ok) {
@@ -168,6 +169,11 @@ fn run_inner(
                     .parse()
                     .unwrap_or(0.0);
                 emit_progress(app, job_id, "transcribing", (pct / 100.0).min(0.99), None);
+            } else if !line.trim().is_empty() {
+                if err_tail.len() >= 12 {
+                    err_tail.pop_front();
+                }
+                err_tail.push_back(line);
             }
         }
     }
@@ -185,7 +191,17 @@ fn run_inner(
         return Err("Cancelled".into());
     }
     if !status.success() {
-        return Err("whisper-cli failed — try re-running or a different model".into());
+        let detail: Vec<String> = err_tail.into_iter().collect();
+        return Err(format!(
+            "whisper-cli failed (exit: {:?}, path: {}): {}",
+            status.code(),
+            crate::sidecar::resolve("whisper-cli").display(),
+            if detail.is_empty() {
+                "no output — likely a missing DLL or a crash at startup".to_string()
+            } else {
+                detail.join(" | ")
+            }
+        ));
     }
 
     // 3. Parse JSON output into word-level segments
