@@ -59,6 +59,10 @@ interface AppState {
   // transcript
   segments: Segment[];
   censor: boolean;
+  /** Highlight rank the current `segments` were captioned for via "Caption
+   * this range", so the Transcript tab can show which clip is being edited.
+   * Null for a whole-clip transcript. */
+  transcriptSourceRank: number | null;
 
   // style
   style: CaptionStyle;
@@ -106,6 +110,8 @@ interface AppState {
   setStyle: (s: CaptionStyle) => void;
   setCensor: (v: boolean) => void;
   updateWord: (segId: string, wordIdx: number, text: string) => void;
+  addWord: (segId: string) => void;
+  removeWord: (segId: string, wordIdx: number) => void;
   setSelectedModel: (m: string) => void;
   setEncoder: (e: string) => void;
   setFpsOverride: (fps: number | null) => void;
@@ -152,6 +158,7 @@ export const useApp = create<AppState>((set, get) => ({
   mediaInfo: null,
   segments: [],
   censor: false,
+  transcriptSourceRank: null,
   style: getPreset("beast"),
   highlights: [],
   analyzeJob: null,
@@ -275,6 +282,7 @@ export const useApp = create<AppState>((set, get) => ({
         previewSrc,
         mediaInfo,
         segments: [],
+        transcriptSourceRank: null,
         highlights: [],
         activeRange: null,
         selectedRanks: [],
@@ -297,6 +305,7 @@ export const useApp = create<AppState>((set, get) => ({
       previewSrc: null,
       mediaInfo: null,
       segments: [],
+      transcriptSourceRank: null,
       highlights: [],
       activeRange: null,
       selectedRanks: [],
@@ -311,10 +320,12 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   transcribe: async () => {
-    const { videoPath, selectedModel, activeRange } = get();
+    const { videoPath, selectedModel, activeRange, editingRank } = get();
     if (!videoPath) return;
     try {
-      set({ error: null, segments: [] });
+      // editingRank is only set while a highlight's trim controls are open,
+      // so this correctly clears to null for a plain whole-clip transcribe.
+      set({ error: null, segments: [], transcriptSourceRank: editingRank });
       const id = await invoke<string>("transcribe", {
         path: videoPath,
         model: selectedModel,
@@ -345,6 +356,28 @@ export const useApp = create<AppState>((set, get) => ({
           ? s
           : { ...s, words: s.words.map((w, i) => (i === wordIdx ? { ...w, text } : w)) }
       ),
+    });
+  },
+
+  addWord: (segId) => {
+    set({
+      segments: get().segments.map((s) => {
+        if (s.id !== segId) return s;
+        const last = s.words[s.words.length - 1];
+        const start = last ? last.end : 0;
+        return { ...s, words: [...s.words, { text: "word", start, end: start + 0.4 }] };
+      }),
+    });
+  },
+
+  /** Removes a word box outright; drops the whole segment row if it was the last one left. */
+  removeWord: (segId, wordIdx) => {
+    set({
+      segments: get()
+        .segments.map((s) =>
+          s.id !== segId ? s : { ...s, words: s.words.filter((_, i) => i !== wordIdx) }
+        )
+        .filter((s) => s.words.length > 0),
     });
   },
 

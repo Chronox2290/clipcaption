@@ -43,7 +43,15 @@ export default function Editor() {
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onTime = () => setTime(v.currentTime);
+    const onTime = () => {
+      // While a highlight's range is active, loop playback at its end
+      // instead of rolling into whatever comes next in the source video —
+      // this is what actually makes Play "replay the selected clip".
+      if (activeRange && v.currentTime >= activeRange.end) {
+        v.currentTime = activeRange.start;
+      }
+      setTime(v.currentTime);
+    };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     v.addEventListener("timeupdate", onTime);
@@ -54,7 +62,7 @@ export default function Editor() {
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
     };
-  }, [previewSrc]);
+  }, [previewSrc, activeRange]);
 
   const togglePlay = () => {
     const v = videoRef.current;

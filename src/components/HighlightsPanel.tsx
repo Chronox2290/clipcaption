@@ -1,4 +1,4 @@
-import { useRef, useState, type RefObject } from "react";
+import { useState, type RefObject } from "react";
 import { useApp } from "../store";
 import { fmtTime } from "../lib/captions";
 import { pickDirectory, pickSavePath } from "../lib/tauri";
@@ -42,30 +42,19 @@ export default function HighlightsPanel({ videoRef }: Props) {
   const [mode, setMode] = useState<"separate" | "compile">("separate");
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
-  // Tracks the timeupdate listener from the last preview, so a new preview
-  // (or a different clip) doesn't leave an old one pausing the video early.
-  const stopAtRef = useRef<{ end: number; handler: () => void } | null>(null);
 
-  // Play + auto-stop at the clip's own end, instead of rolling into whatever
-  // comes next in the source recording.
+  // Preview a clip by making it the active range — Editor's own playback
+  // effect then loops at activeRange.end instead of rolling into whatever
+  // comes next in the source video, so this really does "replay the clip"
+  // no matter how playback is triggered afterward (transport button, or
+  // clicking the video frame itself).
   const previewRange = (start: number, end: number) => {
+    setActiveRange({ start, end });
     const v = videoRef.current;
-    if (!v) return;
-    if (stopAtRef.current) {
-      v.removeEventListener("timeupdate", stopAtRef.current.handler);
-      stopAtRef.current = null;
+    if (v) {
+      v.currentTime = start + 0.001;
+      void v.play();
     }
-    const handler = () => {
-      if (v.currentTime >= end) {
-        v.pause();
-        v.removeEventListener("timeupdate", handler);
-        if (stopAtRef.current?.handler === handler) stopAtRef.current = null;
-      }
-    };
-    stopAtRef.current = { end, handler };
-    v.addEventListener("timeupdate", handler);
-    v.currentTime = start + 0.001;
-    void v.play();
   };
 
   const exportSelected = async () => {

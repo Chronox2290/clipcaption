@@ -18,7 +18,7 @@ export default function EncodingOptions() {
     <div className="enc-options">
       <div className="field">
         <label>Frame rate</label>
-        <div className="seg">
+        <div className="seg-toggle">
           {[
             { v: null, label: "Auto" },
             { v: 30, label: "30" },
@@ -26,7 +26,7 @@ export default function EncodingOptions() {
           ].map((o) => (
             <button
               key={String(o.v)}
-              className={`seg-btn ${fpsOverride === o.v ? "sel" : ""}`}
+              className={`seg-toggle-btn ${fpsOverride === o.v ? "sel" : ""}`}
               onClick={() => setFpsOverride(o.v)}
             >
               {o.label}
