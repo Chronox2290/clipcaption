@@ -481,6 +481,13 @@ select {
   gap: 10px;
   align-items: flex-start;
 }
+.seg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
 .seg-time {
   font-size: 11.5px;
   color: var(--accent2);
@@ -489,6 +496,7 @@ select {
   border-radius: 6px;
   background: rgba(46, 230, 255, 0.08);
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 .seg-time:hover {
   background: rgba(46, 230, 255, 0.18);
@@ -497,28 +505,31 @@ select {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 1px;
+  row-gap: 4px;
+  line-height: 1.9;
 }
 .word-box {
   position: relative;
   display: inline-flex;
 }
 .word-input {
-  padding: 5px 9px;
+  padding: 3px 5px;
   font-size: 13.5px;
-  border-radius: 8px;
-  background: var(--bg2);
-  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
   width: auto;
   field-sizing: content;
   transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
 }
 .word-input:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-  background: #202537;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
 }
 .word-input:focus {
   border-color: var(--accent);
+  background: var(--bg2);
   box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.18);
 }
 .word-input.profane {
@@ -527,6 +538,7 @@ select {
 }
 .word-input.tuning {
   border-color: var(--accent2);
+  background: var(--bg2);
   box-shadow: 0 0 0 3px rgba(46, 230, 255, 0.18);
 }
 .word-unit {
@@ -534,35 +546,42 @@ select {
   align-items: center;
 }
 .word-gap {
-  width: 12px;
-  height: 24px;
+  width: 7px;
+  height: 22px;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.12);
   border-radius: 4px;
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1;
 }
 .word-gap:hover {
   color: var(--accent2);
   background: rgba(46, 230, 255, 0.14);
+  width: 14px;
 }
 .word-tune {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-top: 6px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: 10px;
   background: rgba(46, 230, 255, 0.06);
   border: 1px solid rgba(46, 230, 255, 0.25);
+}
+.word-tune-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .word-tune-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
 }
 .word-del {
   position: absolute;
@@ -758,8 +777,24 @@ select {
 }
 .hl-head {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hl-head-row {
+  display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hl-sort-toggle {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.hl-hype-tag {
+  color: var(--muted);
+  font-weight: 500;
 }
 .hl-list {
   display: flex;
@@ -788,7 +823,8 @@ select {
   font-size: 12px;
   font-weight: 700;
   color: var(--accent2);
-  width: 28px;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 .hl-mid {
   flex: 1;

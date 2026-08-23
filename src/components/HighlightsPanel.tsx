@@ -3,6 +3,7 @@ import { useApp } from "../store";
 import { fmtTime } from "../lib/captions";
 import { pickDirectory, pickSavePath } from "../lib/tauri";
 import { EXPORT_PRESETS as PRESETS } from "../lib/exportPresets";
+import { chronoPositions } from "../lib/highlights";
 import type { Highlight } from "../types";
 
 interface Props {
@@ -42,6 +43,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
   const [mode, setMode] = useState<"separate" | "compile">("separate");
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
+  const [sortMode, setSortMode] = useState<"time" | "hype">("time");
 
   // Preview a clip by making it the active range — Editor's own playback
   // effect then loops at activeRange.end instead of rolling into whatever
@@ -129,29 +131,57 @@ export default function HighlightsPanel({ videoRef }: Props) {
   }
 
   const preset = PRESETS.find((p) => p.id === presetId)!;
+  const chrono = chronoPositions(highlights);
+  const sortedHighlights = [...highlights].sort((a, b) =>
+    sortMode === "time" ? a.start - b.start : b.score - a.score
+  );
 
   return (
     <div className="hl-panel">
       <div className="hl-head">
-        <span className="muted small">
-          {highlights.length} highlight{highlights.length === 1 ? "" : "s"} found ·{" "}
-          {selectedRanks.length} selected
-        </span>
+        <div className="hl-head-row">
+          <span className="muted small">
+            {highlights.length} highlight{highlights.length === 1 ? "" : "s"} ·{" "}
+            {selectedRanks.length} selected
+          </span>
+          <div className="hl-sort-toggle">
+            <button
+              className={`btn btn-small ${sortMode === "time" ? "btn-primary" : "btn-ghost"}`}
+              title="List clips in the order they happen in the recording"
+              onClick={() => setSortMode("time")}
+            >
+              Time
+            </button>
+            <button
+              className={`btn btn-small ${sortMode === "hype" ? "btn-primary" : "btn-ghost"}`}
+              title="List clips most-exciting first"
+              onClick={() => setSortMode("hype")}
+            >
+              🔥 Hype
+            </button>
+          </div>
+        </div>
         <div className="hl-head-actions">
           <button className="btn btn-ghost btn-small" onClick={selectAllHighlights}>
-            All
+            Select all
           </button>
           <button className="btn btn-ghost btn-small" onClick={selectNoneHighlights}>
-            None
+            Select none
           </button>
           <button className="btn btn-ghost btn-small" onClick={() => analyzeHighlights()}>
             ↻ Re-scan
           </button>
         </div>
+        {sortMode === "hype" && (
+          <p className="muted small">
+            Sorted most-exciting first — the Clip # is its position in the recording, not this
+            order.
+          </p>
+        )}
       </div>
 
       <div className="hl-list">
-        {highlights.map((h) => {
+        {sortedHighlights.map((h) => {
           const range = rangeOf(h);
           const isAdjusted = !!clipOverrides[h.rank];
           const isEditing = editingRank === h.rank;
@@ -169,7 +199,10 @@ export default function HighlightsPanel({ videoRef }: Props) {
                   onChange={() => toggleHighlightSelected(h.rank)}
                   title="Include in export"
                 />
-                <span className="hl-rank">#{h.rank}</span>
+                <span className="hl-rank">
+                  Clip #{chrono[h.rank]}
+                  {sortMode === "hype" && <span className="hl-hype-tag"> · 🔥{h.rank}</span>}
+                </span>
                 <div className="hl-mid">
                   <div className="hl-times">
                     {fmtTime(range.start)} – {fmtTime(range.end)}
