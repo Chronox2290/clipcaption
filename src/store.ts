@@ -147,7 +147,13 @@ interface AppState {
   addBatchFolder: (dir: string) => Promise<void>;
   removeBatchItem: (id: string) => void;
   clearBatchItems: () => void;
-  runFileBatch: (presetId: string, customMb: number, outputDir: string | null) => Promise<void>;
+  runFileBatch: (
+    presetId: string,
+    customMb: number,
+    outputDir: string | null,
+    resolutionId?: string,
+    fitMode?: "fill" | "fit"
+  ) => Promise<void>;
   cancelFileBatch: () => void;
   clearError: () => void;
 }
@@ -715,9 +721,10 @@ export const useApp = create<AppState>((set, get) => ({
    * Process every queued clip: transcribe whole clip -> style captions ->
    * export with the chosen preset. Continues past per-file failures.
    */
-  runFileBatch: async (presetId, customMb, outputDir) => {
+  runFileBatch: async (presetId, customMb, outputDir, resolutionId = "source", fitMode = "fill") => {
     const { selectedModel } = get();
     const preset = getExportPreset(presetId);
+    const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
     batchCancelRequested = false;
     set({ batchRunning: true, error: null });
 
@@ -753,8 +760,8 @@ export const useApp = create<AppState>((set, get) => ({
         const segments = result ? (JSON.parse(result) as Segment[]) : [];
         const segs = censor ? applyCensor(segments) : segments;
         const pages = paginate(segs, style.maxWordsPerPage);
-        const outW = preset.targetW ?? info.width;
-        const outH = preset.targetH ?? info.height;
+        const outW = targetW ?? info.width;
+        const outH = targetH ?? info.height;
         const ass =
           pages.length > 0
             ? buildAss(pages, style, { playResX: outW, playResY: outH })
@@ -771,8 +778,8 @@ export const useApp = create<AppState>((set, get) => ({
             inputPath: item.path,
             outputPath,
             assContent: ass,
-            targetW: preset.targetW,
-            targetH: preset.targetH,
+            targetW,
+            targetH,
             targetSizeMb: presetId === "custom" ? customMb : preset.targetSizeMB,
             crf: preset.crf,
             fps: get().fpsOverride ?? preset.fps,
@@ -782,8 +789,8 @@ export const useApp = create<AppState>((set, get) => ({
             trimEnd: null,
             cutRanges: null,
             encoder: get().encoder,
-            fitMode: null,
-            maxHeight: null,
+            fitMode: targetW && targetH ? fitMode : null,
+            maxHeight,
           } satisfies ExportRequest,
         });
         currentBatchJobId = eid;

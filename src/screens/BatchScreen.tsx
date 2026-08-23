@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../store";
 import { pickDirectory, pickVideoFiles } from "../lib/tauri";
-import { EXPORT_PRESETS } from "../lib/exportPresets";
+import { EXPORT_PRESETS, RESOLUTION_OPTIONS } from "../lib/exportPresets";
 import { STYLE_PRESETS } from "../lib/styles";
 import EncodingOptions from "../components/EncodingOptions";
 
@@ -35,10 +35,14 @@ export default function BatchScreen() {
 
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
+  const [resolutionId, setResolutionId] = useState("source");
+  const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
   const [saveMode, setSaveMode] = useState<"beside" | "folder">("beside");
   const [outputDir, setOutputDir] = useState<string | null>(null);
 
   const model = models.find((m) => m.name === selectedModel);
+  const preset = EXPORT_PRESETS.find((p) => p.id === presetId)!;
+  const isCropped = !!(preset.targetW && preset.targetH);
   const pendingCount = batchItems.filter((i) => i.status === "pending").length;
   const doneCount = batchItems.filter((i) => i.status === "done").length;
 
@@ -61,7 +65,13 @@ export default function BatchScreen() {
   };
 
   const start = () => {
-    void runFileBatch(presetId, customMb, saveMode === "folder" ? outputDir : null);
+    void runFileBatch(
+      presetId,
+      customMb,
+      saveMode === "folder" ? outputDir : null,
+      resolutionId,
+      fitMode
+    );
   };
 
   return (
@@ -211,6 +221,39 @@ export default function BatchScreen() {
                 value={customMb}
                 onChange={(e) => setCustomMb(Number(e.target.value))}
               />
+            </div>
+          )}
+
+          <div className="field">
+            <label>Resolution</label>
+            <select value={resolutionId} onChange={(e) => setResolutionId(e.target.value)}>
+              {RESOLUTION_OPTIONS.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {isCropped && (
+            <div className="field">
+              <label>Frame</label>
+              <div className="seg-toggle">
+                <button
+                  className={`seg-toggle-btn ${fitMode === "fill" ? "sel" : ""}`}
+                  title="Fill the frame edge-to-edge, cropping whatever doesn't fit"
+                  onClick={() => setFitMode("fill")}
+                >
+                  Fill (crop)
+                </button>
+                <button
+                  className={`seg-toggle-btn ${fitMode === "fit" ? "sel" : ""}`}
+                  title="Show the whole frame, padded with a blurred zoomed copy instead of cropping"
+                  onClick={() => setFitMode("fit")}
+                >
+                  Fit (show all)
+                </button>
+              </div>
             </div>
           )}
 
