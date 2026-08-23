@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useApp } from "../store";
 import { buildAss } from "../lib/ass";
-import { paginate, applyCensor, shiftPages, fmtTime } from "../lib/captions";
+import { paginate, applyCensor, shiftPages, fmtTime, capitalize } from "../lib/captions";
 import { pickSavePath } from "../lib/tauri";
-import { EXPORT_PRESETS as PRESETS } from "../lib/exportPresets";
+import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
 import EncodingOptions from "./EncodingOptions";
 
 export default function ExportDrawer() {
@@ -24,8 +24,12 @@ export default function ExportDrawer() {
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
   const [burn, setBurn] = useState(true);
+  const [resolutionId, setResolutionId] = useState("source");
+  const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
 
   const preset = PRESETS.find((p) => p.id === presetId)!;
+  const isCropped = !!(preset.targetW && preset.targetH);
+  const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
 
   const go = async () => {
     if (!videoPath || !mediaInfo) return;
@@ -34,8 +38,8 @@ export default function ExportDrawer() {
     const out = await pickSavePath(`${base}${suffix}`);
     if (!out) return;
 
-    const outW = preset.targetW ?? mediaInfo.width;
-    const outH = preset.targetH ?? mediaInfo.height;
+    const outW = targetW ?? mediaInfo.width;
+    const outH = targetH ?? mediaInfo.height;
     const segs = censor ? applyCensor(segments) : segments;
     let pages = paginate(segs, style.maxWordsPerPage);
     if (activeRange) {
@@ -50,8 +54,8 @@ export default function ExportDrawer() {
       inputPath: videoPath,
       outputPath: out,
       assContent: ass,
-      targetW: preset.targetW,
-      targetH: preset.targetH,
+      targetW,
+      targetH,
       targetSizeMb: preset.id === "custom" ? customMb : preset.targetSizeMB,
       crf: preset.crf,
       fps: fpsOverride ?? preset.fps,
@@ -61,6 +65,8 @@ export default function ExportDrawer() {
       trimEnd: activeRange?.end ?? null,
       cutRanges: null,
       encoder,
+      fitMode: isCropped ? fitMode : null,
+      maxHeight,
     });
   };
 
@@ -91,6 +97,39 @@ export default function ExportDrawer() {
             value={customMb}
             onChange={(e) => setCustomMb(Number(e.target.value))}
           />
+        </div>
+      )}
+
+      <div className="field">
+        <label>Resolution</label>
+        <select value={resolutionId} onChange={(e) => setResolutionId(e.target.value)}>
+          {RESOLUTION_OPTIONS.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {isCropped && (
+        <div className="field">
+          <label>Frame</label>
+          <div className="seg-toggle">
+            <button
+              className={`seg-toggle-btn ${fitMode === "fill" ? "sel" : ""}`}
+              title="Fill the frame edge-to-edge, cropping whatever doesn't fit"
+              onClick={() => setFitMode("fill")}
+            >
+              Fill (crop)
+            </button>
+            <button
+              className={`seg-toggle-btn ${fitMode === "fit" ? "sel" : ""}`}
+              title="Show the whole frame, padded with a blurred zoomed copy instead of cropping"
+              onClick={() => setFitMode("fit")}
+            >
+              Fit (show all)
+            </button>
+          </div>
         </div>
       )}
 
@@ -125,7 +164,7 @@ export default function ExportDrawer() {
           </div>
           <div className="progress-row">
             <span className="muted">
-              {exportJob.stage} {exportJob.progress >= 0 ? `${Math.round(exportJob.progress * 100)}%` : ""}
+              {capitalize(exportJob.stage)} {exportJob.progress >= 0 ? `${Math.round(exportJob.progress * 100)}%` : ""}
             </span>
             <button className="btn btn-ghost btn-small" onClick={() => cancelJob(exportJob.id)}>
               Cancel

@@ -1,8 +1,8 @@
 import { useState, type RefObject } from "react";
 import { useApp } from "../store";
-import { fmtTime } from "../lib/captions";
+import { fmtTime, capitalize } from "../lib/captions";
 import { pickDirectory, pickSavePath } from "../lib/tauri";
-import { EXPORT_PRESETS as PRESETS } from "../lib/exportPresets";
+import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
 import { chronoPositions } from "../lib/highlights";
 import type { Highlight } from "../types";
 
@@ -43,6 +43,8 @@ export default function HighlightsPanel({ videoRef }: Props) {
   const [mode, setMode] = useState<"separate" | "compile">("separate");
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
+  const [resolutionId, setResolutionId] = useState("source");
+  const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
   const [sortMode, setSortMode] = useState<"time" | "hype">("time");
 
   // Preview a clip by making it the active range — Editor's own playback
@@ -61,14 +63,14 @@ export default function HighlightsPanel({ videoRef }: Props) {
 
   const exportSelected = async () => {
     const dir = await pickDirectory();
-    if (dir) void exportSelectedHighlights(dir);
+    if (dir) void exportSelectedHighlights(dir, presetId, customMb, resolutionId, fitMode);
   };
 
   const compileSelected = async () => {
     if (!videoPath) return;
     const base = videoPath.replace(/\.[^./\\]+$/, "");
     const out = await pickSavePath(`${base}.highlight-reel.mp4`);
-    if (out) void compileSelectedHighlights(out, presetId, customMb);
+    if (out) void compileSelectedHighlights(out, presetId, customMb, resolutionId, fitMode);
   };
 
   const rangeOf = (h: Highlight) => clipOverrides[h.rank] ?? { start: h.start, end: h.end };
@@ -103,7 +105,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
           </div>
           <div className="progress-row">
             <span className="muted">
-              {analyzeJob.message ?? "analyzing"}…{" "}
+              {capitalize(analyzeJob.message ?? "analyzing")}…{" "}
               {analyzeJob.progress >= 0 ? `${Math.round(analyzeJob.progress * 100)}%` : ""}
             </span>
             <button className="btn btn-ghost btn-small" onClick={() => cancelJob(analyzeJob.id)}>
@@ -131,6 +133,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
   }
 
   const preset = PRESETS.find((p) => p.id === presetId)!;
+  const isCropped = !!(preset.targetW && preset.targetH);
   const chrono = chronoPositions(highlights);
   const sortedHighlights = [...highlights].sort((a, b) =>
     sortMode === "time" ? a.start - b.start : b.score - a.score
@@ -294,7 +297,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                           />
                         </div>
                         <span className="muted small">
-                          {transcribeJob!.stage}…{" "}
+                          {capitalize(transcribeJob!.stage)}…{" "}
                           {transcribeJob!.progress >= 0
                             ? `${Math.round(transcribeJob!.progress * 100)}%`
                             : ""}
@@ -342,17 +345,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
         </button>
       </div>
 
-      {mode === "separate" && !batch && (
-        <button
-          className="btn btn-primary btn-big"
-          disabled={selectedRanks.length === 0}
-          onClick={exportSelected}
-        >
-          ⚡ Caption + export selected ({selectedRanks.length})
-        </button>
-      )}
-
-      {mode === "compile" && !batch && (
+      {!batch && (
         <div className="hl-compile">
           <div className="preset-list">
             {PRESETS.map((p) => (
@@ -379,14 +372,60 @@ export default function HighlightsPanel({ videoRef }: Props) {
               />
             </div>
           )}
-          <button
-            className="btn btn-primary btn-big"
-            disabled={selectedRanks.length === 0}
-            onClick={compileSelected}
-          >
-            🎬 Compile {selectedRanks.length} clip{selectedRanks.length === 1 ? "" : "s"} into one
-            file ({preset.name})
-          </button>
+
+          <div className="field">
+            <label>Resolution</label>
+            <select value={resolutionId} onChange={(e) => setResolutionId(e.target.value)}>
+              {RESOLUTION_OPTIONS.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {isCropped && (
+            <div className="field">
+              <label>Frame</label>
+              <div className="seg-toggle">
+                <button
+                  className={`seg-toggle-btn ${fitMode === "fill" ? "sel" : ""}`}
+                  title="Fill the frame edge-to-edge, cropping whatever doesn't fit"
+                  onClick={() => setFitMode("fill")}
+                >
+                  Fill (crop)
+                </button>
+                <button
+                  className={`seg-toggle-btn ${fitMode === "fit" ? "sel" : ""}`}
+                  title="Show the whole frame, padded with a blurred zoomed copy instead of cropping"
+                  onClick={() => setFitMode("fit")}
+                >
+                  Fit (show all)
+                </button>
+              </div>
+            </div>
+          )}
+
+          {mode === "separate" && (
+            <button
+              className="btn btn-primary btn-big"
+              disabled={selectedRanks.length === 0}
+              onClick={exportSelected}
+            >
+              ⚡ Caption + export selected ({selectedRanks.length})
+            </button>
+          )}
+
+          {mode === "compile" && (
+            <button
+              className="btn btn-primary btn-big"
+              disabled={selectedRanks.length === 0}
+              onClick={compileSelected}
+            >
+              🎬 Compile {selectedRanks.length} clip{selectedRanks.length === 1 ? "" : "s"} into one
+              file ({preset.name})
+            </button>
+          )}
         </div>
       )}
 
@@ -401,7 +440,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
             />
           </div>
           <span className="muted">
-            Clip {batch.current}/{batch.total} — {batch.stage}…
+            Clip {batch.current}/{batch.total} — {capitalize(batch.stage)}…
           </span>
         </div>
       )}

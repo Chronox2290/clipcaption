@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::io::{BufRead, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
@@ -32,6 +32,16 @@ pub struct ExportRequest {
     pub cut_ranges: Option<Vec<(f64, f64)>>,
     /// "auto" | "x264" | "nvenc" | "amf" | "qsv" (None = auto)
     pub encoder: Option<String>,
+    /// How to reconcile source aspect ratio with a forced target_w/target_h:
+    /// "fill" (default, hard center-crop) or "fit" (whole frame visible,
+    /// letterboxed with a blurred zoomed copy of itself instead of black bars).
+    /// Ignored when target_w/target_h aren't both set.
+    #[serde(default)]
+    pub fit_mode: Option<String>,
+    /// Cap the output's height when target_w/target_h aren't set (i.e. no
+    /// forced crop) — never upscales past the source's own resolution.
+    #[serde(default)]
+    pub max_height: Option<u32>,
 }
 
 impl ExportRequest {
@@ -73,38 +83,103 @@ impl ExportRequest {
         args
     }
 
-    /// Builds the -vf or -filter_complex (+ -map) args for this request.
-    /// `vf_simple` is the plain comma-joined filter chain (scale/crop/subtitles).
-    /// `include_audio`: false for the audio-less first pass of 2-pass encodes —
-    /// avoids mapping an audio pad that -an would then conflict with.
-    fn filter_and_map_args(&self, vf_simple: &str, include_audio: bool) -> Vec<String> {
+    /// Builds the full "-filter_complex ... -map ... [-map ...]" args for this
+    /// request. Always goes through filter_complex — even for the common
+    /// single-source case — so multi-segment concat, crop/"fit" letterboxing,
+    /// the resolution cap, and subtitle burn-in are all one code path instead
+    /// of a `-vf`/`-filter_complex` split that has to duplicate each stage.
+    ///
+    /// `include_audio`: false for the audio-less first pass of a 2-pass x264
+    /// encode (run with -an) — a filtergraph output pad that's never consumed
+    /// by a -map is a hard ffmpeg error, not a harmless no-op, so the audio
+    /// stages must not be built at all in that case, not just left unmapped.
+    fn filter_and_map_args(&self, ass_path: Option<&Path>, include_audio: bool) -> Vec<String> {
+        let mut fc = String::new();
+        // 1) Video source: either the concat of several trimmed ranges, or
+        // (when there's nothing else to do) the plain input stream.
+        let mut v_label = "0:v".to_string();
         if let Some(ranges) = self.ranges() {
-            let mut fc = String::new();
             for (i, (s, e)) in ranges.iter().enumerate() {
                 fc.push_str(&format!(
-                    "[0:v]trim=start={s:.3}:end={e:.3},setpts=PTS-STARTPTS[v{i}];\
-                     [0:a]atrim=start={s:.3}:end={e:.3},asetpts=PTS-STARTPTS[a{i}];"
+                    "[0:v]trim=start={s:.3}:end={e:.3},setpts=PTS-STARTPTS[v{i}];"
                 ));
+                if include_audio {
+                    fc.push_str(&format!(
+                        "[0:a]atrim=start={s:.3}:end={e:.3},asetpts=PTS-STARTPTS[a{i}];"
+                    ));
+                }
             }
             for i in 0..ranges.len() {
-                fc.push_str(&format!("[v{i}][a{i}]"));
+                fc.push_str(&format!("[v{i}]"));
+                if include_audio {
+                    fc.push_str(&format!("[a{i}]"));
+                }
             }
-            fc.push_str(&format!("concat=n={}:v=1:a=1[vcat][acat]", ranges.len()));
-            if !vf_simple.is_empty() {
-                fc.push_str(&format!(";[vcat]{vf_simple}[vout]"));
-            }
-            let video_pad = if vf_simple.is_empty() { "[vcat]" } else { "[vout]" };
-            let mut args = vec!["-filter_complex".into(), fc, "-map".into(), video_pad.into()];
+            fc.push_str(&format!(
+                "concat=n={}:v=1:a={}[vcat]",
+                ranges.len(),
+                if include_audio { 1 } else { 0 }
+            ));
             if include_audio {
-                args.extend(["-map".into(), "[acat]".into()]);
+                fc.push_str("[acat]");
             }
-            return args;
+            v_label = "vcat".to_string();
         }
-        if vf_simple.is_empty() {
-            vec![]
-        } else {
-            vec!["-vf".into(), vf_simple.into()]
+
+        // 2) Crop/fit into a forced target size, or just cap the resolution.
+        if let (Some(w), Some(h)) = (self.target_w, self.target_h) {
+            if !fc.is_empty() {
+                fc.push(';');
+            }
+            if self.fit_mode.as_deref() == Some("fit") {
+                // Whole frame visible ("zoomed out"): a blurred, cropped copy
+                // of the same frame fills the background instead of black bars.
+                fc.push_str(&format!(
+                    "[{v_label}]split[vb0][vf0];\
+                     [vb0]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},gblur=sigma=20[vb1];\
+                     [vf0]scale={w}:{h}:force_original_aspect_ratio=decrease[vf1];\
+                     [vb1][vf1]overlay=(W-w)/2:(H-h)/2[vcrop]"
+                ));
+            } else {
+                fc.push_str(&format!(
+                    "[{v_label}]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h}[vcrop]"
+                ));
+            }
+            v_label = "vcrop".to_string();
+        } else if let Some(mh) = self.max_height {
+            if !fc.is_empty() {
+                fc.push(';');
+            }
+            // min(ih,H) never upscales — a no-op once the source is already <= H.
+            fc.push_str(&format!("[{v_label}]scale=-2:min(ih\\,{mh})[vres]"));
+            v_label = "vres".to_string();
         }
+
+        // 3) Burn in subtitles last, after any crop/scale.
+        if let Some(ass) = ass_path {
+            if !fc.is_empty() {
+                fc.push(';');
+            }
+            fc.push_str(&format!(
+                "[{v_label}]subtitles=filename='{}'[vout]",
+                escape_filter_path(&ass.to_string_lossy())
+            ));
+            v_label = "vout".to_string();
+        }
+
+        if fc.is_empty() {
+            // Nothing touched the video at all — let ffmpeg auto-map both
+            // streams exactly as if no -filter_complex/-map were given.
+            return vec![];
+        }
+        let mut args = vec!["-filter_complex".into(), fc, "-map".into(), format!("[{v_label}]")];
+        if include_audio {
+            // Audio was only pulled into the filtergraph by the concat stage
+            // (cut_ranges); otherwise it's untouched, so map the raw stream.
+            let a_label = if self.ranges().is_some() { "[acat]".to_string() } else { "0:a".to_string() };
+            args.extend(["-map".into(), a_label]);
+        }
+        args
     }
 }
 
@@ -143,22 +218,6 @@ fn run_inner(
         Some(p)
     };
 
-    // Build the video filter chain
-    let mut filters: Vec<String> = Vec::new();
-    if let (Some(w), Some(h)) = (req.target_w, req.target_h) {
-        filters.push(format!(
-            "scale={w}:{h}:force_original_aspect_ratio=increase"
-        ));
-        filters.push(format!("crop={w}:{h}"));
-    }
-    if let Some(ass) = &ass_path {
-        filters.push(format!(
-            "subtitles=filename='{}'",
-            escape_filter_path(&ass.to_string_lossy())
-        ));
-    }
-    let vf = filters.join(",");
-
     let fps_str = req.fps.map(|f| format!("{f}"));
     let audio_bitrate = format!("{}k", req.audio_kbps);
 
@@ -181,7 +240,7 @@ fn run_inner(
         if encoder != "x264" {
             // GPU encoders: single pass, size bounded by VBV (maxrate/bufsize)
             let mut args: Vec<String> = req.input_args();
-            args.extend(req.filter_and_map_args(&vf, true));
+            args.extend(req.filter_and_map_args(ass_path.as_deref(), true));
             if let Some(f) = &fps_str {
                 args.extend(["-r".into(), f.clone()]);
             }
@@ -206,7 +265,7 @@ fn run_inner(
 
         // Pass 1
         let mut args1: Vec<String> = req.input_args();
-        args1.extend(req.filter_and_map_args(&vf, false));
+        args1.extend(req.filter_and_map_args(ass_path.as_deref(), false));
         if let Some(f) = &fps_str {
             args1.extend(["-r".into(), f.clone()]);
         }
@@ -225,7 +284,7 @@ fn run_inner(
 
         // Pass 2
         let mut args2: Vec<String> = req.input_args();
-        args2.extend(req.filter_and_map_args(&vf, true));
+        args2.extend(req.filter_and_map_args(ass_path.as_deref(), true));
         if let Some(f) = &fps_str {
             args2.extend(["-r".into(), f.clone()]);
         }
@@ -251,7 +310,7 @@ fn run_inner(
         // ---- Quality (CRF) mode: single pass ----
         let crf = req.crf.unwrap_or(20);
         let mut args: Vec<String> = req.input_args();
-        args.extend(req.filter_and_map_args(&vf, true));
+        args.extend(req.filter_and_map_args(ass_path.as_deref(), true));
         if let Some(f) = &fps_str {
             args.extend(["-r".into(), f.clone()]);
         }
@@ -378,6 +437,8 @@ mod tests {
             trim_end: None,
             cut_ranges: None,
             encoder: None,
+            fit_mode: None,
+            max_height: None,
         }
     }
 
@@ -409,13 +470,13 @@ mod tests {
     fn cut_ranges_filtergraph_concats_and_maps_both_streams() {
         let mut req = base_req();
         req.cut_ranges = Some(vec![(10.0, 20.0), (50.0, 63.5)]);
-        let args = req.filter_and_map_args("", true);
+        let args = req.filter_and_map_args(None, true);
         assert_eq!(args[0], "-filter_complex");
         let fc = &args[1];
         assert!(fc.contains("[0:v]trim=start=10.000:end=20.000"));
         assert!(fc.contains("[0:v]trim=start=50.000:end=63.500"));
         assert!(fc.contains("[v0][a0][v1][a1]concat=n=2:v=1:a=1[vcat][acat]"));
-        assert!(!fc.contains("[vout]")); // no vf_simple => output pad is [vcat] directly
+        assert!(!fc.contains("[vout]")); // no crop/subtitles => output pad is [vcat] directly
         assert_eq!(&args[2..], &["-map", "[vcat]", "-map", "[acat]"]);
     }
 
@@ -423,7 +484,7 @@ mod tests {
     fn cut_ranges_filtergraph_chains_subtitles_after_concat() {
         let mut req = base_req();
         req.cut_ranges = Some(vec![(0.0, 5.0)]);
-        let args = req.filter_and_map_args("subtitles=filename='x.ass'", true);
+        let args = req.filter_and_map_args(Some(Path::new("x.ass")), true);
         let fc = &args[1];
         assert!(fc.ends_with(";[vcat]subtitles=filename='x.ass'[vout]"));
         assert_eq!(&args[2..], &["-map", "[vout]", "-map", "[acat]"]);
@@ -433,15 +494,22 @@ mod tests {
     fn cut_ranges_video_only_pass_omits_audio_map() {
         let mut req = base_req();
         req.cut_ranges = Some(vec![(0.0, 5.0), (5.0, 9.0)]);
-        let args = req.filter_and_map_args("", false);
+        let args = req.filter_and_map_args(None, false);
         assert_eq!(&args[2..], &["-map", "[vcat]"]);
+        // Regression guard: a filtergraph output pad that's never consumed by
+        // a -map is a hard ffmpeg error ("Filter concat has an unconnected
+        // output"), so when audio is excluded, the atrim/acat stages must not
+        // be emitted into the graph at all — not just left unmapped.
+        let fc = &args[1];
+        assert!(!fc.contains("atrim"), "video-only pass must not build atrim stages: {fc}");
+        assert!(!fc.contains("[acat]"), "video-only pass must not declare an [acat] pad: {fc}");
+        assert!(fc.contains("concat=n=2:v=1:a=0[vcat]"), "concat must declare a=0: {fc}");
     }
 
     #[test]
-    fn no_cut_ranges_falls_back_to_simple_vf() {
+    fn no_op_request_returns_no_filter_args() {
         let req = base_req();
-        let args = req.filter_and_map_args("scale=100:100", true);
-        assert_eq!(args, vec!["-vf", "scale=100:100"]);
+        assert_eq!(req.filter_and_map_args(None, true), Vec::<String>::new());
     }
 
     #[test]
@@ -449,6 +517,66 @@ mod tests {
         let mut req = base_req();
         req.cut_ranges = Some(vec![]);
         assert_eq!(req.input_args(), vec!["-y", "-i", "in.mp4"]);
-        assert_eq!(req.filter_and_map_args("", true), Vec::<String>::new());
+        assert_eq!(req.filter_and_map_args(None, true), Vec::<String>::new());
+    }
+
+    #[test]
+    fn target_dims_fill_mode_builds_scale_and_crop() {
+        let mut req = base_req();
+        req.target_w = Some(1080);
+        req.target_h = Some(1920);
+        let args = req.filter_and_map_args(None, true);
+        let fc = &args[1];
+        assert!(fc.contains("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[vcrop]"));
+        assert!(!fc.contains("gblur"), "fill mode must not blur: {fc}");
+        assert_eq!(&args[2..], &["-map", "[vcrop]", "-map", "0:a"]);
+    }
+
+    #[test]
+    fn target_dims_fit_mode_builds_blurred_overlay() {
+        let mut req = base_req();
+        req.target_w = Some(1080);
+        req.target_h = Some(1920);
+        req.fit_mode = Some("fit".into());
+        let args = req.filter_and_map_args(None, true);
+        let fc = &args[1];
+        assert!(fc.contains("split[vb0][vf0]"), "fit mode must split into bg/fg: {fc}");
+        assert!(fc.contains("gblur=sigma=20"), "fit mode's background must be blurred: {fc}");
+        assert!(fc.contains("force_original_aspect_ratio=decrease"), "foreground must fit inside, not fill: {fc}");
+        assert!(fc.contains("overlay=(W-w)/2:(H-h)/2[vcrop]"));
+        assert_eq!(&args[2..], &["-map", "[vcrop]", "-map", "0:a"]);
+    }
+
+    #[test]
+    fn max_height_caps_resolution_without_cropping() {
+        let mut req = base_req();
+        req.max_height = Some(720);
+        let args = req.filter_and_map_args(None, true);
+        let fc = &args[1];
+        assert_eq!(fc, "[0:v]scale=-2:min(ih\\,720)[vres]");
+        assert_eq!(&args[2..], &["-map", "[vres]", "-map", "0:a"]);
+    }
+
+    #[test]
+    fn target_dims_take_priority_over_max_height() {
+        let mut req = base_req();
+        req.target_w = Some(1080);
+        req.target_h = Some(1920);
+        req.max_height = Some(720);
+        let args = req.filter_and_map_args(None, true);
+        let fc = &args[1];
+        assert!(fc.contains("crop=1080:1920[vcrop]"));
+        assert!(!fc.contains("[vres]"), "max_height must be ignored once target dims are set: {fc}");
+    }
+
+    #[test]
+    fn subtitles_without_cut_ranges_burn_directly_on_source_stream() {
+        let mut req = base_req();
+        let args = req.filter_and_map_args(Some(Path::new("cap.ass")), true);
+        assert_eq!(&args[1], "[0:v]subtitles=filename='cap.ass'[vout]");
+        assert_eq!(&args[2..], &["-map", "[vout]", "-map", "0:a"]);
+        req.max_height = Some(480); // sanity: chains after an earlier stage too
+        let args2 = req.filter_and_map_args(Some(Path::new("cap.ass")), true);
+        assert_eq!(&args2[1], "[0:v]scale=-2:min(ih\\,480)[vres];[vres]subtitles=filename='cap.ass'[vout]");
     }
 }

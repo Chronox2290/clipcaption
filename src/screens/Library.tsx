@@ -89,7 +89,7 @@ export default function Library() {
                   style={{ width: `${Math.max(0, modelJob.progress * 100)}%` }}
                 />
               </div>
-              <span className="muted">downloading… {Math.round(modelJob.progress * 100)}%</span>
+              <span className="muted">Downloading… {Math.round(modelJob.progress * 100)}%</span>
             </div>
           )}
         </section>

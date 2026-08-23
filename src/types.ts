@@ -104,6 +104,14 @@ export interface ExportRequest {
   cutRanges: [number, number][] | null;
   /** "auto" | "x264" | "nvenc" | "amf" | "qsv" */
   encoder: string;
+  /** How to reconcile source aspect ratio with a forced targetW/targetH:
+   * "fill" (default, hard center-crop) or "fit" (whole frame visible,
+   * letterboxed with a blurred zoomed copy of itself instead of black bars).
+   * Ignored unless targetW/targetH are both set. */
+  fitMode: "fill" | "fit" | null;
+  /** Cap the output's height when targetW/targetH aren't set (no forced
+   * crop) — never upscales past the source's own resolution. */
+  maxHeight: number | null;
 }
 
 /** A detected highlight window in a long recording. */

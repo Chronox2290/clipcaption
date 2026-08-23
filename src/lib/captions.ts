@@ -102,6 +102,13 @@ export function fmtTime(t: number): string {
   return `${m}:${s.toFixed(1).padStart(4, "0")}`;
 }
 
+/** Job-stage strings from the Rust backend ("exporting", "pass 1/2", …) are
+ * lowercase identifiers, not display text — capitalize the first letter
+ * wherever one is shown directly in the UI. */
+export function capitalize(s: string): string {
+  return s.length ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
 let idCounter = 0;
 export function nextId(prefix: string): string {
   idCounter += 1;

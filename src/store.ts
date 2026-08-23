@@ -14,7 +14,7 @@ import type {
 import { invoke, fileSrc, listenJobProgress, isTauri } from "./lib/tauri";
 import { getPreset } from "./lib/styles";
 import { applyCensor, nextId, paginate, shiftPages } from "./lib/captions";
-import { getExportPreset } from "./lib/exportPresets";
+import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
 
 interface JobState {
@@ -128,11 +128,19 @@ interface AppState {
   startEditingHighlight: (h: Highlight) => void;
   stopEditingHighlight: () => void;
   adjustHighlightRange: (rank: number, start: number, end: number) => void;
-  exportSelectedHighlights: (outputDir: string) => Promise<void>;
+  exportSelectedHighlights: (
+    outputDir: string,
+    presetId?: string,
+    customMb?: number,
+    resolutionId?: string,
+    fitMode?: "fill" | "fit"
+  ) => Promise<void>;
   compileSelectedHighlights: (
     outputPath: string,
     presetId: string,
-    customMb: number
+    customMb: number,
+    resolutionId?: string,
+    fitMode?: "fill" | "fit"
   ) => Promise<void>;
   openBatch: () => void;
   addBatchPaths: (paths: string[]) => void;
@@ -501,11 +509,22 @@ export const useApp = create<AppState>((set, get) => ({
    * adjusted it) — transcribe just that window, build captions in the current
    * style, cut the clip, burn, save.
    */
-  exportSelectedHighlights: async (outputDir: string) => {
+  exportSelectedHighlights: async (
+    outputDir: string,
+    presetId = "original",
+    customMb = 25,
+    resolutionId = "source",
+    fitMode: "fill" | "fit" = "fill"
+  ) => {
     const { highlights, videoPath, mediaInfo, selectedModel, selectedRanks, clipOverrides } =
       get();
     const clips = highlights.filter((h) => selectedRanks.includes(h.rank));
     if (!videoPath || !mediaInfo || clips.length === 0) return;
+
+    const preset = getExportPreset(presetId);
+    const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
+    const outW = targetW ?? mediaInfo.width;
+    const outH = targetH ?? mediaInfo.height;
 
     const baseName =
       videoPath
@@ -535,10 +554,7 @@ export const useApp = create<AppState>((set, get) => ({
         const pages = shiftPages(paginate(segs, style.maxWordsPerPage), range.start);
         const ass =
           pages.length > 0
-            ? buildAss(pages, style, {
-                playResX: mediaInfo.width,
-                playResY: mediaInfo.height,
-              })
+            ? buildAss(pages, style, { playResX: outW, playResY: outH })
             : "";
 
         set({
@@ -551,17 +567,19 @@ export const useApp = create<AppState>((set, get) => ({
             inputPath: videoPath,
             outputPath,
             assContent: ass,
-            targetW: null,
-            targetH: null,
-            targetSizeMb: null,
-            crf: 20,
-            fps: get().fpsOverride,
-            audioKbps: 160,
+            targetW,
+            targetH,
+            targetSizeMb: presetId === "custom" ? customMb : preset.targetSizeMB,
+            crf: preset.crf,
+            fps: get().fpsOverride ?? preset.fps,
+            audioKbps: preset.audioKbps,
             durationSec: mediaInfo.durationSec,
             trimStart: range.start,
             trimEnd: range.end,
             cutRanges: null,
             encoder: get().encoder,
+            fitMode: targetW && targetH ? fitMode : null,
+            maxHeight,
           } satisfies ExportRequest,
         });
         await waitForJob(eid);
@@ -578,7 +596,13 @@ export const useApp = create<AppState>((set, get) => ({
    * clip, merge their captions onto one continuous timeline, then cut +
    * concatenate + burn + compress in one ffmpeg pass at the chosen preset.
    */
-  compileSelectedHighlights: async (outputPath, presetId, customMb) => {
+  compileSelectedHighlights: async (
+    outputPath,
+    presetId,
+    customMb,
+    resolutionId = "source",
+    fitMode = "fill"
+  ) => {
     const { highlights, videoPath, mediaInfo, selectedModel, selectedRanks, clipOverrides } =
       get();
     const ordered = highlights
@@ -588,6 +612,7 @@ export const useApp = create<AppState>((set, get) => ({
     if (!videoPath || !mediaInfo || ordered.length === 0) return;
 
     const preset = getExportPreset(presetId);
+    const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
     const total = ordered.length;
     let cumulative = 0;
     let mergedPages: CaptionPage[] = [];
@@ -618,8 +643,8 @@ export const useApp = create<AppState>((set, get) => ({
 
       set({ batch: { current: total, total, stage: "exporting", outputDir: outputPath } });
       const { style } = get();
-      const outW = preset.targetW ?? mediaInfo.width;
-      const outH = preset.targetH ?? mediaInfo.height;
+      const outW = targetW ?? mediaInfo.width;
+      const outH = targetH ?? mediaInfo.height;
       const ass =
         mergedPages.length > 0
           ? buildAss(mergedPages, style, { playResX: outW, playResY: outH })
@@ -630,8 +655,8 @@ export const useApp = create<AppState>((set, get) => ({
           inputPath: videoPath,
           outputPath,
           assContent: ass,
-          targetW: preset.targetW,
-          targetH: preset.targetH,
+          targetW,
+          targetH,
           targetSizeMb: presetId === "custom" ? customMb : preset.targetSizeMB,
           crf: preset.crf,
           fps: get().fpsOverride ?? preset.fps,
@@ -641,6 +666,8 @@ export const useApp = create<AppState>((set, get) => ({
           trimEnd: null,
           cutRanges,
           encoder: get().encoder,
+          fitMode: targetW && targetH ? fitMode : null,
+          maxHeight,
         } satisfies ExportRequest,
       });
       await waitForJob(eid);
@@ -755,6 +782,8 @@ export const useApp = create<AppState>((set, get) => ({
             trimEnd: null,
             cutRanges: null,
             encoder: get().encoder,
+            fitMode: null,
+            maxHeight: null,
           } satisfies ExportRequest,
         });
         currentBatchJobId = eid;

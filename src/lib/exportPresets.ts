@@ -13,3 +13,37 @@ export const EXPORT_PRESETS: ExportPreset[] = [
 export function getExportPreset(id: string): ExportPreset {
   return EXPORT_PRESETS.find((p) => p.id === id) ?? EXPORT_PRESETS[0];
 }
+
+/** Resolution cap choices shown alongside a destination preset. `h` is a
+ * height in pixels; null means "use the source's own resolution". These
+ * only ever scale down — picking a cap taller than the source is a no-op. */
+export const RESOLUTION_OPTIONS: { id: string; label: string; h: number | null }[] = [
+  { id: "source", label: "Source", h: null },
+  { id: "2160", label: "4K (2160p)", h: 2160 },
+  { id: "1440", label: "1440p", h: 1440 },
+  { id: "1080", label: "1080p", h: 1080 },
+  { id: "720", label: "720p", h: 720 },
+  { id: "480", label: "480p", h: 480 },
+];
+
+/** Resolves a preset + chosen resolution cap into the concrete targetW/
+ * targetH/maxHeight to send in an ExportRequest. For a preset with forced
+ * dimensions (e.g. the 9:16 vertical crop), the cap scales those dimensions
+ * down proportionally instead of setting maxHeight (which the backend only
+ * honors when there's no forced crop). Never upscales past the preset's own
+ * (or the source's) resolution. */
+export function resolveResolution(
+  preset: ExportPreset,
+  resolutionId: string
+): { targetW: number | null; targetH: number | null; maxHeight: number | null } {
+  const cap = RESOLUTION_OPTIONS.find((r) => r.id === resolutionId)?.h ?? null;
+  if (preset.targetW && preset.targetH) {
+    if (cap && cap < preset.targetH) {
+      const targetH = cap;
+      const targetW = Math.round((targetH * (preset.targetW / preset.targetH)) / 2) * 2;
+      return { targetW, targetH, maxHeight: null };
+    }
+    return { targetW: preset.targetW, targetH: preset.targetH, maxHeight: null };
+  }
+  return { targetW: null, targetH: null, maxHeight: cap };
+}
