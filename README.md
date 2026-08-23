@@ -29,11 +29,20 @@ Download (start with **small.en**, ~466 MB — best balance for game audio).
 
 ## Building an installer
 
+Double-click **`BUILD-EXE.cmd`**, or run it yourself:
+
 ```powershell
 npm run tauri build
 ```
 
 Output: `src-tauri/target/release/bundle/nsis/ClipCaption_0.1.0_x64-setup.exe`
+
+This is a full optimized release build (LTO + size optimization), so it's
+much slower than `tauri dev` — expect several minutes. The result is a real
+Windows installer: Start Menu shortcut, uninstaller, no terminal window.
+`whisper-cli`'s companion DLLs (ggml.dll etc.) are bundled alongside the app
+via the Windows-only `tauri.windows.conf.json` overlay, so the installed app
+doesn't depend on anything in `src-tauri/binaries` staying in place.
 
 ## How it works
 
