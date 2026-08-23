@@ -116,8 +116,11 @@ fn run_inner(
         }
         // 93% budget for video+audio, leave headroom for container overhead
         let total_kbits = target_mb * 8192.0 * 0.93;
-        let video_kbps =
-            ((total_kbits / out_duration) - req.audio_kbps as f64).max(100.0) as u64;
+        // clamp: below 100 kbps is unwatchable; above ~30 Mbps a short clip just
+        // wastes space against a generous target (e.g. Nitro 500 MB), so the
+        // file simply comes out smaller than the cap
+        let video_kbps = ((total_kbits / out_duration) - req.audio_kbps as f64)
+            .clamp(100.0, 30_000.0) as u64;
 
         let passlog = cache.join(format!("{job_id}_2pass"));
         let passlog_s = passlog.to_string_lossy().to_string();
