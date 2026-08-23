@@ -59,6 +59,7 @@ export default function ExportDrawer() {
       durationSec: mediaInfo.durationSec,
       trimStart: activeRange?.start ?? null,
       trimEnd: activeRange?.end ?? null,
+      cutRanges: null,
       encoder,
     });
   };

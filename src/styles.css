@@ -659,6 +659,10 @@ select:focus {
   border-color: rgba(124, 92, 255, 0.45);
   background: rgba(124, 92, 255, 0.1);
 }
+.hl-row.picked {
+  border-left: 3px solid var(--accent2);
+  padding-left: 7px;
+}
 .hl-rank {
   font-size: 12px;
   font-weight: 700;
@@ -751,6 +755,25 @@ select:focus {
   flex-wrap: wrap;
   padding-top: 4px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.hl-cap-status {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.hl-cap-status.ok {
+  color: var(--accent2);
+}
+.hl-mode-toggle {
+  display: flex;
+  gap: 6px;
+}
+.hl-mode-toggle .btn {
+  flex: 1;
+}
+.hl-compile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* seek bar with range band */

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type {
   BatchItem,
   BatchState,
+  CaptionPage,
   CaptionStyle,
   ExportRequest,
   Highlight,
@@ -120,6 +121,11 @@ interface AppState {
   stopEditingHighlight: () => void;
   adjustHighlightRange: (rank: number, start: number, end: number) => void;
   exportSelectedHighlights: (outputDir: string) => Promise<void>;
+  compileSelectedHighlights: (
+    outputPath: string,
+    presetId: string,
+    customMb: number
+  ) => Promise<void>;
   openBatch: () => void;
   addBatchPaths: (paths: string[]) => void;
   addBatchFolder: (dir: string) => Promise<void>;
@@ -492,12 +498,91 @@ export const useApp = create<AppState>((set, get) => ({
             durationSec: mediaInfo.durationSec,
             trimStart: range.start,
             trimEnd: range.end,
+            cutRanges: null,
             encoder: get().encoder,
           } satisfies ExportRequest,
         });
         await waitForJob(eid);
       }
       set({ batch: null, exportDone: outputDir });
+    } catch (e) {
+      set({ batch: null, error: String(e) });
+    }
+  },
+
+  /**
+   * Compile every checked highlight into a single output file, in the order
+   * they occur in the source video (not detection rank) — transcribe each
+   * clip, merge their captions onto one continuous timeline, then cut +
+   * concatenate + burn + compress in one ffmpeg pass at the chosen preset.
+   */
+  compileSelectedHighlights: async (outputPath, presetId, customMb) => {
+    const { highlights, videoPath, mediaInfo, selectedModel, selectedRanks, clipOverrides } =
+      get();
+    const ordered = highlights
+      .filter((h) => selectedRanks.includes(h.rank))
+      .map((h) => ({ h, range: clipOverrides[h.rank] ?? { start: h.start, end: h.end } }))
+      .sort((a, b) => a.range.start - b.range.start);
+    if (!videoPath || !mediaInfo || ordered.length === 0) return;
+
+    const preset = getExportPreset(presetId);
+    const total = ordered.length;
+    let cumulative = 0;
+    let mergedPages: CaptionPage[] = [];
+    const cutRanges: [number, number][] = [];
+
+    try {
+      set({ error: null, exportDone: null });
+      for (let i = 0; i < ordered.length; i++) {
+        const { range } = ordered[i];
+        const { style, censor } = get(); // re-read so mid-run tweaks apply to later clips
+        set({ batch: { current: i + 1, total, stage: "transcribing", outputDir: outputPath } });
+
+        const tid = await invoke<string>("transcribe", {
+          path: videoPath,
+          model: selectedModel,
+          start: range.start,
+          end: range.end,
+        });
+        const result = await waitForJob(tid);
+        const segments = result ? (JSON.parse(result) as Segment[]) : [];
+        const segs = censor ? applyCensor(segments) : segments;
+        const pages = paginate(segs, style.maxWordsPerPage);
+        // source time t -> (t - range.start) + cumulative on the compiled timeline
+        mergedPages = mergedPages.concat(shiftPages(pages, range.start - cumulative));
+        cutRanges.push([range.start, range.end]);
+        cumulative += range.end - range.start;
+      }
+
+      set({ batch: { current: total, total, stage: "exporting", outputDir: outputPath } });
+      const { style } = get();
+      const outW = preset.targetW ?? mediaInfo.width;
+      const outH = preset.targetH ?? mediaInfo.height;
+      const ass =
+        mergedPages.length > 0
+          ? buildAss(mergedPages, style, { playResX: outW, playResY: outH })
+          : "";
+
+      const eid = await invoke<string>("export_video", {
+        req: {
+          inputPath: videoPath,
+          outputPath,
+          assContent: ass,
+          targetW: preset.targetW,
+          targetH: preset.targetH,
+          targetSizeMb: presetId === "custom" ? customMb : preset.targetSizeMB,
+          crf: preset.crf,
+          fps: get().fpsOverride ?? preset.fps,
+          audioKbps: preset.audioKbps,
+          durationSec: cumulative,
+          trimStart: null,
+          trimEnd: null,
+          cutRanges,
+          encoder: get().encoder,
+        } satisfies ExportRequest,
+      });
+      await waitForJob(eid);
+      set({ batch: null, exportDone: outputPath });
     } catch (e) {
       set({ batch: null, error: String(e) });
     }
@@ -606,6 +691,7 @@ export const useApp = create<AppState>((set, get) => ({
             durationSec: info.durationSec,
             trimStart: null,
             trimEnd: null,
+            cutRanges: null,
             encoder: get().encoder,
           } satisfies ExportRequest,
         });

@@ -98,6 +98,10 @@ export interface ExportRequest {
   /** Optional trim range (absolute source times, seconds) */
   trimStart: number | null;
   trimEnd: number | null;
+  /** Optional multi-segment cut (absolute source times, seconds each) — several
+   * ranges concatenated into one output. Used to compile multiple selected
+   * highlights into a single file; takes priority over trimStart/trimEnd. */
+  cutRanges: [number, number][] | null;
   /** "auto" | "x264" | "nvenc" | "amf" | "qsv" */
   encoder: string;
 }
