@@ -83,6 +83,11 @@ interface AppState {
   models: ModelInfo[];
   selectedModel: string;
 
+  // encoding options
+  encoder: string; // "auto" | "x264" | "nvenc" | "amf" | "qsv"
+  availableEncoders: string[];
+  fpsOverride: number | null; // null = auto (source / preset default)
+
   recent: string[];
 
   // actions
@@ -95,6 +100,8 @@ interface AppState {
   setCensor: (v: boolean) => void;
   updateWord: (segId: string, wordIdx: number, text: string) => void;
   setSelectedModel: (m: string) => void;
+  setEncoder: (e: string) => void;
+  setFpsOverride: (fps: number | null) => void;
   downloadModel: (name: string) => Promise<void>;
   refreshModels: () => Promise<void>;
   startExport: (req: ExportRequest) => Promise<void>;
@@ -140,6 +147,12 @@ export const useApp = create<AppState>((set, get) => ({
   modelJob: null,
   models: [],
   selectedModel: localStorage.getItem("cc.model") ?? "small.en",
+  encoder: localStorage.getItem("cc.encoder") ?? "auto",
+  availableEncoders: ["x264"],
+  fpsOverride: (() => {
+    const v = localStorage.getItem("cc.fps");
+    return v === "30" || v === "60" ? Number(v) : null;
+  })(),
   recent: loadRecent(),
 
   init: async () => {
@@ -204,6 +217,12 @@ export const useApp = create<AppState>((set, get) => ({
         patch(modelJob, "modelJob");
     });
     await get().refreshModels();
+    try {
+      const availableEncoders = await invoke<string[]>("detect_encoders");
+      set({ availableEncoders });
+    } catch {
+      /* keep x264 default */
+    }
   },
 
   refreshModels: async () => {
@@ -301,6 +320,16 @@ export const useApp = create<AppState>((set, get) => ({
     set({ selectedModel: m });
   },
 
+  setEncoder: (encoder) => {
+    localStorage.setItem("cc.encoder", encoder);
+    set({ encoder });
+  },
+
+  setFpsOverride: (fpsOverride) => {
+    localStorage.setItem("cc.fps", fpsOverride == null ? "auto" : String(fpsOverride));
+    set({ fpsOverride });
+  },
+
   downloadModel: async (name) => {
     try {
       const id = await invoke<string>("ensure_model", { name });
@@ -392,11 +421,12 @@ export const useApp = create<AppState>((set, get) => ({
             targetH: null,
             targetSizeMb: null,
             crf: 20,
-            fps: null,
+            fps: get().fpsOverride,
             audioKbps: 160,
             durationSec: mediaInfo.durationSec,
             trimStart: h.start,
             trimEnd: h.end,
+            encoder: get().encoder,
           } satisfies ExportRequest,
         });
         await waitForJob(eid);
@@ -505,11 +535,12 @@ export const useApp = create<AppState>((set, get) => ({
             targetH: preset.targetH,
             targetSizeMb: presetId === "custom" ? customMb : preset.targetSizeMB,
             crf: preset.crf,
-            fps: preset.fps,
+            fps: get().fpsOverride ?? preset.fps,
             audioKbps: preset.audioKbps,
             durationSec: info.durationSec,
             trimStart: null,
             trimEnd: null,
+            encoder: get().encoder,
           } satisfies ExportRequest,
         });
         currentBatchJobId = eid;

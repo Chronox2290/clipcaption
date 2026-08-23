@@ -98,6 +98,8 @@ export interface ExportRequest {
   /** Optional trim range (absolute source times, seconds) */
   trimStart: number | null;
   trimEnd: number | null;
+  /** "auto" | "x264" | "nvenc" | "amf" | "qsv" */
+  encoder: string;
 }
 
 /** A detected highlight window in a long recording. */

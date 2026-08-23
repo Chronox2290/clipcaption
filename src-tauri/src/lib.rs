@@ -1,4 +1,5 @@
 mod analyze;
+mod encoders;
 mod export;
 mod jobs;
 mod media;
@@ -17,6 +18,11 @@ fn probe_video(path: String) -> Result<media::MediaInfo, String> {
 #[tauri::command]
 fn prepare_preview(app: AppHandle, path: String) -> Result<String, String> {
     media::prepare_preview(&app, &path)
+}
+
+#[tauri::command]
+fn detect_encoders() -> Vec<String> {
+    encoders::available()
 }
 
 #[tauri::command]
@@ -124,6 +130,7 @@ pub fn run() {
             prepare_preview,
             analyze_highlights,
             list_videos,
+            detect_encoders,
             list_models,
             ensure_model,
             transcribe,

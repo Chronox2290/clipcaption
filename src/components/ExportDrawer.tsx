@@ -4,6 +4,7 @@ import { buildAss } from "../lib/ass";
 import { paginate, applyCensor, shiftPages, fmtTime } from "../lib/captions";
 import { pickSavePath } from "../lib/tauri";
 import { EXPORT_PRESETS as PRESETS } from "../lib/exportPresets";
+import EncodingOptions from "./EncodingOptions";
 
 export default function ExportDrawer() {
   const {
@@ -17,6 +18,8 @@ export default function ExportDrawer() {
     exportDone,
     startExport,
     cancelJob,
+    fpsOverride,
+    encoder,
   } = useApp();
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
@@ -51,11 +54,12 @@ export default function ExportDrawer() {
       targetH: preset.targetH,
       targetSizeMb: preset.id === "custom" ? customMb : preset.targetSizeMB,
       crf: preset.crf,
-      fps: preset.fps,
+      fps: fpsOverride ?? preset.fps,
       audioKbps: preset.audioKbps,
       durationSec: mediaInfo.durationSec,
       trimStart: activeRange?.start ?? null,
       trimEnd: activeRange?.end ?? null,
+      encoder,
     });
   };
 
@@ -100,6 +104,9 @@ export default function ExportDrawer() {
         <input type="checkbox" checked={burn} onChange={(e) => setBurn(e.target.checked)} />
         <span>Burn captions into video {segments.length === 0 && "(no transcript yet)"}</span>
       </label>
+
+      <h4>Encoding</h4>
+      <EncodingOptions />
 
       {!exportJob && (
         <button className="btn btn-primary btn-big" onClick={go} disabled={!videoPath}>

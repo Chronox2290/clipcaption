@@ -3,6 +3,7 @@ import { useApp } from "../store";
 import { pickDirectory, pickVideoFiles } from "../lib/tauri";
 import { EXPORT_PRESETS } from "../lib/exportPresets";
 import { STYLE_PRESETS } from "../lib/styles";
+import EncodingOptions from "../components/EncodingOptions";
 
 const STATUS_ICON: Record<string, string> = {
   pending: "•",
@@ -201,6 +202,9 @@ export default function BatchScreen() {
               />
             </div>
           )}
+
+          <h4>Encoding</h4>
+          <EncodingOptions />
 
           <h4>Save to</h4>
           <label className={`preset-row ${saveMode === "beside" ? "sel" : ""}`}>

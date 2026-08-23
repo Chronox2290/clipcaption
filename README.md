@@ -79,6 +79,19 @@ Nitro 500 MB), choose where outputs go (next to each original as
 captioned in the current style, and exported in turn — failures are reported
 per clip and the queue keeps going. Stop anytime after the current clip.
 
+## Encoding options
+
+Both the Export tab and Batch mode share two settings (remembered between runs):
+
+- **Frame rate**: Auto (source fps / preset default), 30, or 60.
+- **Encoder**: Auto picks your GPU when one is detected — NVIDIA NVENC, AMD AMF,
+  or Intel QuickSync — for much faster exports; CPU (x264) remains the best
+  choice for squeezing maximum quality into tight size targets like the Discord
+  presets. Detection actually test-encodes a few frames on startup, so only
+  encoders that really work on your machine are offered. Size-targeted GPU
+  exports are capped with VBV (maxrate/bufsize) to stay under the limit in a
+  single pass; x264 keeps its more accurate two-pass mode.
+
 ## Roadmap
 
 See the project docs (feature brainstorm + architecture spec): profanity

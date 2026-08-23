@@ -856,6 +856,38 @@ select:focus {
   margin: 6px 0 2px;
 }
 
+/* encoding options */
+.enc-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.seg {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.seg-btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--bg2);
+  border-right: 1px solid var(--line);
+}
+.seg-btn:last-child {
+  border-right: none;
+}
+.seg-btn.sel {
+  background: rgba(124, 92, 255, 0.22);
+  color: var(--text);
+  font-weight: 600;
+}
+.enc-note {
+  line-height: 1.45;
+}
+
 /* progress */
 .progress-wrap {
   display: flex;

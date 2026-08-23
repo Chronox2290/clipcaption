@@ -5,6 +5,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
+use crate::encoders;
 use crate::jobs::{emit_done, emit_error, emit_progress, JobHandle};
 use crate::sidecar;
 
@@ -24,6 +25,8 @@ pub struct ExportRequest {
     /// Optional trim: cut this range out of the source before encoding.
     pub trim_start: Option<f64>,
     pub trim_end: Option<f64>,
+    /// "auto" | "x264" | "nvenc" | "amf" | "qsv" (None = auto)
+    pub encoder: Option<String>,
 }
 
 impl ExportRequest {
@@ -108,6 +111,7 @@ fn run_inner(
     let audio_bitrate = format!("{}k", req.audio_kbps);
 
     let out_duration = req.effective_duration();
+    let encoder = encoders::resolve(req.encoder.as_deref());
 
     if let Some(target_mb) = req.target_size_mb {
         // ---- Target-size mode: two-pass x264 ----
@@ -121,6 +125,30 @@ fn run_inner(
         // file simply comes out smaller than the cap
         let video_kbps = ((total_kbits / out_duration) - req.audio_kbps as f64)
             .clamp(100.0, 30_000.0) as u64;
+
+        if encoder != "x264" {
+            // GPU encoders: single pass, size bounded by VBV (maxrate/bufsize)
+            let mut args: Vec<String> = req.input_args();
+            if !vf.is_empty() {
+                args.extend(["-vf".into(), vf.clone()]);
+            }
+            if let Some(f) = &fps_str {
+                args.extend(["-r".into(), f.clone()]);
+            }
+            args.extend(encoders::bitrate_args(&encoder, video_kbps));
+            args.extend([
+                "-pix_fmt".into(), "yuv420p".into(),
+                "-c:a".into(), "aac".into(),
+                "-b:a".into(), audio_bitrate.clone(),
+                "-movflags".into(), "+faststart".into(),
+                req.output_path.clone(),
+            ]);
+            run_ffmpeg(app, job_id, handle, &args, out_duration, 0.0, 1.0, "encoding (GPU)")?;
+            if let Some(ass) = ass_path {
+                let _ = std::fs::remove_file(ass);
+            }
+            return Ok(());
+        }
 
         let passlog = cache.join(format!("{job_id}_2pass"));
         let passlog_s = passlog.to_string_lossy().to_string();
@@ -175,7 +203,7 @@ fn run_inner(
         }
     } else {
         // ---- Quality (CRF) mode: single pass ----
-        let crf = req.crf.unwrap_or(20).to_string();
+        let crf = req.crf.unwrap_or(20);
         let mut args: Vec<String> = req.input_args();
         if !vf.is_empty() {
             args.extend(["-vf".into(), vf.clone()]);
@@ -183,17 +211,16 @@ fn run_inner(
         if let Some(f) = &fps_str {
             args.extend(["-r".into(), f.clone()]);
         }
+        args.extend(encoders::quality_args(&encoder, crf));
         args.extend([
-            "-c:v".into(), "libx264".into(),
-            "-preset".into(), "medium".into(),
-            "-crf".into(), crf,
             "-pix_fmt".into(), "yuv420p".into(),
             "-c:a".into(), "aac".into(),
             "-b:a".into(), audio_bitrate,
             "-movflags".into(), "+faststart".into(),
             req.output_path.clone(),
         ]);
-        run_ffmpeg(app, job_id, handle, &args, out_duration, 0.0, 1.0, "encoding")?;
+        let label = if encoder == "x264" { "encoding" } else { "encoding (GPU)" };
+        run_ffmpeg(app, job_id, handle, &args, out_duration, 0.0, 1.0, label)?;
     }
 
     if let Some(ass) = ass_path {
