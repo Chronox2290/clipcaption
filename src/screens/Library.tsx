@@ -30,7 +30,18 @@ export default function Library() {
       </header>
 
       <main className="lib-main">
-        <div className="dropzone" onClick={browse} role="button" tabIndex={0}>
+        <div
+          className="dropzone"
+          onClick={browse}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              void browse();
+            }
+          }}
+        >
           <div className="dropzone-icon">🎬</div>
           <h2>Drop a clip here</h2>
           <p>or click to browse — mp4 · mkv · mov · webm</p>

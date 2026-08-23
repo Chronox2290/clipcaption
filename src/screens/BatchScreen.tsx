@@ -97,7 +97,18 @@ export default function BatchScreen() {
           </div>
 
           {batchItems.length === 0 ? (
-            <div className="dropzone batch-empty" onClick={addFiles} role="button">
+            <div
+              className="dropzone batch-empty"
+              onClick={addFiles}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  void addFiles();
+                }
+              }}
+            >
               <div className="dropzone-icon">🗂️</div>
               <h2>Queue up your clips</h2>
               <p>Add individual clips or a whole folder of OBS recordings</p>

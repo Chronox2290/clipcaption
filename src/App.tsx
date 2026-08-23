@@ -37,9 +37,11 @@ export default function App() {
       {screen === "editor" && <Editor />}
       {screen === "batch" && <BatchScreen />}
       {error && (
-        <div className="toast toast-error" onClick={clearError}>
+        <div className="toast toast-error" role="alert">
           <span>⚠ {error}</span>
-          <button className="toast-close">✕</button>
+          <button className="toast-close" onClick={clearError} title="Dismiss">
+            ✕
+          </button>
         </div>
       )}
     </div>

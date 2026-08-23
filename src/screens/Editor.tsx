@@ -71,6 +71,32 @@ export default function Editor() {
     else v.pause();
   };
 
+  // Space/arrow-key transport, ignored while typing in a text field, word
+  // box, or number input so it never hijacks normal editing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement)?.isContentEditable) {
+        return;
+      }
+      const v = videoRef.current;
+      if (!v) return;
+      if (e.code === "Space") {
+        e.preventDefault();
+        togglePlay();
+      } else if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        v.currentTime = Math.max(0, v.currentTime - (e.shiftKey ? 1 : 5));
+      } else if (e.code === "ArrowRight") {
+        e.preventDefault();
+        v.currentTime = Math.min(mediaInfo?.durationSec ?? Infinity, v.currentTime + (e.shiftKey ? 1 : 5));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [mediaInfo]);
+
   const fileName = videoPath?.split(/[/\\]/).pop() ?? "";
 
   return (
@@ -147,6 +173,10 @@ export default function Editor() {
               {fmtTime(time)} / {fmtTime(mediaInfo?.durationSec ?? 0)}
             </span>
           </div>
+          <p className="muted small kbd-hint">
+            <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> seek 5s
+            <span className="kbd-hint-shift"> (+ Shift for 1s)</span>
+          </p>
         </div>
 
         <aside className="ed-side">
