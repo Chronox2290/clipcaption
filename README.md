@@ -69,6 +69,15 @@ ready-to-cut clip windows. From there:
 Only the highlight windows are transcribed, so a 2-hour VOD costs one fast
 audio decode pass plus a few minutes of Whisper — not two hours.
 
+## Batch mode (many clips at once)
+
+From the home screen, **Batch process clips**: queue individual files or a whole
+folder of OBS recordings, pick a caption style + export preset (including the
+Discord size targets), choose where outputs go (next to each original as
+`.captioned.mp4`, or one folder), and hit Process. Each clip is transcribed,
+captioned in the current style, and exported in turn — failures are reported
+per clip and the queue keeps going. Stop anytime after the current clip.
+
 ## Roadmap
 
 See the project docs (feature brainstorm + architecture spec): profanity

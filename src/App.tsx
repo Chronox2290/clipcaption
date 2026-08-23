@@ -3,6 +3,7 @@ import { useApp } from "./store";
 import { isTauri } from "./lib/tauri";
 import Library from "./screens/Library";
 import Editor from "./screens/Editor";
+import BatchScreen from "./screens/BatchScreen";
 
 export default function App() {
   const screen = useApp((s) => s.screen);
@@ -32,7 +33,9 @@ export default function App() {
 
   return (
     <div className="app">
-      {screen === "library" ? <Library /> : <Editor />}
+      {screen === "library" && <Library />}
+      {screen === "editor" && <Editor />}
+      {screen === "batch" && <BatchScreen />}
       {error && (
         <div className="toast toast-error" onClick={clearError}>
           <span>⚠ {error}</span>

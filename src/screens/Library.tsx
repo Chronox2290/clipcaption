@@ -12,6 +12,8 @@ export default function Library() {
 
   const selected = models.find((m) => m.name === selectedModel);
 
+  const openBatch = useApp((s) => s.openBatch);
+
   const browse = async () => {
     const p = await pickVideoFile();
     if (p) void openVideo(p);
@@ -36,6 +38,15 @@ export default function Library() {
             <p className="dev-note">UI preview mode — run “npm run tauri dev” for the real app</p>
           )}
         </div>
+
+        <button className="batch-launch" onClick={openBatch}>
+          <span className="batch-launch-icon">🗂️</span>
+          <span>
+            <strong>Batch process clips</strong>
+            <span className="muted"> — caption + compress a whole folder in one go</span>
+          </span>
+          <span className="batch-launch-arrow">→</span>
+        </button>
 
         <section className="model-card">
           <div className="model-card-head">

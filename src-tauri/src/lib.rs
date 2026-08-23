@@ -20,6 +20,24 @@ fn prepare_preview(app: AppHandle, path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn list_videos(dir: String) -> Result<Vec<String>, String> {
+    const EXTS: [&str; 8] = ["mp4", "mkv", "mov", "webm", "avi", "flv", "ts", "m4v"];
+    let mut out: Vec<String> = Vec::new();
+    for entry in std::fs::read_dir(&dir).map_err(|e| format!("Could not read folder: {e}"))? {
+        let path = entry.map_err(|e| e.to_string())?.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                if EXTS.contains(&ext.to_lowercase().as_str()) {
+                    out.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
+#[tauri::command]
 fn list_models(app: AppHandle) -> Result<Vec<models::ModelInfo>, String> {
     models::list(&app)
 }
@@ -105,6 +123,7 @@ pub fn run() {
             probe_video,
             prepare_preview,
             analyze_highlights,
+            list_videos,
             list_models,
             ensure_model,
             transcribe,

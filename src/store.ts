@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type {
+  BatchItem,
   BatchState,
   CaptionStyle,
   ExportRequest,
@@ -11,7 +12,8 @@ import type {
 } from "./types";
 import { invoke, fileSrc, listenJobProgress, isTauri } from "./lib/tauri";
 import { getPreset } from "./lib/styles";
-import { applyCensor, paginate, shiftPages } from "./lib/captions";
+import { applyCensor, nextId, paginate, shiftPages } from "./lib/captions";
+import { getExportPreset } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
 
 interface JobState {
@@ -24,17 +26,28 @@ interface JobState {
 // Promise adapters for jobs we want to await (used by the batch pipeline)
 const pendingJobs = new Map<
   string,
-  { resolve: (result: string | undefined) => void; reject: (err: Error) => void }
+  {
+    resolve: (result: string | undefined) => void;
+    reject: (err: Error) => void;
+    onProgress?: (p: JobProgressPayload) => void;
+  }
 >();
 
-function waitForJob(id: string): Promise<string | undefined> {
+function waitForJob(
+  id: string,
+  onProgress?: (p: JobProgressPayload) => void
+): Promise<string | undefined> {
   return new Promise((resolve, reject) => {
-    pendingJobs.set(id, { resolve, reject });
+    pendingJobs.set(id, { resolve, reject, onProgress });
   });
 }
 
+// id of the job the file-batch loop is currently awaiting (for cancellation)
+let currentBatchJobId: string | null = null;
+let batchCancelRequested = false;
+
 interface AppState {
-  screen: "library" | "editor";
+  screen: "library" | "editor" | "batch";
   error: string | null;
 
   // media
@@ -55,6 +68,10 @@ interface AppState {
   /** Active working range (a highlight the user selected) — transcribe/export apply to it */
   activeRange: { start: number; end: number } | null;
   batch: BatchState | null;
+
+  // multi-clip batch queue
+  batchItems: BatchItem[];
+  batchRunning: boolean;
 
   // jobs
   transcribeJob: JobState | null;
@@ -84,6 +101,13 @@ interface AppState {
   analyzeHighlights: () => Promise<void>;
   setActiveRange: (r: { start: number; end: number } | null) => void;
   processAllHighlights: (outputDir: string) => Promise<void>;
+  openBatch: () => void;
+  addBatchPaths: (paths: string[]) => void;
+  addBatchFolder: (dir: string) => Promise<void>;
+  removeBatchItem: (id: string) => void;
+  clearBatchItems: () => void;
+  runFileBatch: (presetId: string, customMb: number, outputDir: string | null) => Promise<void>;
+  cancelFileBatch: () => void;
   clearError: () => void;
 }
 
@@ -108,6 +132,8 @@ export const useApp = create<AppState>((set, get) => ({
   analyzeJob: null,
   activeRange: null,
   batch: null,
+  batchItems: [],
+  batchRunning: false,
   transcribeJob: null,
   exportJob: null,
   exportDone: null,
@@ -128,6 +154,8 @@ export const useApp = create<AppState>((set, get) => ({
         } else if (p.done) {
           pendingJobs.delete(p.id);
           pending.resolve(p.result);
+        } else {
+          pending.onProgress?.(p);
         }
         return;
       }
@@ -376,6 +404,136 @@ export const useApp = create<AppState>((set, get) => ({
       set({ batch: null, exportDone: outputDir });
     } catch (e) {
       set({ batch: null, error: String(e) });
+    }
+  },
+
+  openBatch: () => set({ screen: "batch", exportDone: null }),
+
+  addBatchPaths: (paths) => {
+    const existing = new Set(get().batchItems.map((i) => i.path));
+    const items: BatchItem[] = paths
+      .filter((p) => !existing.has(p))
+      .map((p) => ({
+        id: nextId("bi"),
+        path: p,
+        name: p.split(/[/\\]/).pop() ?? p,
+        status: "pending",
+        progress: -1,
+      }));
+    if (items.length) set({ batchItems: [...get().batchItems, ...items] });
+  },
+
+  addBatchFolder: async (dir) => {
+    try {
+      const paths = await invoke<string[]>("list_videos", { dir });
+      if (paths.length === 0) {
+        set({ error: "No video files found in that folder" });
+        return;
+      }
+      get().addBatchPaths(paths);
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  removeBatchItem: (id) =>
+    set({ batchItems: get().batchItems.filter((i) => i.id !== id) }),
+
+  clearBatchItems: () => set({ batchItems: [] }),
+
+  /**
+   * Process every queued clip: transcribe whole clip -> style captions ->
+   * export with the chosen preset. Continues past per-file failures.
+   */
+  runFileBatch: async (presetId, customMb, outputDir) => {
+    const { selectedModel } = get();
+    const preset = getExportPreset(presetId);
+    batchCancelRequested = false;
+    set({ batchRunning: true, error: null });
+
+    const setItem = (id: string, patch: Partial<BatchItem>) =>
+      set({
+        batchItems: get().batchItems.map((i) => (i.id === id ? { ...i, ...patch } : i)),
+      });
+
+    for (const item of get().batchItems) {
+      if (batchCancelRequested) {
+        if (item.status === "pending") setItem(item.id, { status: "skipped" });
+        continue;
+      }
+      if (item.status !== "pending") continue;
+
+      const { style, censor } = get(); // mid-batch tweaks apply to later clips
+      try {
+        setItem(item.id, { status: "transcribing", progress: -1 });
+        const info = await invoke<MediaInfo>("probe_video", { path: item.path });
+
+        const tid = await invoke<string>("transcribe", {
+          path: item.path,
+          model: selectedModel,
+          start: null,
+          end: null,
+        });
+        currentBatchJobId = tid;
+        const result = await waitForJob(tid, (p) =>
+          setItem(item.id, { progress: p.progress })
+        );
+        currentBatchJobId = null;
+
+        const segments = result ? (JSON.parse(result) as Segment[]) : [];
+        const segs = censor ? applyCensor(segments) : segments;
+        const pages = paginate(segs, style.maxWordsPerPage);
+        const outW = preset.targetW ?? info.width;
+        const outH = preset.targetH ?? info.height;
+        const ass =
+          pages.length > 0
+            ? buildAss(pages, style, { playResX: outW, playResY: outH })
+            : "";
+
+        const dir =
+          outputDir ?? item.path.slice(0, Math.max(item.path.lastIndexOf("/"), item.path.lastIndexOf("\\")));
+        const stem = item.name.replace(/\.[^.]+$/, "");
+        const outputPath = `${dir}/${stem}.captioned.mp4`;
+
+        setItem(item.id, { status: "exporting", progress: 0 });
+        const eid = await invoke<string>("export_video", {
+          req: {
+            inputPath: item.path,
+            outputPath,
+            assContent: ass,
+            targetW: preset.targetW,
+            targetH: preset.targetH,
+            targetSizeMb: presetId === "custom" ? customMb : preset.targetSizeMB,
+            crf: preset.crf,
+            fps: preset.fps,
+            audioKbps: preset.audioKbps,
+            durationSec: info.durationSec,
+            trimStart: null,
+            trimEnd: null,
+          } satisfies ExportRequest,
+        });
+        currentBatchJobId = eid;
+        await waitForJob(eid, (p) => setItem(item.id, { progress: p.progress }));
+        currentBatchJobId = null;
+
+        setItem(item.id, { status: "done", progress: 1, output: outputPath });
+      } catch (e) {
+        currentBatchJobId = null;
+        const msg = e instanceof Error ? e.message : String(e);
+        setItem(item.id, {
+          status: batchCancelRequested && msg === "Cancelled" ? "skipped" : "error",
+          error: msg,
+        });
+      }
+    }
+
+    set({ batchRunning: false });
+  },
+
+  cancelFileBatch: () => {
+    batchCancelRequested = true;
+    if (currentBatchJobId) {
+      void get().cancelJob(currentBatchJobId);
     }
   },
 

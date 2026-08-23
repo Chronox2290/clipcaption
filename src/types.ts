@@ -109,6 +109,17 @@ export interface Highlight {
   rank: number;
 }
 
+/** One clip in the multi-file batch queue. */
+export interface BatchItem {
+  id: string;
+  path: string;
+  name: string;
+  status: "pending" | "transcribing" | "exporting" | "done" | "error" | "skipped";
+  progress: number; // 0..1 within the current stage, -1 indeterminate
+  output?: string;
+  error?: string;
+}
+
 export interface BatchState {
   current: number; // 1-based clip being processed
   total: number;
