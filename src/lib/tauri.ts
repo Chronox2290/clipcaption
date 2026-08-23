@@ -1,0 +1,49 @@
+// Thin wrapper around the Tauri APIs so the UI can also load in a plain
+// browser (npm run dev without Tauri) for quick UI work.
+
+import type { JobProgressPayload } from "../types";
+
+export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (!isTauri) throw new Error(`Tauri not available (cmd: ${cmd}) — run via 'npm run tauri dev'`);
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<T>(cmd, args);
+}
+
+export async function fileSrc(path: string): Promise<string> {
+  if (!isTauri) return path;
+  const { convertFileSrc } = await import("@tauri-apps/api/core");
+  return convertFileSrc(path);
+}
+
+export async function listenJobProgress(
+  cb: (p: JobProgressPayload) => void
+): Promise<() => void> {
+  if (!isTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const un = await listen<JobProgressPayload>("job-progress", (e) => cb(e.payload));
+  return un;
+}
+
+export async function pickVideoFile(): Promise<string | null> {
+  if (!isTauri) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({
+    multiple: false,
+    filters: [
+      { name: "Video", extensions: ["mp4", "mkv", "mov", "webm", "avi", "flv", "ts"] },
+    ],
+  });
+  return typeof res === "string" ? res : null;
+}
+
+export async function pickSavePath(defaultName: string): Promise<string | null> {
+  if (!isTauri) return null;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const res = await save({
+    defaultPath: defaultName,
+    filters: [{ name: "MP4 video", extensions: ["mp4"] }],
+  });
+  return res ?? null;
+}

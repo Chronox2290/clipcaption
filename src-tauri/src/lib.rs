@@ -1,0 +1,96 @@
+mod export;
+mod jobs;
+mod media;
+mod models;
+mod sidecar;
+mod transcribe;
+
+use jobs::Jobs;
+use tauri::{AppHandle, Manager, State};
+
+#[tauri::command]
+fn probe_video(path: String) -> Result<media::MediaInfo, String> {
+    media::probe(&path)
+}
+
+#[tauri::command]
+fn prepare_preview(app: AppHandle, path: String) -> Result<String, String> {
+    media::prepare_preview(&app, &path)
+}
+
+#[tauri::command]
+fn list_models(app: AppHandle) -> Result<Vec<models::ModelInfo>, String> {
+    models::list(&app)
+}
+
+#[tauri::command]
+fn ensure_model(app: AppHandle, jobs: State<Jobs>, name: String) -> Result<String, String> {
+    let (id, handle) = jobs.create("model");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        models::download(app, job_id, handle, name);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+fn transcribe(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    path: String,
+    model: String,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("stt");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        transcribe::run(app, job_id, handle, path, model);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+fn export_video(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    req: export::ExportRequest,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("export");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        export::run(app, job_id, handle, req);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+fn cancel_job(jobs: State<Jobs>, id: String) -> Result<(), String> {
+    if let Some(handle) = jobs.get(&id) {
+        handle.cancel();
+        jobs.remove(&id);
+    }
+    Ok(())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(Jobs::default())
+        .setup(|app| {
+            // make sure app dirs exist early
+            let _ = app.path().app_data_dir().map(|d| std::fs::create_dir_all(d));
+            let _ = app.path().app_cache_dir().map(|d| std::fs::create_dir_all(d));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            probe_video,
+            prepare_preview,
+            list_models,
+            ensure_model,
+            transcribe,
+            export_video,
+            cancel_job
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running ClipCaption");
+}

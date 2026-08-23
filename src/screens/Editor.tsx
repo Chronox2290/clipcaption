@@ -1,0 +1,152 @@
+import { useEffect, useRef, useState } from "react";
+import { useApp } from "../store";
+import CaptionOverlay from "../components/CaptionOverlay";
+import TranscriptPanel from "../components/TranscriptPanel";
+import StylePanel from "../components/StylePanel";
+import ExportDrawer from "../components/ExportDrawer";
+import { fmtTime } from "../lib/captions";
+
+type Tab = "transcript" | "style" | "export";
+
+export default function Editor() {
+  const { videoPath, previewSrc, mediaInfo, segments, style, censor, closeVideo } = useApp();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [tab, setTab] = useState<Tab>("transcript");
+  const [stage, setStage] = useState({ w: 0, h: 0 });
+  const [time, setTime] = useState(0);
+  const [playing, setPlaying] = useState(false);
+
+  // Compute the actual displayed video rect (object-fit: contain math)
+  useEffect(() => {
+    const el = frameRef.current;
+    if (!el || !mediaInfo) return;
+    const compute = () => {
+      const box = el.getBoundingClientRect();
+      const ar = mediaInfo.width / mediaInfo.height;
+      let w = box.width;
+      let h = w / ar;
+      if (h > box.height) {
+        h = box.height;
+        w = h * ar;
+      }
+      setStage({ w, h });
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [mediaInfo]);
+
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    const onTime = () => setTime(v.currentTime);
+    const onPlay = () => setPlaying(true);
+    const onPause = () => setPlaying(false);
+    v.addEventListener("timeupdate", onTime);
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    return () => {
+      v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("play", onPlay);
+      v.removeEventListener("pause", onPause);
+    };
+  }, [previewSrc]);
+
+  const togglePlay = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    if (v.paused) void v.play();
+    else v.pause();
+  };
+
+  const fileName = videoPath?.split(/[/\\]/).pop() ?? "";
+
+  return (
+    <div className="editor">
+      <header className="ed-header">
+        <button className="btn btn-ghost" onClick={closeVideo}>
+          ← Library
+        </button>
+        <span className="ed-file" title={videoPath ?? ""}>
+          {fileName}
+        </span>
+        {mediaInfo && (
+          <span className="ed-meta muted">
+            {mediaInfo.width}×{mediaInfo.height} · {Math.round(mediaInfo.fps)}fps ·{" "}
+            {(mediaInfo.sizeBytes / 1024 / 1024).toFixed(1)} MB
+          </span>
+        )}
+      </header>
+
+      <div className="ed-body">
+        <div className="ed-preview">
+          <div className="video-frame" ref={frameRef} onClick={togglePlay}>
+            {previewSrc && (
+              <video
+                ref={videoRef}
+                src={previewSrc}
+                className="video-el"
+                playsInline
+              />
+            )}
+            <div
+              className="stage"
+              style={{ width: stage.w, height: stage.h }}
+            >
+              <CaptionOverlay
+                videoRef={videoRef}
+                segments={segments}
+                style={style}
+                censor={censor}
+                stageHeight={stage.h}
+              />
+            </div>
+            {!playing && <div className="play-badge">▶</div>}
+          </div>
+
+          <div className="transport">
+            <button className="btn btn-ghost" onClick={togglePlay}>
+              {playing ? "❚❚" : "▶"}
+            </button>
+            <input
+              className="seek"
+              type="range"
+              min={0}
+              max={mediaInfo?.durationSec ?? 0}
+              step={0.05}
+              value={time}
+              onChange={(e) => {
+                const v = videoRef.current;
+                if (v) v.currentTime = Number(e.target.value);
+              }}
+            />
+            <span className="time muted">
+              {fmtTime(time)} / {fmtTime(mediaInfo?.durationSec ?? 0)}
+            </span>
+          </div>
+        </div>
+
+        <aside className="ed-side">
+          <nav className="tabs">
+            <button className={tab === "transcript" ? "sel" : ""} onClick={() => setTab("transcript")}>
+              Transcript
+            </button>
+            <button className={tab === "style" ? "sel" : ""} onClick={() => setTab("style")}>
+              Style
+            </button>
+            <button className={tab === "export" ? "sel" : ""} onClick={() => setTab("export")}>
+              Export
+            </button>
+          </nav>
+          <div className="tab-body">
+            {tab === "transcript" && <TranscriptPanel videoRef={videoRef} />}
+            {tab === "style" && <StylePanel />}
+            {tab === "export" && <ExportDrawer />}
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
