@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import type {
+  BatchState,
   CaptionStyle,
   ExportRequest,
+  Highlight,
   JobProgressPayload,
   MediaInfo,
   ModelInfo,
@@ -9,12 +11,26 @@ import type {
 } from "./types";
 import { invoke, fileSrc, listenJobProgress, isTauri } from "./lib/tauri";
 import { getPreset } from "./lib/styles";
+import { applyCensor, paginate, shiftPages } from "./lib/captions";
+import { buildAss } from "./lib/ass";
 
 interface JobState {
   id: string;
   stage: string;
   progress: number;
   message?: string;
+}
+
+// Promise adapters for jobs we want to await (used by the batch pipeline)
+const pendingJobs = new Map<
+  string,
+  { resolve: (result: string | undefined) => void; reject: (err: Error) => void }
+>();
+
+function waitForJob(id: string): Promise<string | undefined> {
+  return new Promise((resolve, reject) => {
+    pendingJobs.set(id, { resolve, reject });
+  });
 }
 
 interface AppState {
@@ -33,10 +49,17 @@ interface AppState {
   // style
   style: CaptionStyle;
 
+  // highlights
+  highlights: Highlight[];
+  analyzeJob: JobState | null;
+  /** Active working range (a highlight the user selected) — transcribe/export apply to it */
+  activeRange: { start: number; end: number } | null;
+  batch: BatchState | null;
+
   // jobs
   transcribeJob: JobState | null;
   exportJob: JobState | null;
-  exportDone: string | null; // finished output path
+  exportDone: string | null;
   modelJob: JobState | null;
 
   // models
@@ -58,6 +81,9 @@ interface AppState {
   downloadModel: (name: string) => Promise<void>;
   refreshModels: () => Promise<void>;
   startExport: (req: ExportRequest) => Promise<void>;
+  analyzeHighlights: () => Promise<void>;
+  setActiveRange: (r: { start: number; end: number } | null) => void;
+  processAllHighlights: (outputDir: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -78,6 +104,10 @@ export const useApp = create<AppState>((set, get) => ({
   segments: [],
   censor: false,
   style: getPreset("beast"),
+  highlights: [],
+  analyzeJob: null,
+  activeRange: null,
+  batch: null,
   transcribeJob: null,
   exportJob: null,
   exportDone: null,
@@ -89,11 +119,29 @@ export const useApp = create<AppState>((set, get) => ({
   init: async () => {
     if (!isTauri) return;
     await listenJobProgress((p: JobProgressPayload) => {
-      const { transcribeJob, exportJob, modelJob } = get();
-      const patch = (job: JobState | null, key: "transcribeJob" | "exportJob" | "modelJob") => {
+      // 1) jobs awaited as promises (batch pipeline)
+      const pending = pendingJobs.get(p.id);
+      if (pending) {
+        if (p.error) {
+          pendingJobs.delete(p.id);
+          pending.reject(new Error(p.error));
+        } else if (p.done) {
+          pendingJobs.delete(p.id);
+          pending.resolve(p.result);
+        }
+        return;
+      }
+
+      // 2) jobs tracked in UI state
+      const { transcribeJob, exportJob, modelJob, analyzeJob } = get();
+      const patch = (
+        job: JobState | null,
+        key: "transcribeJob" | "exportJob" | "modelJob" | "analyzeJob"
+      ) => {
         if (!job || job.id !== p.id) return false;
         if (p.error) {
-          set({ [key]: null, error: p.error } as Partial<AppState>);
+          const quiet = p.error === "Cancelled";
+          set({ [key]: null, error: quiet ? null : p.error } as Partial<AppState>);
         } else if (p.done) {
           if (key === "transcribeJob" && p.result) {
             try {
@@ -104,6 +152,13 @@ export const useApp = create<AppState>((set, get) => ({
             }
           } else if (key === "exportJob") {
             set({ exportJob: null, exportDone: p.result ?? null });
+          } else if (key === "analyzeJob" && p.result) {
+            try {
+              const highlights = JSON.parse(p.result) as Highlight[];
+              set({ highlights, analyzeJob: null });
+            } catch {
+              set({ analyzeJob: null, error: "Failed to parse highlights" });
+            }
           } else {
             set({ [key]: null } as Partial<AppState>);
             void get().refreshModels();
@@ -117,6 +172,7 @@ export const useApp = create<AppState>((set, get) => ({
       };
       patch(transcribeJob, "transcribeJob") ||
         patch(exportJob, "exportJob") ||
+        patch(analyzeJob, "analyzeJob") ||
         patch(modelJob, "modelJob");
     });
     await get().refreshModels();
@@ -145,6 +201,9 @@ export const useApp = create<AppState>((set, get) => ({
         previewSrc,
         mediaInfo,
         segments: [],
+        highlights: [],
+        activeRange: null,
+        batch: null,
         exportDone: null,
         screen: "editor",
         recent,
@@ -161,20 +220,26 @@ export const useApp = create<AppState>((set, get) => ({
       previewSrc: null,
       mediaInfo: null,
       segments: [],
+      highlights: [],
+      activeRange: null,
+      batch: null,
       transcribeJob: null,
       exportJob: null,
+      analyzeJob: null,
       exportDone: null,
     });
   },
 
   transcribe: async () => {
-    const { videoPath, selectedModel } = get();
+    const { videoPath, selectedModel, activeRange } = get();
     if (!videoPath) return;
     try {
       set({ error: null, segments: [] });
       const id = await invoke<string>("transcribe", {
         path: videoPath,
         model: selectedModel,
+        start: activeRange?.start ?? null,
+        end: activeRange?.end ?? null,
       });
       set({ transcribeJob: { id, stage: "starting", progress: -1 } });
     } catch (e) {
@@ -224,6 +289,93 @@ export const useApp = create<AppState>((set, get) => ({
       set({ exportJob: { id, stage: "starting", progress: 0 } });
     } catch (e) {
       set({ error: String(e) });
+    }
+  },
+
+  analyzeHighlights: async () => {
+    const { videoPath } = get();
+    if (!videoPath) return;
+    try {
+      set({ error: null, highlights: [] });
+      const id = await invoke<string>("analyze_highlights", {
+        path: videoPath,
+        maxCount: 12,
+      });
+      set({ analyzeJob: { id, stage: "analyzing", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  setActiveRange: (activeRange) => set({ activeRange }),
+
+  /**
+   * One click: for every detected highlight — transcribe just that window,
+   * build captions in the current style, cut the clip, burn, save.
+   */
+  processAllHighlights: async (outputDir: string) => {
+    const { highlights, videoPath, mediaInfo, selectedModel } = get();
+    if (!videoPath || !mediaInfo || highlights.length === 0) return;
+
+    const baseName =
+      videoPath
+        .split(/[/\\]/)
+        .pop()
+        ?.replace(/\.[^.]+$/, "") ?? "clip";
+    const total = highlights.length;
+
+    try {
+      for (let i = 0; i < highlights.length; i++) {
+        const h = highlights[i];
+        const { style, censor } = get(); // re-read so mid-batch tweaks apply
+
+        set({
+          batch: { current: i + 1, total, stage: "transcribing", outputDir },
+        });
+        const tid = await invoke<string>("transcribe", {
+          path: videoPath,
+          model: selectedModel,
+          start: h.start,
+          end: h.end,
+        });
+        const result = await waitForJob(tid);
+        const segments = result ? (JSON.parse(result) as Segment[]) : [];
+        const segs = censor ? applyCensor(segments) : segments;
+        const pages = shiftPages(paginate(segs, style.maxWordsPerPage), h.start);
+        const ass =
+          pages.length > 0
+            ? buildAss(pages, style, {
+                playResX: mediaInfo.width,
+                playResY: mediaInfo.height,
+              })
+            : "";
+
+        set({
+          batch: { current: i + 1, total, stage: "exporting", outputDir },
+        });
+        const n = String(h.rank).padStart(2, "0");
+        const outputPath = `${outputDir}/${baseName}_highlight_${n}.mp4`;
+        const eid = await invoke<string>("export_video", {
+          req: {
+            inputPath: videoPath,
+            outputPath,
+            assContent: ass,
+            targetW: null,
+            targetH: null,
+            targetSizeMb: null,
+            crf: 20,
+            fps: null,
+            audioKbps: 160,
+            durationSec: mediaInfo.durationSec,
+            trimStart: h.start,
+            trimEnd: h.end,
+          } satisfies ExportRequest,
+        });
+        await waitForJob(eid);
+      }
+      set({ batch: null, exportDone: outputDir });
+    } catch (e) {
+      set({ batch: null, error: String(e) });
     }
   },
 

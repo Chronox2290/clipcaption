@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../store";
 import { buildAss } from "../lib/ass";
-import { paginate, applyCensor } from "../lib/captions";
+import { paginate, applyCensor, shiftPages, fmtTime } from "../lib/captions";
 import { pickSavePath } from "../lib/tauri";
 import type { ExportPreset } from "../types";
 
@@ -14,8 +14,18 @@ const PRESETS: ExportPreset[] = [
 ];
 
 export default function ExportDrawer() {
-  const { videoPath, mediaInfo, segments, style, censor, exportJob, exportDone, startExport, cancelJob } =
-    useApp();
+  const {
+    videoPath,
+    mediaInfo,
+    segments,
+    style,
+    censor,
+    activeRange,
+    exportJob,
+    exportDone,
+    startExport,
+    cancelJob,
+  } = useApp();
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
   const [burn, setBurn] = useState(true);
@@ -25,13 +35,20 @@ export default function ExportDrawer() {
   const go = async () => {
     if (!videoPath || !mediaInfo) return;
     const base = videoPath.replace(/\.[^./\\]+$/, "");
-    const out = await pickSavePath(`${base}.captioned.mp4`);
+    const suffix = activeRange ? ".highlight.mp4" : ".captioned.mp4";
+    const out = await pickSavePath(`${base}${suffix}`);
     if (!out) return;
 
     const outW = preset.targetW ?? mediaInfo.width;
     const outH = preset.targetH ?? mediaInfo.height;
     const segs = censor ? applyCensor(segments) : segments;
-    const pages = paginate(segs, style.maxWordsPerPage);
+    let pages = paginate(segs, style.maxWordsPerPage);
+    if (activeRange) {
+      pages = shiftPages(
+        pages.filter((p) => p.end > activeRange.start && p.start < activeRange.end),
+        activeRange.start
+      );
+    }
     const ass = burn && pages.length ? buildAss(pages, style, { playResX: outW, playResY: outH }) : "";
 
     void startExport({
@@ -45,6 +62,8 @@ export default function ExportDrawer() {
       fps: preset.fps,
       audioKbps: preset.audioKbps,
       durationSec: mediaInfo.durationSec,
+      trimStart: activeRange?.start ?? null,
+      trimEnd: activeRange?.end ?? null,
     });
   };
 
@@ -75,6 +94,13 @@ export default function ExportDrawer() {
             value={customMb}
             onChange={(e) => setCustomMb(Number(e.target.value))}
           />
+        </div>
+      )}
+
+      {activeRange && (
+        <div className="hl-active">
+          Exporting range {fmtTime(activeRange.start)} – {fmtTime(activeRange.end)} (from the
+          Highlights tab)
         </div>
       )}
 

@@ -54,6 +54,21 @@ Key source files:
 - `src-tauri/src/export.rs` — ffmpeg export pipeline (CRF / two-pass target size)
 - `src-tauri/src/models.rs` — Whisper model download manager
 
+## Highlights mode (long VODs)
+
+Open a long recording (e.g. a 2-hour session) and hit **Highlights → Find
+highlights**. The whole VOD's audio is scanned locally for excitement (sustained
+loudness vs. the local baseline), and the top moments come back as ranked,
+ready-to-cut clip windows. From there:
+
+- **Preview** a highlight, or **Use** it to set a working range — transcript and
+  export then apply to just that range.
+- **Caption + export all** batch-processes every highlight: transcribe the
+  window, style captions, cut, burn, save as `<name>_highlight_NN.mp4`.
+
+Only the highlight windows are transcribed, so a 2-hour VOD costs one fast
+audio decode pass plus a few minutes of Whisper — not two hours.
+
 ## Roadmap
 
 See the project docs (feature brainstorm + architecture spec): profanity

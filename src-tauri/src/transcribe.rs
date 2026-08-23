@@ -45,8 +45,16 @@ struct WTok {
     offsets: Option<WOff>,
 }
 
-pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, path: String, model: String) {
-    let result = run_inner(&app, &job_id, &handle, &path, &model);
+pub fn run(
+    app: AppHandle,
+    job_id: String,
+    handle: Arc<JobHandle>,
+    path: String,
+    model: String,
+    start: Option<f64>,
+    end: Option<f64>,
+) {
+    let result = run_inner(&app, &job_id, &handle, &path, &model, start, end);
     match result {
         Ok(json) => emit_done(&app, &job_id, "transcribing", Some(json)),
         Err(e) => {
@@ -65,6 +73,8 @@ fn run_inner(
     handle: &Arc<JobHandle>,
     path: &str,
     model: &str,
+    start: Option<f64>,
+    end: Option<f64>,
 ) -> Result<String, String> {
     let model_path = models::model_path(app, model)?;
     if !model_path.exists() {
@@ -83,13 +93,21 @@ fn run_inner(
     let wav = cache.join(format!("{job_id}.wav"));
     let out_base = cache.join(format!("{job_id}"));
 
-    // 1. Extract mono 16 kHz audio
+    // 1. Extract mono 16 kHz audio (optionally only a time range)
     emit_progress(app, job_id, "extracting", -1.0, None);
-    let extract = sidecar::command("ffmpeg")
+    let offset = start.unwrap_or(0.0).max(0.0);
+    let mut extract_cmd = sidecar::command("ffmpeg");
+    extract_cmd.arg("-y");
+    if offset > 0.0 {
+        extract_cmd.args(["-ss", &format!("{offset:.3}")]);
+    }
+    extract_cmd.args(["-i", path]);
+    if let Some(end) = end {
+        let dur = (end - offset).max(0.1);
+        extract_cmd.args(["-t", &format!("{dur:.3}")]);
+    }
+    let extract = extract_cmd
         .args([
-            "-y",
-            "-i",
-            path,
             "-vn",
             "-ac",
             "1",
@@ -177,7 +195,16 @@ fn run_inner(
     let parsed: WhisperOut =
         serde_json::from_str(&raw).map_err(|e| format!("Transcript parse error: {e}"))?;
 
-    let segments = build_segments(parsed);
+    let mut segments = build_segments(parsed);
+    // shift word times back onto the full-video timeline when a range was used
+    if offset > 0.0 {
+        for seg in &mut segments {
+            for w in &mut seg.words {
+                w.start += offset;
+                w.end += offset;
+            }
+        }
+    }
     let _ = std::fs::remove_file(&wav);
     let _ = std::fs::remove_file(&json_path);
 

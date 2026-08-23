@@ -95,4 +95,23 @@ export interface ExportRequest {
   fps: number | null;
   audioKbps: number;
   durationSec: number;
+  /** Optional trim range (absolute source times, seconds) */
+  trimStart: number | null;
+  trimEnd: number | null;
+}
+
+/** A detected highlight window in a long recording. */
+export interface Highlight {
+  start: number;
+  end: number;
+  peak: number;
+  score: number;
+  rank: number;
+}
+
+export interface BatchState {
+  current: number; // 1-based clip being processed
+  total: number;
+  stage: string;
+  outputDir: string;
 }

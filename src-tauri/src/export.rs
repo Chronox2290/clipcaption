@@ -21,6 +21,36 @@ pub struct ExportRequest {
     pub fps: Option<f64>,
     pub audio_kbps: u32,
     pub duration_sec: f64,
+    /// Optional trim: cut this range out of the source before encoding.
+    pub trim_start: Option<f64>,
+    pub trim_end: Option<f64>,
+}
+
+impl ExportRequest {
+    /// Duration of the encoded output (after trimming).
+    fn effective_duration(&self) -> f64 {
+        match (self.trim_start, self.trim_end) {
+            (Some(s), Some(e)) => (e - s).max(0.1),
+            (Some(s), None) => (self.duration_sec - s).max(0.1),
+            (None, Some(e)) => e.max(0.1),
+            (None, None) => self.duration_sec,
+        }
+    }
+
+    /// ffmpeg input args implementing the trim (-ss before -i, -t after).
+    fn input_args(&self) -> Vec<String> {
+        let mut args: Vec<String> = vec!["-y".into()];
+        if let Some(s) = self.trim_start {
+            if s > 0.0 {
+                args.extend(["-ss".into(), format!("{s:.3}")]);
+            }
+        }
+        args.extend(["-i".into(), self.input_path.clone()]);
+        if self.trim_end.is_some() || self.trim_start.is_some() {
+            args.extend(["-t".into(), format!("{:.3}", self.effective_duration())]);
+        }
+        args
+    }
 }
 
 pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: ExportRequest) {
@@ -77,22 +107,24 @@ fn run_inner(
     let fps_str = req.fps.map(|f| format!("{f}"));
     let audio_bitrate = format!("{}k", req.audio_kbps);
 
+    let out_duration = req.effective_duration();
+
     if let Some(target_mb) = req.target_size_mb {
         // ---- Target-size mode: two-pass x264 ----
-        if req.duration_sec <= 0.0 {
+        if out_duration <= 0.0 {
             return Err("Unknown clip duration — cannot compute target bitrate".into());
         }
         // 93% budget for video+audio, leave headroom for container overhead
         let total_kbits = target_mb * 8192.0 * 0.93;
         let video_kbps =
-            ((total_kbits / req.duration_sec) - req.audio_kbps as f64).max(100.0) as u64;
+            ((total_kbits / out_duration) - req.audio_kbps as f64).max(100.0) as u64;
 
         let passlog = cache.join(format!("{job_id}_2pass"));
         let passlog_s = passlog.to_string_lossy().to_string();
         let null_out = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
         // Pass 1
-        let mut args1: Vec<String> = vec!["-y".into(), "-i".into(), req.input_path.clone()];
+        let mut args1: Vec<String> = req.input_args();
         if !vf.is_empty() {
             args1.extend(["-vf".into(), vf.clone()]);
         }
@@ -110,10 +142,10 @@ fn run_inner(
             "-f".into(), "mp4".into(),
             null_out.into(),
         ]);
-        run_ffmpeg(app, job_id, handle, &args1, req.duration_sec, 0.0, 0.5, "pass 1/2")?;
+        run_ffmpeg(app, job_id, handle, &args1, out_duration, 0.0, 0.5, "pass 1/2")?;
 
         // Pass 2
-        let mut args2: Vec<String> = vec!["-y".into(), "-i".into(), req.input_path.clone()];
+        let mut args2: Vec<String> = req.input_args();
         if !vf.is_empty() {
             args2.extend(["-vf".into(), vf.clone()]);
         }
@@ -132,7 +164,7 @@ fn run_inner(
             "-movflags".into(), "+faststart".into(),
             req.output_path.clone(),
         ]);
-        run_ffmpeg(app, job_id, handle, &args2, req.duration_sec, 0.5, 1.0, "pass 2/2")?;
+        run_ffmpeg(app, job_id, handle, &args2, out_duration, 0.5, 1.0, "pass 2/2")?;
 
         // clean pass logs
         for ext in ["log", "log.mbtree"] {
@@ -141,7 +173,7 @@ fn run_inner(
     } else {
         // ---- Quality (CRF) mode: single pass ----
         let crf = req.crf.unwrap_or(20).to_string();
-        let mut args: Vec<String> = vec!["-y".into(), "-i".into(), req.input_path.clone()];
+        let mut args: Vec<String> = req.input_args();
         if !vf.is_empty() {
             args.extend(["-vf".into(), vf.clone()]);
         }
@@ -158,7 +190,7 @@ fn run_inner(
             "-movflags".into(), "+faststart".into(),
             req.output_path.clone(),
         ]);
-        run_ffmpeg(app, job_id, handle, &args, req.duration_sec, 0.0, 1.0, "encoding")?;
+        run_ffmpeg(app, job_id, handle, &args, out_duration, 0.0, 1.0, "encoding")?;
     }
 
     if let Some(ass) = ass_path {

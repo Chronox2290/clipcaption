@@ -1,3 +1,4 @@
+mod analyze;
 mod export;
 mod jobs;
 mod media;
@@ -39,11 +40,29 @@ fn transcribe(
     jobs: State<Jobs>,
     path: String,
     model: String,
+    start: Option<f64>,
+    end: Option<f64>,
 ) -> Result<String, String> {
     let (id, handle) = jobs.create("stt");
     let job_id = id.clone();
     std::thread::spawn(move || {
-        transcribe::run(app, job_id, handle, path, model);
+        transcribe::run(app, job_id, handle, path, model, start, end);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+fn analyze_highlights(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    path: String,
+    max_count: Option<usize>,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("hl");
+    let job_id = id.clone();
+    let max = max_count.unwrap_or(12);
+    std::thread::spawn(move || {
+        analyze::run(app, job_id, handle, path, max);
     });
     Ok(id)
 }
@@ -85,6 +104,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             probe_video,
             prepare_preview,
+            analyze_highlights,
             list_models,
             ensure_model,
             transcribe,

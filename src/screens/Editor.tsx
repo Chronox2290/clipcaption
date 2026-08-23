@@ -4,12 +4,14 @@ import CaptionOverlay from "../components/CaptionOverlay";
 import TranscriptPanel from "../components/TranscriptPanel";
 import StylePanel from "../components/StylePanel";
 import ExportDrawer from "../components/ExportDrawer";
+import HighlightsPanel from "../components/HighlightsPanel";
 import { fmtTime } from "../lib/captions";
 
-type Tab = "transcript" | "style" | "export";
+type Tab = "transcript" | "highlights" | "style" | "export";
 
 export default function Editor() {
-  const { videoPath, previewSrc, mediaInfo, segments, style, censor, closeVideo } = useApp();
+  const { videoPath, previewSrc, mediaInfo, segments, style, censor, closeVideo, activeRange } =
+    useApp();
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [tab, setTab] = useState<Tab>("transcript");
@@ -110,18 +112,29 @@ export default function Editor() {
             <button className="btn btn-ghost" onClick={togglePlay}>
               {playing ? "❚❚" : "▶"}
             </button>
-            <input
-              className="seek"
-              type="range"
-              min={0}
-              max={mediaInfo?.durationSec ?? 0}
-              step={0.05}
-              value={time}
-              onChange={(e) => {
-                const v = videoRef.current;
-                if (v) v.currentTime = Number(e.target.value);
-              }}
-            />
+            <div className="seek-wrap">
+              {activeRange && mediaInfo && mediaInfo.durationSec > 0 && (
+                <div
+                  className="seek-range"
+                  style={{
+                    left: `${(activeRange.start / mediaInfo.durationSec) * 100}%`,
+                    width: `${((activeRange.end - activeRange.start) / mediaInfo.durationSec) * 100}%`,
+                  }}
+                />
+              )}
+              <input
+                className="seek"
+                type="range"
+                min={0}
+                max={mediaInfo?.durationSec ?? 0}
+                step={0.05}
+                value={time}
+                onChange={(e) => {
+                  const v = videoRef.current;
+                  if (v) v.currentTime = Number(e.target.value);
+                }}
+              />
+            </div>
             <span className="time muted">
               {fmtTime(time)} / {fmtTime(mediaInfo?.durationSec ?? 0)}
             </span>
@@ -133,6 +146,12 @@ export default function Editor() {
             <button className={tab === "transcript" ? "sel" : ""} onClick={() => setTab("transcript")}>
               Transcript
             </button>
+            <button
+              className={tab === "highlights" ? "sel" : ""}
+              onClick={() => setTab("highlights")}
+            >
+              Highlights
+            </button>
             <button className={tab === "style" ? "sel" : ""} onClick={() => setTab("style")}>
               Style
             </button>
@@ -142,6 +161,7 @@ export default function Editor() {
           </nav>
           <div className="tab-body">
             {tab === "transcript" && <TranscriptPanel videoRef={videoRef} />}
+            {tab === "highlights" && <HighlightsPanel videoRef={videoRef} />}
             {tab === "style" && <StylePanel />}
             {tab === "export" && <ExportDrawer />}
           </div>

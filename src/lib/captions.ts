@@ -74,6 +74,19 @@ export function isProfane(text: string): boolean {
   return profanityRe.test(text.trim());
 }
 
+/** Shift caption pages onto a clip-relative timeline (e.g. for trimmed exports). */
+export function shiftPages(pages: CaptionPage[], offset: number): CaptionPage[] {
+  return pages.map((p) => ({
+    start: Math.max(0, p.start - offset),
+    end: Math.max(0, p.end - offset),
+    words: p.words.map((w) => ({
+      ...w,
+      start: Math.max(0, w.start - offset),
+      end: Math.max(0, w.end - offset),
+    })),
+  }));
+}
+
 // ---------------- helpers ----------------
 
 export function fmtTime(t: number): string {
