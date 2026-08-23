@@ -699,6 +699,59 @@ select:focus {
   border-radius: 10px;
   padding: 8px 10px;
 }
+.hl-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hl-item {
+  display: flex;
+  flex-direction: column;
+}
+.hl-check {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+.hl-adjusted {
+  color: var(--accent2);
+}
+.hl-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 6px 34px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(124, 92, 255, 0.08);
+  border: 1px solid rgba(124, 92, 255, 0.35);
+}
+.hl-nudge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hl-nudge-label {
+  font-size: 12px;
+  color: var(--muted);
+  width: 36px;
+}
+.hl-nudge-val {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  min-width: 68px;
+  text-align: center;
+}
+.hl-edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
 
 /* seek bar with range band */
 .seek-wrap {

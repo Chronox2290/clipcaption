@@ -67,6 +67,12 @@ interface AppState {
   analyzeJob: JobState | null;
   /** Active working range (a highlight the user selected) — transcribe/export apply to it */
   activeRange: { start: number; end: number } | null;
+  /** Ranks of highlights checked for "export selected" */
+  selectedRanks: number[];
+  /** User-adjusted start/end per highlight rank, overriding the AI-detected window */
+  clipOverrides: Record<number, { start: number; end: number }>;
+  /** Which highlight (by rank) currently has its trim nudge controls open */
+  editingRank: number | null;
   batch: BatchState | null;
 
   // multi-clip batch queue
@@ -107,7 +113,13 @@ interface AppState {
   startExport: (req: ExportRequest) => Promise<void>;
   analyzeHighlights: () => Promise<void>;
   setActiveRange: (r: { start: number; end: number } | null) => void;
-  processAllHighlights: (outputDir: string) => Promise<void>;
+  toggleHighlightSelected: (rank: number) => void;
+  selectAllHighlights: () => void;
+  selectNoneHighlights: () => void;
+  startEditingHighlight: (h: Highlight) => void;
+  stopEditingHighlight: () => void;
+  adjustHighlightRange: (rank: number, start: number, end: number) => void;
+  exportSelectedHighlights: (outputDir: string) => Promise<void>;
   openBatch: () => void;
   addBatchPaths: (paths: string[]) => void;
   addBatchFolder: (dir: string) => Promise<void>;
@@ -138,6 +150,9 @@ export const useApp = create<AppState>((set, get) => ({
   highlights: [],
   analyzeJob: null,
   activeRange: null,
+  selectedRanks: [],
+  clipOverrides: {},
+  editingRank: null,
   batch: null,
   batchItems: [],
   batchRunning: false,
@@ -196,7 +211,13 @@ export const useApp = create<AppState>((set, get) => ({
           } else if (key === "analyzeJob" && p.result) {
             try {
               const highlights = JSON.parse(p.result) as Highlight[];
-              set({ highlights, analyzeJob: null });
+              set({
+                highlights,
+                analyzeJob: null,
+                selectedRanks: highlights.map((h) => h.rank),
+                clipOverrides: {},
+                editingRank: null,
+              });
             } catch {
               set({ analyzeJob: null, error: "Failed to parse highlights" });
             }
@@ -250,6 +271,9 @@ export const useApp = create<AppState>((set, get) => ({
         segments: [],
         highlights: [],
         activeRange: null,
+        selectedRanks: [],
+        clipOverrides: {},
+        editingRank: null,
         batch: null,
         exportDone: null,
         screen: "editor",
@@ -269,6 +293,9 @@ export const useApp = create<AppState>((set, get) => ({
       segments: [],
       highlights: [],
       activeRange: null,
+      selectedRanks: [],
+      clipOverrides: {},
+      editingRank: null,
       batch: null,
       transcribeJob: null,
       exportJob: null,
@@ -366,24 +393,63 @@ export const useApp = create<AppState>((set, get) => ({
 
   setActiveRange: (activeRange) => set({ activeRange }),
 
+  toggleHighlightSelected: (rank) => {
+    const { selectedRanks } = get();
+    set({
+      selectedRanks: selectedRanks.includes(rank)
+        ? selectedRanks.filter((r) => r !== rank)
+        : [...selectedRanks, rank],
+    });
+  },
+
+  selectAllHighlights: () => set({ selectedRanks: get().highlights.map((h) => h.rank) }),
+  selectNoneHighlights: () => set({ selectedRanks: [] }),
+
+  /** Open a highlight's range for manual extend/trim; auto-includes it in the export selection. */
+  startEditingHighlight: (h) => {
+    const { clipOverrides, selectedRanks } = get();
+    const range = clipOverrides[h.rank] ?? { start: h.start, end: h.end };
+    set({
+      activeRange: range,
+      editingRank: h.rank,
+      selectedRanks: selectedRanks.includes(h.rank) ? selectedRanks : [...selectedRanks, h.rank],
+    });
+  },
+
+  stopEditingHighlight: () => set({ editingRank: null }),
+
+  adjustHighlightRange: (rank, start, end) => {
+    const dur = get().mediaInfo?.durationSec ?? Infinity;
+    const s = Math.max(0, Math.min(start, end - 0.5));
+    const e = Math.max(s + 0.5, Math.min(end, dur));
+    set({
+      clipOverrides: { ...get().clipOverrides, [rank]: { start: s, end: e } },
+      activeRange: get().editingRank === rank ? { start: s, end: e } : get().activeRange,
+    });
+  },
+
   /**
-   * One click: for every detected highlight — transcribe just that window,
-   * build captions in the current style, cut the clip, burn, save.
+   * For every checked highlight (using the user's extended/trimmed range if they
+   * adjusted it) — transcribe just that window, build captions in the current
+   * style, cut the clip, burn, save.
    */
-  processAllHighlights: async (outputDir: string) => {
-    const { highlights, videoPath, mediaInfo, selectedModel } = get();
-    if (!videoPath || !mediaInfo || highlights.length === 0) return;
+  exportSelectedHighlights: async (outputDir: string) => {
+    const { highlights, videoPath, mediaInfo, selectedModel, selectedRanks, clipOverrides } =
+      get();
+    const clips = highlights.filter((h) => selectedRanks.includes(h.rank));
+    if (!videoPath || !mediaInfo || clips.length === 0) return;
 
     const baseName =
       videoPath
         .split(/[/\\]/)
         .pop()
         ?.replace(/\.[^.]+$/, "") ?? "clip";
-    const total = highlights.length;
+    const total = clips.length;
 
     try {
-      for (let i = 0; i < highlights.length; i++) {
-        const h = highlights[i];
+      for (let i = 0; i < clips.length; i++) {
+        const h = clips[i];
+        const range = clipOverrides[h.rank] ?? { start: h.start, end: h.end };
         const { style, censor } = get(); // re-read so mid-batch tweaks apply
 
         set({
@@ -392,13 +458,13 @@ export const useApp = create<AppState>((set, get) => ({
         const tid = await invoke<string>("transcribe", {
           path: videoPath,
           model: selectedModel,
-          start: h.start,
-          end: h.end,
+          start: range.start,
+          end: range.end,
         });
         const result = await waitForJob(tid);
         const segments = result ? (JSON.parse(result) as Segment[]) : [];
         const segs = censor ? applyCensor(segments) : segments;
-        const pages = shiftPages(paginate(segs, style.maxWordsPerPage), h.start);
+        const pages = shiftPages(paginate(segs, style.maxWordsPerPage), range.start);
         const ass =
           pages.length > 0
             ? buildAss(pages, style, {
@@ -424,8 +490,8 @@ export const useApp = create<AppState>((set, get) => ({
             fps: get().fpsOverride,
             audioKbps: 160,
             durationSec: mediaInfo.durationSec,
-            trimStart: h.start,
-            trimEnd: h.end,
+            trimStart: range.start,
+            trimEnd: range.end,
             encoder: get().encoder,
           } satisfies ExportRequest,
         });
