@@ -22,12 +22,32 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 20
+          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # Without this every release recompiles the entire dependency graph
+      # (tauri, wry, webview2, serde, ...) from scratch, which is the bulk of
+      # a ~20 minute build. Keyed on Cargo.lock by the action itself.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "src-tauri -> target"
+
       - name: Install frontend dependencies
         run: npm install
+
+      # ~375MB of downloads from GitHub releases and HuggingFace on every run
+      # otherwise. Both scripts below skip anything already present, so a cache
+      # hit turns them into no-ops. Bump the "v1" in the key to force a refetch
+      # - worth knowing that get-sidecars.ps1 asks for whisper.cpp's *latest*
+      # release, so a warm cache also pins the whisper version until then.
+      - name: Cache sidecar binaries
+        uses: actions/cache@v4
+        with:
+          path: src-tauri/binaries
+          key: sidecars-v1-${{ runner.os }}-${{ hashFiles('scripts/get-sidecars.ps1', 'scripts/build-embed-tool.ps1') }}
 
       - name: Fetch sidecar binaries (ffmpeg, ffprobe, whisper-cli)
         run: powershell -ExecutionPolicy Bypass -File scripts/get-sidecars.ps1
