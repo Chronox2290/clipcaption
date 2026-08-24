@@ -690,15 +690,15 @@ kbd {
 }
 .word-del {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 16px;
-  height: 16px;
+  top: -8px;
+  right: -8px;
+  width: 19px;
+  height: 19px;
   border-radius: 50%;
   background: var(--bg0);
   border: 1px solid var(--line);
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -1353,6 +1353,51 @@ kbd {
   }
   100% {
     transform: scale(1);
+  }
+}
+@keyframes cc-flick {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes cc-glow {
+  0% {
+    filter: drop-shadow(0 0 0px currentColor) drop-shadow(0 0 0px currentColor);
+    transform: scale(1);
+  }
+  40% {
+    filter: drop-shadow(0 0 8px currentColor) drop-shadow(0 0 16px currentColor);
+    transform: scale(1.06);
+  }
+  100% {
+    filter: drop-shadow(0 0 0px currentColor) drop-shadow(0 0 0px currentColor);
+    transform: scale(1);
+  }
+}
+@keyframes cc-shake {
+  0% {
+    transform: translateX(0) rotate(0deg);
+  }
+  20% {
+    transform: translateX(-3px) rotate(-3deg);
+  }
+  40% {
+    transform: translateX(3px) rotate(3deg);
+  }
+  60% {
+    transform: translateX(-2px) rotate(2deg);
+  }
+  80% {
+    transform: translateX(2px) rotate(-2deg);
+  }
+  100% {
+    transform: translateX(0) rotate(0deg);
   }
 }
 @keyframes cc-spin {

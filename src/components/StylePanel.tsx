@@ -22,6 +22,7 @@ export default function StylePanel() {
               className="preset-sample"
               style={{
                 fontFamily: `"${p.font}", sans-serif`,
+                fontWeight: p.fontWeight,
                 color: p.fill,
                 background: p.boxColor ? "rgba(0,0,0,0.7)" : undefined,
                 WebkitTextStroke: p.outlineWidthPct > 0 ? `1px ${p.outline}` : undefined,
@@ -79,6 +80,8 @@ export default function StylePanel() {
           <option value="pop">Pop</option>
           <option value="bounce">Bounce</option>
           <option value="karaoke">Karaoke</option>
+          <option value="glow">Glow</option>
+          <option value="shake">Shake</option>
           <option value="none">None</option>
         </select>
       </div>

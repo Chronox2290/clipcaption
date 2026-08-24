@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { useApp } from "../store";
 import { fmtTime, isProfane } from "../lib/captions";
 import { chronoPositions } from "../lib/highlights";
@@ -27,6 +27,25 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const setTuning = useApp((s) => s.setTuningWord);
 
   const model = models.find((m) => m.name === selectedModel);
+
+  // Deleting a run of consecutive bad words by hunting down a tiny × that
+  // lands in a different spot on every word (boxes are only as wide as their
+  // text) was the actual complaint here — so Ctrl/Cmd+Backspace (or plain
+  // Backspace on an already-empty box) deletes the word AND moves focus to
+  // the previous one, so a run of garbage words can be cleared by holding
+  // one key combo and tapping repeatedly without re-aiming the mouse at all.
+  const wordRefs = useRef(new Map<string, HTMLInputElement>());
+  const [focusKey, setFocusKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (!focusKey) return;
+    const el = wordRefs.current.get(focusKey);
+    if (el) {
+      el.focus();
+      el.select();
+    }
+    setFocusKey(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusKey, segments]);
 
   if (transcribeJob) {
     const pct = transcribeJob.progress >= 0 ? Math.round(transcribeJob.progress * 100) : null;
@@ -115,7 +134,9 @@ export default function TranscriptPanel({ videoRef }: Props) {
       <p className="muted small">
         Click a word to jump the preview there and select it for fine-tuning. Drag its timing on
         the big waveform below the video — that's also where you can drag on an empty stretch to
-        add a line whisper missed entirely.
+        add a line whisper missed entirely. To clear out a run of bad words fast: click the first
+        one, then hold <kbd>Ctrl</kbd>+<kbd>Backspace</kbd> and tap it repeatedly — no need to
+        re-aim at the little × each time.
       </p>
       <div className="transcript-list">
         {segments.map((seg) => (
@@ -149,6 +170,11 @@ export default function TranscriptPanel({ videoRef }: Props) {
                   <span key={i} className="word-unit">
                     <span className="word-box">
                       <input
+                        ref={(el) => {
+                          const key = `${seg.id}:${i}`;
+                          if (el) wordRefs.current.set(key, el);
+                          else wordRefs.current.delete(key);
+                        }}
                         className={`word-input ${isProfane(w.text) ? "profane" : ""} ${
                           tuning?.segId === seg.id && tuning.idx === i ? "tuning" : ""
                         }`}
@@ -162,6 +188,16 @@ export default function TranscriptPanel({ videoRef }: Props) {
                           setTuning({ segId: seg.id, idx: i });
                           const v = videoRef.current;
                           if (v) v.currentTime = w.start + 0.001;
+                        }}
+                        onKeyDown={(e) => {
+                          const wholeWord = (e.key === "Backspace" || e.key === "Delete") && (e.ctrlKey || e.metaKey);
+                          const emptyBackspace = e.key === "Backspace" && e.currentTarget.value === "";
+                          if (!wholeWord && !emptyBackspace) return;
+                          e.preventDefault();
+                          const nextKey =
+                            i > 0 ? `${seg.id}:${i - 1}` : seg.words.length > 1 ? `${seg.id}:0` : null;
+                          doRemove(seg.id, i);
+                          setFocusKey(nextKey);
                         }}
                       />
                       <button

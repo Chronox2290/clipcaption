@@ -22,7 +22,7 @@ import {
   pickProjectOpenPath,
 } from "./lib/tauri";
 import { getPreset } from "./lib/styles";
-import { applyCensor, nextId, paginate, shiftPages } from "./lib/captions";
+import { applyCensor, distributeWordTimes, nextId, paginate, shiftPages } from "./lib/captions";
 import { addEmojis } from "./lib/emojis";
 import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
@@ -513,7 +513,13 @@ export const useApp = create<AppState>((set, get) => ({
     const id = nextId("useg");
     const s0 = Math.max(0, Math.min(start, end - 0.02));
     const e0 = Math.max(s0 + 0.02, end);
-    const seg: Segment = { id, words: [{ text, start: s0, end: e0 }], speaker: null };
+    // Split what was typed into individual words (see distributeWordTimes) so
+    // a hand-typed line gets the same per-word highlight animation and
+    // drag-to-retime as anything whisper produced, instead of behaving as one
+    // frozen block of text for its whole duration.
+    const tokens = text.trim().split(/\s+/).filter(Boolean);
+    const words = tokens.length ? distributeWordTimes(tokens, s0, e0) : [{ text: "word", start: s0, end: e0 }];
+    const seg: Segment = { id, words, speaker: null };
     const segments = [...get().segments, seg].sort(
       (a, b) => (a.words[0]?.start ?? 0) - (b.words[0]?.start ?? 0)
     );

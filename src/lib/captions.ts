@@ -121,6 +121,33 @@ export function capitalize(s: string): string {
   return s.length ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+/** Splits manually-typed caption text into individual, independently-timed
+ * words spanning [start,end] — proportioned by each word's length so a long
+ * word gets more screen time than "a" or "to". Without this, typing a whole
+ * sentence into the "add a missed line" prompt produced ONE WordSpan holding
+ * the entire sentence, which broke the karaoke/pop/bounce per-word highlight
+ * (there's only one "word" to ever be "active") and made it look like static
+ * text for the whole duration. Splitting it here makes a hand-typed caption
+ * behave exactly like a whisper-produced one — same animation, same
+ * per-word drag-to-retime afterward. */
+export function distributeWordTimes(tokens: string[], start: number, end: number): WordSpan[] {
+  if (tokens.length === 0) return [];
+  const dur = Math.max(0.02 * tokens.length, end - start);
+  const weights = tokens.map((t) => Math.max(1, t.length));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  const words: WordSpan[] = [];
+  let t = start;
+  tokens.forEach((tok, i) => {
+    const isLast = i === tokens.length - 1;
+    const share = (weights[i] / totalWeight) * dur;
+    const wStart = t;
+    const wEnd = isLast ? start + dur : Math.min(start + dur, t + share);
+    words.push({ text: tok, start: wStart, end: Math.max(wStart + 0.02, wEnd) });
+    t = words[words.length - 1].end;
+  });
+  return words;
+}
+
 let idCounter = 0;
 export function nextId(prefix: string): string {
   idCounter += 1;

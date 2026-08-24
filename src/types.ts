@@ -74,7 +74,7 @@ export interface ModelInfo {
   capabilityOnly?: boolean;
 }
 
-export type AnimationKind = "pop" | "karaoke" | "bounce" | "none";
+export type AnimationKind = "pop" | "karaoke" | "bounce" | "glow" | "shake" | "none";
 
 export interface CaptionStyle {
   id: string;
@@ -85,9 +85,14 @@ export interface CaptionStyle {
   /** Font size as % of video height (e.g. 5.5) */
   fontSizePct: number;
   fill: string; // hex
-  activeFill: string; // hex — color of the currently spoken word
+  activeFill: string; // hex — color of the currently spoken word (used when there's no known speaker)
   outline: string; // hex
   outlineWidthPct: number; // % of video height
+  /** Font weight for the caption text. Presets built around a true black-weight
+   * display font (Arial Black) want 900; most other fonts don't have a real
+   * black cut and look synthetically over-bolded (blurry/mushy) at 900, so
+   * this is per-preset rather than one hardcoded value. */
+  fontWeight: number;
   shadow: boolean;
   /** Background box behind text (CSS rgba-like hex8 or null) */
   boxColor: string | null;
