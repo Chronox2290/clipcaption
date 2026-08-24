@@ -1,7 +1,8 @@
 {
   "bundle": {
     "resources": {
-      "binaries/*.dll": "./"
+      "binaries/*.dll": "./",
+      "binaries/*.onnx": "./"
     }
   }
 }

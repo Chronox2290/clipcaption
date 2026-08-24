@@ -10,15 +10,12 @@ export default function Library() {
   const downloadModel = useApp((s) => s.downloadModel);
   const modelJob = useApp((s) => s.modelJob);
   const loadProject = useApp((s) => s.loadProject);
-  const diarizeEnabled = useApp((s) => s.diarizeEnabled);
-  const setDiarizeEnabled = useApp((s) => s.setDiarizeEnabled);
   const appVersion = useApp((s) => s.appVersion);
   const updateStatus = useApp((s) => s.updateStatus);
   const checkForUpdates = useApp((s) => s.checkForUpdates);
 
   const selected = models.find((m) => m.name === selectedModel);
   const pickerModels = models.filter((m) => !m.capabilityOnly);
-  const tdrzModel = models.find((m) => m.name === "small.en-tdrz");
 
   const openBatch = useApp((s) => s.openBatch);
 
@@ -133,37 +130,10 @@ export default function Library() {
               <span className="muted">Downloading… {Math.round(modelJob.progress * 100)}%</span>
             </div>
           )}
-        </section>
-
-        <section className="model-card">
-          <div className="model-card-head">
-            <h3>Speaker detection <span className="muted small">(beta)</span></h3>
-            {tdrzModel && !tdrzModel.downloaded && !modelJob && (
-              <button className="btn btn-small" onClick={() => downloadModel("small.en-tdrz")}>
-                Download ({tdrzModel.sizeMb} MB)
-              </button>
-            )}
-            {tdrzModel?.downloaded && <span className="chip chip-ok">ready</span>}
-          </div>
           <p className="muted small">
-            Marks when the speaker changes and colors alternating turns differently in the
-            captions — handy for a 2-person conversation. It isn't real voice recognition: it
-            can't tell that the same person is talking again after a gap, and it uses a smaller,
-            specialized model, so turning it on trades some transcription accuracy for speaker
-            awareness.
+            Speakers are detected automatically by real voice recognition (not just turn
+            alternation) and colored per-speaker in the captions — no setup needed.
           </p>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={diarizeEnabled}
-              disabled={!tdrzModel?.downloaded}
-              onChange={(e) => setDiarizeEnabled(e.target.checked)}
-            />
-            <span>
-              Detect speaker changes
-              {!tdrzModel?.downloaded && " (download the model above first)"}
-            </span>
-          </label>
         </section>
 
         {recent.length > 0 && (

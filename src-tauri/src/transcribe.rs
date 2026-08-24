@@ -4,6 +4,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 
+use crate::diarize;
 use crate::jobs::{emit_done, emit_error, emit_progress, JobHandle};
 use crate::models;
 use crate::sidecar;
@@ -19,12 +20,13 @@ pub struct WordSpan {
 pub struct Segment {
     pub id: String,
     pub words: Vec<WordSpan>,
-    /// 0 or 1 when speaker-turn detection (tinydiarize) was used, alternating
-    /// each time whisper.cpp reports a speaker change. This is turn-taking,
-    /// not voice identification — it can't tell you the same person spoke
-    /// again after a gap, only that the previous speaker vs. this one
-    /// differs. Null when diarization wasn't requested for this transcribe.
-    pub speaker: Option<u8>,
+    /// A real speaker index from voice-fingerprint clustering (see
+    /// diarize.rs) — unlike the old tinydiarize turn-alternation this
+    /// replaced, the same person gets the same index if they speak again
+    /// later in the clip, and there can be more than two. Null when the
+    /// diarization sidecar/models weren't available (never blocks getting a
+    /// transcript) or a segment's audio didn't overlap any detected speaker.
+    pub speaker: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -55,11 +57,6 @@ struct WSeg {
     text: String,
     offsets: WOff,
     tokens: Option<Vec<WTok>>,
-    /// Present (and meaningful) only when whisper-cli was run with -tdrz.
-    /// Verified field name against whisper.cpp's own JSON writer in
-    /// examples/cli/cli.cpp — true means the *next* segment is a new speaker.
-    #[serde(default)]
-    speaker_turn_next: bool,
 }
 
 #[derive(Deserialize)]
@@ -82,9 +79,8 @@ pub fn run(
     model: String,
     start: Option<f64>,
     end: Option<f64>,
-    diarize: bool,
 ) {
-    let result = run_inner(&app, &job_id, &handle, &path, &model, start, end, diarize);
+    let result = run_inner(&app, &job_id, &handle, &path, &model, start, end);
     match result {
         Ok(json) => emit_done(&app, &job_id, "transcribing", Some(json)),
         Err(e) => {
@@ -105,18 +101,11 @@ fn run_inner(
     model: &str,
     start: Option<f64>,
     end: Option<f64>,
-    diarize: bool,
 ) -> Result<String, String> {
-    // Speaker-turn detection requires whisper.cpp's tinydiarize fine-tune —
-    // it's a different, smaller model (small.en-tdrz) than whatever accuracy
-    // model the user picked, so diarizing trades some accuracy for speaker
-    // awareness rather than layering on top of e.g. large-v3.
-    let effective_model = if diarize { "small.en-tdrz" } else { model };
-    let model_path = models::model_path(app, effective_model)?;
+    let model_path = models::model_path(app, model)?;
     if !model_path.exists() {
-        let label = if diarize { "Speaker detection" } else { "Model" };
         return Err(format!(
-            "{label} model '{effective_model}' is not downloaded yet — grab it from the home screen."
+            "Model '{model}' is not downloaded yet — grab it from the home screen."
         ));
     }
 
@@ -191,9 +180,8 @@ fn run_inner(
     // The preset string isn't always the model name verbatim (the large
     // models take dotted names like "large.v3" while their file names use
     // hyphens), so it's resolved through models::dtw_preset rather than
-    // passed through directly. Resolved against effective_model, not the
-    // originally-requested model, since that's the model actually running.
-    let dtw = models::dtw_preset(effective_model);
+    // passed through directly.
+    let dtw = models::dtw_preset(model);
 
     // Bind these as owned Strings first — the args Vec below borrows from
     // them, and (unlike the single-chained-expression form this replaced)
@@ -202,7 +190,7 @@ fn run_inner(
     let wav_s = wav.to_string_lossy().into_owned();
     let out_base_s = out_base.to_string_lossy().into_owned();
 
-    let mut args: Vec<&str> = vec![
+    let args: Vec<&str> = vec![
         "-m",
         &model_path_s,
         "-f",
@@ -216,12 +204,6 @@ fn run_inner(
         "-dtw",
         dtw,
     ];
-    // Speaker-turn detection — combinable with -dtw (verified no conflict in
-    // whisper.cpp's own flag validation), adds a `speaker_turn_next` boolean
-    // to each segment in the JSON output parsed below.
-    if diarize {
-        args.push("-tdrz");
-    }
 
     let mut child = sidecar::command("whisper-cli")
         .args(&args)
@@ -287,7 +269,23 @@ fn run_inner(
     let parsed: WhisperOut =
         serde_json::from_str(&raw).map_err(|e| format!("Transcript parse error: {e}"))?;
 
-    let mut segments = build_segments(parsed, diarize);
+    let mut segments = build_segments(parsed);
+
+    // Real speaker diarization (see diarize.rs) — a separate pass over the
+    // same WAV, run *before* the offset shift below since diarization's
+    // timestamps are relative to this (possibly range-limited) clip, same
+    // as the word times fresh out of whisper. Automatic, no toggle: quietly
+    // does nothing if the sidecar/models aren't present rather than ever
+    // blocking the transcript itself on it.
+    if let Some(diarized) = diarize::run(&wav) {
+        for seg in &mut segments {
+            let (Some(first), Some(last)) = (seg.words.first(), seg.words.last()) else {
+                continue;
+            };
+            seg.speaker = diarize::speaker_for_span(&diarized, first.start, last.end);
+        }
+    }
+
     // shift word times back onto the full-video timeline when a range was used
     if offset > 0.0 {
         for seg in &mut segments {
@@ -394,26 +392,16 @@ fn read_wav_peaks(path: &std::path::Path, max_buckets: usize) -> Option<(Vec<f32
     Some((peaks, step))
 }
 
-fn build_segments(out: WhisperOut, diarize: bool) -> Vec<Segment> {
+fn build_segments(out: WhisperOut) -> Vec<Segment> {
     let mut segments = Vec::new();
-    // Alternates 0/1 each time whisper.cpp reports a speaker-turn boundary.
-    // Only meaningful (and only assigned to segments) when diarize is on.
-    let mut speaker: u8 = 0;
 
     for (si, seg) in out.transcription.into_iter().enumerate() {
-        let turn_next = diarize && seg.speaker_turn_next;
         let text_trim = seg.text.trim();
         // skip non-speech annotations like [Music], (laughing), [BLANK_AUDIO]
         if text_trim.is_empty()
             || (text_trim.starts_with('[') && text_trim.ends_with(']'))
             || (text_trim.starts_with('(') && text_trim.ends_with(')'))
         {
-            // Still honor a turn boundary on a skipped annotation segment,
-            // so the alternation doesn't fall out of sync with whisper's own
-            // turn markers.
-            if turn_next {
-                speaker = 1 - speaker;
-            }
             continue;
         }
 
@@ -468,11 +456,10 @@ fn build_segments(out: WhisperOut, diarize: bool) -> Vec<Segment> {
             segments.push(Segment {
                 id: format!("seg_{si}"),
                 words,
-                speaker: if diarize { Some(speaker) } else { None },
+                // Filled in afterward by a real diarization pass in
+                // run_inner (see diarize.rs) — not known at this point.
+                speaker: None,
             });
-        }
-        if turn_next {
-            speaker = 1 - speaker;
         }
     }
 
@@ -506,8 +493,12 @@ mod waveform_tests {
         buf
     }
 
+    /// `bytes.as_ptr()`, not `bytes` — `{:p}` on a slice reference formats the
+    /// fat pointer as `Pointer { addr: 0x.., metadata: N }`, and those braces,
+    /// colons and spaces are illegal in a Windows filename (os error 123). The
+    /// thin data pointer formats as a plain `0x..` on every platform.
     fn write_temp(bytes: &[u8], name: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("clipcaption_test_{name}_{:p}.wav", bytes));
+        let p = std::env::temp_dir().join(format!("clipcaption_test_{name}_{:p}.wav", bytes.as_ptr()));
         std::fs::write(&p, bytes).unwrap();
         p
     }

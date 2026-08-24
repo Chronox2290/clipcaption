@@ -1,4 +1,5 @@
 mod analyze;
+mod diarize;
 mod encoders;
 mod export;
 mod jobs;
@@ -66,12 +67,11 @@ fn transcribe(
     model: String,
     start: Option<f64>,
     end: Option<f64>,
-    diarize: Option<bool>,
 ) -> Result<String, String> {
     let (id, handle) = jobs.create("stt");
     let job_id = id.clone();
     std::thread::spawn(move || {
-        transcribe::run(app, job_id, handle, path, model, start, end, diarize.unwrap_or(false));
+        transcribe::run(app, job_id, handle, path, model, start, end);
     });
     Ok(id)
 }

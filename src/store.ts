@@ -129,9 +129,6 @@ interface AppState {
   // models
   models: ModelInfo[];
   selectedModel: string;
-  /** Speaker-turn detection (tinydiarize) — off by default since it forces a
-   * smaller, less accurate model in exchange for speaker awareness. */
-  diarizeEnabled: boolean;
 
   // encoding options
   encoder: string; // "auto" | "x264" | "nvenc" | "amf" | "qsv"
@@ -174,7 +171,6 @@ interface AppState {
    * Returns the new segment's id. */
   insertSegment: (start: number, end: number, text: string) => string;
   setSelectedModel: (m: string) => void;
-  setDiarizeEnabled: (v: boolean) => void;
   setEncoder: (e: string) => void;
   setFpsOverride: (fps: number | null) => void;
   downloadModel: (name: string) => Promise<void>;
@@ -265,7 +261,6 @@ export const useApp = create<AppState>((set, get) => ({
   modelJob: null,
   models: [],
   selectedModel: localStorage.getItem("cc.model") ?? "large-v3-turbo",
-  diarizeEnabled: localStorage.getItem("cc.diarize") === "1",
   encoder: localStorage.getItem("cc.encoder") ?? "auto",
   availableEncoders: ["x264"],
   fpsOverride: (() => {
@@ -285,9 +280,22 @@ export const useApp = create<AppState>((set, get) => ({
     void (async () => {
       try {
         const { getVersion } = await import("@tauri-apps/api/app");
-        set({ appVersion: await getVersion() });
-      } catch {
+        const version = await getVersion();
+        set({ appVersion: version });
+        // The Library header also shows "vX.Y.Z", but that's easy to miss if
+        // you mostly live in the Editor screen — the title bar is visible no
+        // matter what's on screen (and shows up in the taskbar/alt-tab too),
+        // so it's the one place that answers "which version am I running?"
+        // without having to go looking for it.
+        try {
+          const { getCurrentWindow } = await import("@tauri-apps/api/window");
+          await getCurrentWindow().setTitle(`ClipCaption v${version}`);
+        } catch (titleErr) {
+          console.error("Could not set window title:", titleErr);
+        }
+      } catch (err) {
         // non-essential — version just won't show in the UI
+        console.error("Could not read app version:", err);
       }
     })();
     // Give the window a moment to paint before doing a network check no one
@@ -443,7 +451,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   transcribe: async () => {
-    const { videoPath, selectedModel, activeRange, editingRank, diarizeEnabled } = get();
+    const { videoPath, selectedModel, activeRange, editingRank } = get();
     if (!videoPath) return;
     try {
       // editingRank is only set while a highlight's trim controls are open,
@@ -462,7 +470,6 @@ export const useApp = create<AppState>((set, get) => ({
         model: selectedModel,
         start: activeRange?.start ?? null,
         end: activeRange?.end ?? null,
-        diarize: diarizeEnabled,
       });
       set({ transcribeJob: { id, stage: "starting", progress: -1 } });
     } catch (e) {
@@ -569,11 +576,6 @@ export const useApp = create<AppState>((set, get) => ({
   setSelectedModel: (m) => {
     localStorage.setItem("cc.model", m);
     set({ selectedModel: m });
-  },
-
-  setDiarizeEnabled: (v) => {
-    localStorage.setItem("cc.diarize", v ? "1" : "0");
-    set({ diarizeEnabled: v });
   },
 
   setEncoder: (encoder) => {
@@ -687,7 +689,6 @@ export const useApp = create<AppState>((set, get) => ({
       selectedRanks,
       clipOverrides,
       clipNames,
-      diarizeEnabled,
     } = get();
     const clips = highlights.filter((h) => selectedRanks.includes(h.rank));
     if (!videoPath || !mediaInfo || clips.length === 0) return;
@@ -719,7 +720,6 @@ export const useApp = create<AppState>((set, get) => ({
           model: selectedModel,
           start: range.start,
           end: range.end,
-          diarize: diarizeEnabled,
         });
         const result = await waitForJob(tid);
         const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
@@ -795,7 +795,6 @@ export const useApp = create<AppState>((set, get) => ({
       selectedModel,
       selectedRanks,
       clipOverrides,
-      diarizeEnabled,
     } = get();
     const ordered = highlights
       .filter((h) => selectedRanks.includes(h.rank))
@@ -822,7 +821,6 @@ export const useApp = create<AppState>((set, get) => ({
           model: selectedModel,
           start: range.start,
           end: range.end,
-          diarize: diarizeEnabled,
         });
         const result = await waitForJob(tid);
         const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
@@ -910,7 +908,7 @@ export const useApp = create<AppState>((set, get) => ({
    * export with the chosen preset. Continues past per-file failures.
    */
   runFileBatch: async (presetId, customMb, outputDir, resolutionId = "source", fitMode = "fill") => {
-    const { selectedModel, diarizeEnabled } = get();
+    const { selectedModel } = get();
     const preset = getExportPreset(presetId);
     const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
     batchCancelRequested = false;
@@ -938,7 +936,6 @@ export const useApp = create<AppState>((set, get) => ({
           model: selectedModel,
           start: null,
           end: null,
-          diarize: diarizeEnabled,
         });
         currentBatchJobId = tid;
         const result = await waitForJob(tid, (p) =>

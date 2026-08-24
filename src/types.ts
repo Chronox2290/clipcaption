@@ -9,10 +9,12 @@ export interface WordSpan {
 export interface Segment {
   id: string;
   words: WordSpan[];
-  /** 0 or 1 when speaker-turn detection was used for this transcribe, else
-   * null. This is turn-taking (whisper.cpp's tinydiarize), not real voice
-   * identification — it alternates each time the speaker changes, but can't
-   * recognize "this is the same person as before" after a gap. */
+  /** A real speaker index from voice-fingerprint clustering (sherpa-onnx
+   * diarization, run automatically — see src-tauri/src/diarize.rs), or null
+   * if diarization wasn't available or this segment's audio didn't overlap
+   * any detected speaker. Unlike the old tinydiarize turn-alternation this
+   * replaced, the same person keeps the same index if they speak again
+   * later in the clip, and there can be more than two speakers. */
   speaker: number | null;
 }
 
@@ -101,8 +103,11 @@ export interface CaptionStyle {
   positionPct: number;
   maxWordsPerPage: number;
   /** Base (non-active-word) fill color per speaker, used instead of `fill`
-   * when a caption page came from a diarized transcript — [speaker 0, speaker 1]. */
-  speakerColors: [string, string];
+   * when a caption page came from a diarized transcript — indexed by speaker
+   * number, wrapping via modulo (see wordCss/buildAss) if there are more
+   * detected speakers than colors defined here. Real diarization can surface
+   * more than 2 speakers, so presets give this at least 4 colors. */
+  speakerColors: string[];
   /** Auto-insert a relevant emoji after the key trigger word in each caption
    * line (one per line, see lib/emojis.ts). Off by default. */
   emojis: boolean;

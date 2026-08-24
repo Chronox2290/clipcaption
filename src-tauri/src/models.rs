@@ -19,14 +19,14 @@ pub struct ModelSpec {
     /// ggml file names use hyphens ("large-v3") — verified against
     /// whisper.cpp's own `examples/cli/cli.cpp` source, not guessed.
     pub dtw_preset: &'static str,
-    /// HF repo the file is hosted in ("owner/name"). Every normal model
-    /// lives in ggerganov/whisper.cpp; the tinydiarize model is a separate
-    /// community fine-tune hosted in its own repo (confirmed against
-    /// whisper.cpp's own download-ggml-model.sh, which special-cases it).
+    /// HF repo the file is hosted in ("owner/name"). Every model here lives
+    /// in ggerganov/whisper.cpp.
     pub hf_repo: &'static str,
-    /// True for a model that exists to unlock a capability (currently: speaker-turn
-    /// detection) rather than being a normal accuracy choice — the UI keeps
-    /// these out of the main "Speech model" picker.
+    /// True for a model that exists to unlock a capability rather than being
+    /// a normal accuracy choice — the UI keeps these out of the main "Speech
+    /// model" picker. Unused today (speaker diarization no longer needs a
+    /// whisper.cpp model at all — see diarize.rs) but kept in case a future
+    /// capability model needs it.
     pub capability_only: bool,
 }
 
@@ -95,23 +95,6 @@ pub const MODELS: &[ModelSpec] = &[
         dtw_preset: "large.v3",
         hf_repo: "ggerganov/whisper.cpp",
         capability_only: false,
-    },
-    ModelSpec {
-        name: "small.en-tdrz",
-        file_name: "ggml-small.en-tdrz.bin",
-        size_mb: 488,
-        recommended: false,
-        // Honest framing: this is turn-detection, not voice identification —
-        // it marks when the speaker changes, then the app alternates a
-        // "Speaker A/B" color across those turns. It can't recognize the
-        // same person again after a gap, and it's only reliable for
-        // two-person audio (verified against whisper.cpp's tinydiarize docs
-        // and source — it emits a single "speaker changed" boolean per
-        // segment, no speaker embeddings/clustering).
-        description: "Speaker-turn detection for 2-person audio — trades some accuracy for speaker awareness",
-        dtw_preset: "small.en", // tinydiarize is a small.en fine-tune; same architecture/alignment heads
-        hf_repo: "akashmjn/tinydiarize-whisper.cpp",
-        capability_only: true,
     },
 ];
 

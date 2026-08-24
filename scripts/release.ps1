@@ -3,21 +3,28 @@
 # (.github/workflows/release.yml) build the signed installer and updater
 # manifest. Run via RELEASE.cmd, or directly:
 #   powershell -ExecutionPolicy Bypass -File scripts/release.ps1 -Version 0.2.0
+# Leave -Version off (or just press Enter at the RELEASE.cmd prompt) to
+# auto-bump the current patch version instead - e.g. 0.2.0 -> 0.2.1.
 
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$Version
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-
-if ($Version -notmatch '^\d+\.\d+\.\d+$') {
-    Write-Error "Version must look like 0.2.0 (three numbers, dots, no leading 'v') - got '$Version'."
-}
-
 $tauriConf = Join-Path $root "src-tauri\tauri.conf.json"
 $pkgJson = Join-Path $root "package.json"
+
+if ($Version -eq "") {
+    $current = (Select-String -Path $tauriConf -Pattern '"version":\s*"([^"]+)"').Matches[0].Groups[1].Value
+    if ($current -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
+        Write-Error "Could not read a X.Y.Z version out of tauri.conf.json to auto-bump (found '$current'). Pass -Version explicitly instead."
+    }
+    $Version = "{0}.{1}.{2}" -f $Matches[1], $Matches[2], ([int]$Matches[3] + 1)
+    Write-Host "No version given - auto-bumping patch: $current -> $Version"
+} elseif ($Version -notmatch '^\d+\.\d+\.\d+$') {
+    Write-Error "Version must look like 0.2.0 (three numbers, dots, no leading 'v') - got '$Version'."
+}
 
 Write-Host "Bumping version to $Version in tauri.conf.json and package.json..."
 (Get-Content $tauriConf -Raw) -replace '"version":\s*"[^"]+"', "`"version`": `"$Version`"" |
@@ -27,7 +34,16 @@ Write-Host "Bumping version to $Version in tauri.conf.json and package.json..."
 
 Push-Location $root
 try {
-    git add src-tauri/tauri.conf.json package.json
+    # `git add -A`, not just the two version files: a release should ship
+    # whatever's actually sitting in the working tree. The narrower add used
+    # to live here once caused a real, confusing bug - tauri.conf.json (one
+    # of the two paths explicitly listed) started requiring a new sidecar
+    # binary, but the script that fetches it wasn't one of the listed paths,
+    # so it silently never got committed - CI built a config that demanded a
+    # file nothing had ever been pushed to go get. `git status` below prints
+    # exactly what's about to ship, so nothing goes out unreviewed.
+    git add -A
+    git status --short
     git commit -m "Release v$Version"
     git tag "v$Version"
     git push

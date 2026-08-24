@@ -58,6 +58,30 @@ pub fn resolve(name: &str) -> PathBuf {
     PathBuf::from(format!("{name}{EXE_SUFFIX}"))
 }
 
+/// Resolve a bundled data file (not an executable — e.g. the .onnx model
+/// files the speaker-diarization sidecar needs). Same search order as
+/// `resolve()` minus the exe-suffix/target-triple handling, since these
+/// files are the same bytes on every platform.
+pub fn resolve_data(filename: &str) -> PathBuf {
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(filename);
+    if cfg!(debug_assertions) && dev.exists() {
+        return dev;
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join(filename);
+            if p.exists() {
+                return p;
+            }
+        }
+    }
+
+    dev
+}
+
 /// Build a Command with the console window hidden on Windows.
 pub fn command(name: &str) -> Command {
     let cmd = Command::new(resolve(name));

@@ -128,22 +128,22 @@ export default function StylePanel() {
       </div>
       <div className="field colors">
         <label>Speakers</label>
-        <span className="color-item">
-          <input
-            type="color"
-            value={style.speakerColors[0]}
-            onChange={(e) => set({ speakerColors: [e.target.value, style.speakerColors[1]] })}
-          />
-          A
-        </span>
-        <span className="color-item">
-          <input
-            type="color"
-            value={style.speakerColors[1]}
-            onChange={(e) => set({ speakerColors: [style.speakerColors[0], e.target.value] })}
-          />
-          B
-        </span>
+        {style.speakerColors.map((c, i) => (
+          <span className="color-item" key={i}>
+            <input
+              type="color"
+              value={c}
+              onChange={(e) =>
+                set({
+                  speakerColors: style.speakerColors.map((sc, si) =>
+                    si === i ? e.target.value : sc
+                  ),
+                })
+              }
+            />
+            {String.fromCharCode(65 + (i % 26))}
+          </span>
+        ))}
       </div>
     </div>
   );

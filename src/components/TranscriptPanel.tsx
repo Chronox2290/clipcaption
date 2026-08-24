@@ -151,8 +151,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
               {seg.speaker != null && (
                 <span
                   className="speaker-dot"
-                  title={`Speaker ${seg.speaker === 0 ? "A" : "B"}`}
-                  style={{ background: style.speakerColors[seg.speaker % 2] }}
+                  title={`Speaker ${String.fromCharCode(65 + (seg.speaker % 26))}`}
+                  style={{
+                    background: style.speakerColors[seg.speaker % style.speakerColors.length],
+                  }}
                 />
               )}
               {seg.words.length ? fmtTime(seg.words[0].start) : "–"}

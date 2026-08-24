@@ -21,7 +21,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "pop",
     positionPct: 76,
     maxWordsPerPage: 4,
-    speakerColors: ["#FFFFFF", "#B9AFFF"],
+    speakerColors: ["#FFFFFF", "#B9AFFF", "#FFD166", "#5EE6D0"],
     emojis: true,
   },
   {
@@ -43,7 +43,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "glow",
     positionPct: 78,
     maxWordsPerPage: 5,
-    speakerColors: ["#EDFDFF", "#FF6FD8"],
+    speakerColors: ["#EDFDFF", "#FF6FD8", "#7CFFB2", "#FFD166"],
     emojis: true,
   },
   {
@@ -62,7 +62,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "none",
     positionPct: 80,
     maxWordsPerPage: 6,
-    speakerColors: ["#FFFFFF", "#FFD866"],
+    speakerColors: ["#FFFFFF", "#FFD866", "#7EC8FF", "#FF8A65"],
     emojis: true,
   },
   {
@@ -83,7 +83,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "bounce",
     positionPct: 74,
     maxWordsPerPage: 3,
-    speakerColors: ["#FFF200", "#00E5FF"],
+    speakerColors: ["#FFF200", "#00E5FF", "#FF5C00", "#B9FF66"],
     emojis: true,
   },
   {
@@ -102,7 +102,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "shake",
     positionPct: 76,
     maxWordsPerPage: 4,
-    speakerColors: ["#FFE8D6", "#7CFFB2"],
+    speakerColors: ["#FFE8D6", "#7CFFB2", "#FF6FD8", "#7EC8FF"],
     emojis: true,
   },
   {
@@ -121,7 +121,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "bounce",
     positionPct: 78,
     maxWordsPerPage: 5,
-    speakerColors: ["#FFFFFF", "#7EC8FF"],
+    speakerColors: ["#FFFFFF", "#7EC8FF", "#FFD166", "#FF8A80"],
     emojis: true,
   },
 ];
