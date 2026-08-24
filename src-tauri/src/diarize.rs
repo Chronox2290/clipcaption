@@ -15,6 +15,7 @@
 // and quietly does nothing otherwise, exactly like a missing optional model
 // should behave.
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::sidecar;
@@ -92,6 +93,68 @@ pub fn run(wav_path: &Path) -> Option<Vec<SpeakerSegment>> {
     } else {
         Some(segments)
     }
+}
+
+/// For each distinct speaker id `run()` found, extracts one voice-fingerprint
+/// embedding from that speaker's single longest continuous span (via the
+/// extract-embedding sidecar — see src-tauri/embed-tool/extract_embedding.cpp
+/// for what it does and why it exists), keyed by that speaker's *local*
+/// index for this run only.
+///
+/// This is what lets the app recognize the same real person across separate
+/// diarization runs (the live preview vs. an export's own independent
+/// re-transcription) despite sherpa-onnx's speaker_00/01/... numbering being
+/// freshly assigned by clustering every single time and carrying no
+/// persistent identity on its own — see the frontend's speaker-matching
+/// logic (captions.ts) for the other half of that. Best-effort: a speaker
+/// whose embedding fails to extract is simply missing from the returned map
+/// (falls back to an unnamed generic label in the UI), same non-fatal
+/// philosophy as `run()` itself.
+pub fn extract_speaker_embeddings(
+    wav_path: &Path,
+    segments: &[SpeakerSegment],
+) -> HashMap<u32, Vec<f32>> {
+    let embed_model = sidecar::resolve_data(EMBEDDING_MODEL);
+    if !embed_model.exists() {
+        return HashMap::new();
+    }
+
+    // Longest single continuous span per speaker — a cleaner, more reliable
+    // fingerprint than concatenating fragments (which the embedding model
+    // was never asked to handle) or than the first span (which can be a
+    // throwaway one-word reaction).
+    let mut longest: HashMap<u32, (f64, f64)> = HashMap::new();
+    for s in segments {
+        let dur = s.end - s.start;
+        let better = longest
+            .get(&s.speaker)
+            .map(|(a, b)| dur > (b - a))
+            .unwrap_or(true);
+        if better {
+            longest.insert(s.speaker, (s.start, s.end));
+        }
+    }
+
+    let mut out = HashMap::new();
+    for (speaker, (start, end)) in longest {
+        let output = sidecar::command("extract-embedding")
+            .arg(format!("--model={}", embed_model.display()))
+            .arg(format!("--start={start:.3}"))
+            .arg(format!("--end={end:.3}"))
+            .arg(wav_path)
+            .output();
+        let Ok(output) = output else { continue };
+        if !output.status.success() {
+            continue;
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(embedding) = serde_json::from_str::<Vec<f32>>(stdout.trim()) {
+            if !embedding.is_empty() {
+                out.insert(speaker, embedding);
+            }
+        }
+    }
+    out
 }
 
 /// Assigns each `[start, end)` span (a transcript segment's own time range)

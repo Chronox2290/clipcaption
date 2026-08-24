@@ -55,6 +55,15 @@ struct TranscribeResult {
     /// waveform up with word times when only a highlight (not the whole
     /// clip) was transcribed.
     waveform_offset: f64,
+    /// One voice-fingerprint embedding per distinct speaker id diarization
+    /// found in this run (keyed by that *local* speaker index — see
+    /// diarize::extract_speaker_embeddings). Empty when diarization found no
+    /// speakers or the sidecar/model wasn't available; a speaker whose
+    /// embedding extraction failed is simply missing its entry. The frontend
+    /// uses this to match speakers against the user's saved names — matching
+    /// happens there, not here, so the backend stays a stateless pass over
+    /// whatever this one clip's audio contains.
+    speaker_embeddings: std::collections::HashMap<u32, Vec<f32>>,
 }
 
 #[derive(Deserialize)]
@@ -339,6 +348,7 @@ fn run_inner(
     // as the word times fresh out of whisper. Automatic, no toggle: quietly
     // does nothing if the sidecar/models aren't present rather than ever
     // blocking the transcript itself on it.
+    let mut speaker_embeddings = std::collections::HashMap::new();
     if let Some(diarized) = diarize::run(&wav) {
         for seg in &mut segments {
             let (Some(first), Some(last)) = (seg.words.first(), seg.words.last()) else {
@@ -346,6 +356,10 @@ fn run_inner(
             };
             seg.speaker = diarize::speaker_for_span(&diarized, first.start, last.end);
         }
+        // Extracted from the same still-on-disk WAV, before it's deleted
+        // below — one embedding per distinct speaker id, for the frontend to
+        // match against the user's named speaker profiles.
+        speaker_embeddings = diarize::extract_speaker_embeddings(&wav, &diarized);
     }
 
     // Stereo pan, on the same (possibly range-limited) timeline as the word
@@ -387,6 +401,7 @@ fn run_inner(
         waveform,
         waveform_step,
         waveform_offset: offset,
+        speaker_embeddings,
     })
     .map_err(|e| e.to_string())
 }

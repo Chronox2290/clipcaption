@@ -26,6 +26,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     emojis: true,
     dynamic: true,
     dynamicAmountPct: 70,
+    showSpeakerNames: false,
   },
   {
     id: "neon",
@@ -50,6 +51,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     emojis: true,
     dynamic: true,
     dynamicAmountPct: 70,
+    showSpeakerNames: false,
   },
   {
     id: "clean",
@@ -71,6 +73,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     emojis: true,
     dynamic: true,
     dynamicAmountPct: 70,
+    showSpeakerNames: false,
   },
   {
     id: "retro",
@@ -94,6 +97,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     emojis: true,
     dynamic: true,
     dynamicAmountPct: 70,
+    showSpeakerNames: false,
   },
   {
     id: "hype",
@@ -115,6 +119,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     emojis: true,
     dynamic: true,
     dynamicAmountPct: 70,
+    showSpeakerNames: false,
   },
   {
     id: "comic",
@@ -136,6 +141,7 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     emojis: true,
     dynamic: true,
     dynamicAmountPct: 70,
+    showSpeakerNames: false,
   },
 ];
 
@@ -220,6 +226,30 @@ export function wordCss(
     base.animation = "cc-shake 260ms ease-out";
   }
   return base;
+}
+
+/** CSS for a speaker-name label rendered just above the caption words —
+ * positioned as an absolutely-positioned child of containerCss's own div
+ * (which is itself position:"absolute", a valid containing block), anchored
+ * to the words block's own top edge via bottom:"100%" rather than a fixed
+ * offset, so it doesn't overlap even when a page wraps onto extra lines. */
+export function speakerNameCss(
+  style: CaptionStyle,
+  videoHeightPx: number,
+  speaker: number
+): CSSProperties {
+  return {
+    position: "absolute",
+    left: "50%",
+    bottom: "100%",
+    transform: "translateX(-50%)",
+    marginBottom: "0.3em",
+    color: style.speakerColors[speaker % style.speakerColors.length],
+    fontSize: "0.55em",
+    fontWeight: 700,
+    textShadow: "0 1px 3px rgba(0,0,0,0.7)",
+    whiteSpace: "nowrap",
+  };
 }
 
 /** Mixes a hex color toward white by `amt` (0..1) — used to derive the

@@ -1,4 +1,4 @@
-import type { CaptionPage, CaptionStyle, Segment, WordSpan } from "../types";
+import type { CaptionPage, CaptionStyle, Segment, SpeakerProfile, WordSpan } from "../types";
 
 /** Chunk transcript words into on-screen caption pages. */
 export function paginate(
@@ -238,4 +238,100 @@ let idCounter = 0;
 export function nextId(prefix: string): string {
   idCounter += 1;
   return `${prefix}_${Date.now().toString(36)}_${idCounter}`;
+}
+
+// ---------------- speaker names ----------------
+//
+// A diarized speaker index (Segment.speaker) is only ever a *local* id -
+// sherpa-onnx's clustering reassigns 0, 1, 2... fresh on every single
+// diarization run, so it carries no identity of its own across the live
+// preview and each export's own independent re-transcription. A
+// SpeakerProfile instead identifies a real voice by its embedding (see
+// TranscribeResult.speakerEmbeddings); resolveSpeakerNames below is what
+// turns "this run's speaker 0" back into "Alex" by matching embeddings.
+
+/** The same generic per-clip letter used before names existed ("Speaker A",
+ * "Speaker B", ...) - still the fallback for any speaker that hasn't been
+ * named, or whose voice didn't match a saved profile closely enough. */
+export function speakerLetter(speaker: number): string {
+  return String.fromCharCode(65 + (((speaker % 26) + 26) % 26));
+}
+
+export function cosineSimilarity(a: number[], b: number[]): number {
+  const n = Math.min(a.length, b.length);
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < n; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  if (normA === 0 || normB === 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/** Minimum cosine similarity to call two embeddings "the same voice". Set
+ * from a real measurement, not a guess: extracting embeddings independently
+ * for the same person's voice in different real audio files (this app's own
+ * titanet embedding model, via the extract-embedding sidecar) scored
+ * 0.63-0.75; different people's voices scored 0.06-0.30 - a clean, wide
+ * gap. 0.5 sits solidly in the middle of that gap with margin on both
+ * sides, so it's a threshold with real headroom rather than one riding
+ * right up against where the two populations start to overlap. */
+export const SPEAKER_MATCH_THRESHOLD = 0.5;
+
+/** For every distinct speaker id `speakerEmbeddings` has an embedding for,
+ * finds the best-matching saved SpeakerProfile (by cosine similarity).
+ * Returns the whole matched profile (not just its name) so callers that
+ * need to update/replace a profile - not just display it - have its id
+ * too. A speaker with no embedding, or whose closest match doesn't clear
+ * SPEAKER_MATCH_THRESHOLD, is simply absent from the result. */
+export function matchSpeakerProfiles(
+  speakerEmbeddings: Record<string, number[]>,
+  profiles: SpeakerProfile[]
+): Record<number, SpeakerProfile> {
+  const matched: Record<number, SpeakerProfile> = {};
+  if (!profiles.length) return matched;
+  for (const [key, embedding] of Object.entries(speakerEmbeddings)) {
+    let best: SpeakerProfile | null = null;
+    let bestScore = -Infinity;
+    for (const profile of profiles) {
+      const score = cosineSimilarity(embedding, profile.embedding);
+      if (score > bestScore) {
+        bestScore = score;
+        best = profile;
+      }
+    }
+    if (best && bestScore >= SPEAKER_MATCH_THRESHOLD) {
+      matched[Number(key)] = best;
+    }
+  }
+  return matched;
+}
+
+/** Same as matchSpeakerProfiles, but just the names - what the rendering
+ * paths (CaptionOverlay, buildAss, the transcript's speaker-dot tooltip)
+ * actually need. */
+export function resolveSpeakerNames(
+  speakerEmbeddings: Record<string, number[]>,
+  profiles: SpeakerProfile[]
+): Record<number, string> {
+  const matched = matchSpeakerProfiles(speakerEmbeddings, profiles);
+  const names: Record<number, string> = {};
+  for (const [key, profile] of Object.entries(matched)) {
+    names[Number(key)] = profile.name;
+  }
+  return names;
+}
+
+/** Display label for a caption page/transcript row's speaker: the resolved
+ * name if one matched, else the generic "Speaker A" fallback, else null for
+ * no detected speaker at all. */
+export function speakerLabel(
+  speaker: number | null,
+  resolvedNames: Record<number, string>
+): string | null {
+  if (speaker == null) return null;
+  return resolvedNames[speaker] ?? `Speaker ${speakerLetter(speaker)}`;
 }

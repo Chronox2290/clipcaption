@@ -152,6 +152,16 @@ export default function StylePanel() {
           <span className="muted small">{style.dynamicAmountPct ?? 70}%</span>
         </div>
       )}
+      <div className="field">
+        <label title="Shows a named speaker's name above/beside their captions — only for speakers you've named in the Transcript tab">
+          Show speaker names
+        </label>
+        <input
+          type="checkbox"
+          checked={style.showSpeakerNames}
+          onChange={(e) => set({ showSpeakerNames: e.target.checked })}
+        />
+      </div>
       <div className="field colors">
         <label>Speakers</label>
         {style.speakerColors.map((c, i) => (

@@ -32,6 +32,15 @@ jobs:
       - name: Fetch sidecar binaries (ffmpeg, ffprobe, whisper-cli)
         run: powershell -ExecutionPolicy Bypass -File scripts/get-sidecars.ps1
 
+      # Compiles src-tauri/embed-tool (the speaker-embedding extractor) with
+      # the runner's MSVC toolchain - nobody publishes a prebuilt binary for
+      # it. Must run BEFORE the Tauri build: tauri.conf.json lists
+      # binaries/extract-embedding as an externalBin, and a missing sidecar
+      # fails the bundle step with a "resource path doesn't exist" error far
+      # less obvious than failing right here.
+      - name: Build speaker-embedding tool
+        run: powershell -ExecutionPolicy Bypass -File scripts/build-embed-tool.ps1
+
       - name: Build + release
         uses: tauri-apps/tauri-action@v0
         env:

@@ -38,7 +38,8 @@
       "binaries/ffmpeg",
       "binaries/ffprobe",
       "binaries/whisper-cli",
-      "binaries/sherpa-onnx-offline-speaker-diarization"
+      "binaries/sherpa-onnx-offline-speaker-diarization",
+      "binaries/extract-embedding"
     ]
   },
   "plugins": {

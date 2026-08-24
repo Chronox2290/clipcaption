@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useApp } from "../store";
 import TimeField from "./TimeField";
-import { fmtTime, isProfane } from "../lib/captions";
+import { fmtTime, isProfane, resolveSpeakerNames, speakerLetter } from "../lib/captions";
 import { chronoPositions } from "../lib/highlights";
 
 interface Props {
@@ -26,6 +26,9 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const style = useApp((s) => s.style);
   const tuning = useApp((s) => s.tuningWord);
   const setTuning = useApp((s) => s.setTuningWord);
+  const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
+  const speakerProfiles = useApp((s) => s.speakerProfiles);
+  const setSpeakerName = useApp((s) => s.setSpeakerName);
 
   const model = models.find((m) => m.name === selectedModel);
 
@@ -93,6 +96,11 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const chrono = chronoPositions(highlights);
   const sourceClipNum = sourceHighlight ? chrono[sourceHighlight.rank] : null;
 
+  const distinctSpeakers = [
+    ...new Set(segments.map((s) => s.speaker).filter((s): s is number => s != null)),
+  ].sort((a, b) => a - b);
+  const resolvedSpeakerNames = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
+
   const syncWordToPlayhead = (segId: string, idx: number, field: "start" | "end") => {
     const v = videoRef.current;
     if (v) setWordTime(segId, idx, field, v.currentTime);
@@ -122,6 +130,43 @@ export default function TranscriptPanel({ videoRef }: Props) {
           )}
         </div>
       )}
+      {distinctSpeakers.length > 0 && (
+        <div className="speakers-panel">
+          <p className="muted small" style={{ marginBottom: 4 }}>
+            Speakers in this clip — name one and it'll follow that voice into exports and
+            batch runs too, not just show up here.
+          </p>
+          <div className="speakers-list">
+            {distinctSpeakers.map((idx) => {
+              const hasEmbedding = Boolean(speakerEmbeddings[String(idx)]);
+              return (
+                <div key={idx} className="speaker-row">
+                  <span
+                    className="speaker-dot"
+                    style={{ background: style.speakerColors[idx % style.speakerColors.length] }}
+                  />
+                  <input
+                    className="speaker-name-input"
+                    value={resolvedSpeakerNames[idx] ?? ""}
+                    placeholder={
+                      hasEmbedding
+                        ? `Speaker ${speakerLetter(idx)} (name it, e.g. Alex)`
+                        : `Speaker ${speakerLetter(idx)} (too short to identify — can't be named)`
+                    }
+                    title={
+                      hasEmbedding
+                        ? "Naming this speaker matches their voice, not just this run's index"
+                        : "This speaker's lines were too brief to fingerprint their voice"
+                    }
+                    disabled={!hasEmbedding}
+                    onChange={(e) => setSpeakerName(idx, e.target.value)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <label className="check-row">
         <input type="checkbox" checked={censor} onChange={(e) => setCensor(e.target.checked)} />
         <span>Censor profanity (f***)</span>
@@ -146,7 +191,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
               {seg.speaker != null && (
                 <span
                   className="speaker-dot"
-                  title={`Speaker ${String.fromCharCode(65 + (seg.speaker % 26))}`}
+                  title={resolvedSpeakerNames[seg.speaker] ?? `Speaker ${speakerLetter(seg.speaker)}`}
                   style={{
                     background: style.speakerColors[seg.speaker % style.speakerColors.length],
                   }}

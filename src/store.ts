@@ -10,6 +10,7 @@ import type {
   MediaInfo,
   ModelInfo,
   Segment,
+  SpeakerProfile,
   TranscribeResult,
   ProjectFile,
 } from "./types";
@@ -22,7 +23,15 @@ import {
   pickProjectOpenPath,
 } from "./lib/tauri";
 import { getPreset } from "./lib/styles";
-import { applyCensor, distributeWordTimes, nextId, paginate, shiftPages } from "./lib/captions";
+import {
+  applyCensor,
+  distributeWordTimes,
+  matchSpeakerProfiles,
+  nextId,
+  paginate,
+  resolveSpeakerNames,
+  shiftPages,
+} from "./lib/captions";
 import { addEmojis } from "./lib/emojis";
 import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
@@ -92,6 +101,16 @@ interface AppState {
   waveformStep: number;
   /** Full-video-timeline seconds `waveform[0]` represents — see TranscribeResult. */
   waveformOffset: number;
+  /** One voice embedding per distinct speaker id in the *current* `segments`
+   * (keyed as a string — see TranscribeResult.speakerEmbeddings) — cleared
+   * and replaced every time segments are, since it's only ever valid for
+   * this specific transcription run. setSpeakerName reads from this to
+   * capture/update a durable SpeakerProfile. */
+  speakerEmbeddings: Record<string, number[]>;
+  /** Named voices for this project — see SpeakerProfile. Persists across
+   * re-transcribes of the same video (that's the point), reset on
+   * openVideo/closeVideo like the rest of this video's metadata. */
+  speakerProfiles: SpeakerProfile[];
   /** Word currently selected for fine-tuning — drives both the nudge panel in
    * the Transcript tab and which word is highlighted in the main waveform
    * editor beneath the video. Null when nothing is selected. */
@@ -189,6 +208,13 @@ interface AppState {
   stopEditingHighlight: () => void;
   adjustHighlightRange: (rank: number, start: number, end: number) => void;
   setClipName: (rank: number, name: string) => void;
+  /** Names (or renames, or clears with an empty/whitespace name) the voice
+   * currently showing as speaker `speakerIndex` in `segments` — see
+   * SpeakerProfile and lib/captions.ts's matching functions for how that
+   * name then follows the same real voice into other transcriptions. A
+   * no-op if that speaker has no embedding to match against (diarization
+   * ran but embedding extraction failed for it — rare). */
+  setSpeakerName: (speakerIndex: number, name: string) => void;
   exportSelectedHighlights: (
     outputDir: string,
     presetId?: string,
@@ -390,6 +416,8 @@ export const useApp = create<AppState>((set, get) => ({
   waveform: [],
   waveformStep: 0.01,
   waveformOffset: 0,
+  speakerEmbeddings: {},
+  speakerProfiles: [],
   tuningWord: null,
   style: getPreset("beast"),
   highlights: [],
@@ -478,10 +506,16 @@ export const useApp = create<AppState>((set, get) => ({
         } else if (p.done) {
           if (key === "transcribeJob" && p.result) {
             try {
-              const { segments, waveform, waveformStep, waveformOffset } = JSON.parse(
-                p.result
-              ) as TranscribeResult;
-              set({ segments, waveform, waveformStep, waveformOffset, transcribeJob: null });
+              const { segments, waveform, waveformStep, waveformOffset, speakerEmbeddings } =
+                JSON.parse(p.result) as TranscribeResult;
+              set({
+                segments,
+                waveform,
+                waveformStep,
+                waveformOffset,
+                speakerEmbeddings: speakerEmbeddings ?? {},
+                transcribeJob: null,
+              });
             } catch {
               set({ transcribeJob: null, error: "Failed to parse transcript" });
             }
@@ -576,6 +610,8 @@ export const useApp = create<AppState>((set, get) => ({
         waveform: [],
         waveformStep: 0.01,
         waveformOffset: 0,
+        speakerEmbeddings: {},
+        speakerProfiles: [],
         tuningWord: null,
         highlights: [],
         activeRange: null,
@@ -613,6 +649,8 @@ export const useApp = create<AppState>((set, get) => ({
       waveform: [],
       waveformStep: 0.01,
       waveformOffset: 0,
+      speakerEmbeddings: {},
+      speakerProfiles: [],
       tuningWord: null,
       highlights: [],
       activeRange: null,
@@ -641,6 +679,7 @@ export const useApp = create<AppState>((set, get) => ({
         waveform: [],
         waveformStep: 0.01,
         waveformOffset: 0,
+        speakerEmbeddings: {},
         tuningWord: null,
       });
       const id = await invoke<string>("transcribe", {
@@ -853,6 +892,42 @@ export const useApp = create<AppState>((set, get) => ({
     set({ clipNames: next });
   },
 
+  /** Names, renames, or clears (empty/whitespace name) the voice currently
+   * showing as speaker `speakerIndex`. Matches against existing profiles
+   * first — renaming a voice that's already recognized updates that same
+   * profile (and refreshes its embedding to this latest sample) instead of
+   * creating a duplicate. A no-op if this speaker has no embedding to
+   * identify it by at all. */
+  setSpeakerName: (speakerIndex, name) => {
+    const trimmed = name.trim();
+    const { speakerEmbeddings, speakerProfiles } = get();
+    const embedding = speakerEmbeddings[String(speakerIndex)];
+    if (!embedding) return;
+
+    const matched = matchSpeakerProfiles(speakerEmbeddings, speakerProfiles)[speakerIndex];
+
+    if (!trimmed) {
+      // Clearing the name: drop the matched profile entirely so this voice
+      // goes back to unnamed everywhere it's used, not just this row.
+      if (matched) {
+        set({ speakerProfiles: speakerProfiles.filter((p) => p.id !== matched.id) });
+      }
+      return;
+    }
+
+    if (matched) {
+      set({
+        speakerProfiles: speakerProfiles.map((p) =>
+          p.id === matched.id ? { ...p, name: trimmed, embedding } : p
+        ),
+      });
+    } else {
+      set({
+        speakerProfiles: [...speakerProfiles, { id: nextId("spk"), name: trimmed, embedding }],
+      });
+    }
+  },
+
   /**
    * For every checked highlight (using the user's extended/trimmed range if they
    * adjusted it) — transcribe just that window, build captions in the current
@@ -873,6 +948,7 @@ export const useApp = create<AppState>((set, get) => ({
       selectedRanks,
       clipOverrides,
       clipNames,
+      speakerProfiles,
     } = get();
     const clips = highlights.filter((h) => selectedRanks.includes(h.rank));
     if (!videoPath || !mediaInfo || clips.length === 0) return;
@@ -907,13 +983,21 @@ export const useApp = create<AppState>((set, get) => ({
           end: range.end,
         });
         const result = await waitForJob(tid);
-        const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
+        const { segments, speakerEmbeddings } = result
+          ? (JSON.parse(result) as TranscribeResult)
+          : { segments: [], speakerEmbeddings: {} };
+        // This highlight got its own independent transcribe+diarize pass, so
+        // its speaker indices only mean anything within this one export —
+        // resolve names via voice-fingerprint matching against the user's
+        // saved profiles rather than assuming index 0 here is the same
+        // person as index 0 anywhere else (see lib/captions.ts).
+        const speakerNames = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
         let segs = censor ? applyCensor(segments) : segments;
         if (style.emojis) segs = addEmojis(segs);
         const pages = shiftPages(paginate(segs, style.maxWordsPerPage), range.start);
         const ass =
           pages.length > 0
-            ? buildAss(pages, style, { playResX: outW, playResY: outH })
+            ? buildAss(pages, style, { playResX: outW, playResY: outH, speakerNames })
             : "";
 
         set({
@@ -980,6 +1064,7 @@ export const useApp = create<AppState>((set, get) => ({
       selectedModel,
       selectedRanks,
       clipOverrides,
+      speakerProfiles,
     } = get();
     const ordered = highlights
       .filter((h) => selectedRanks.includes(h.rank))
@@ -993,6 +1078,20 @@ export const useApp = create<AppState>((set, get) => ({
     let cumulative = 0;
     let mergedPages: CaptionPage[] = [];
     const cutRanges: [number, number][] = [];
+
+    // Each highlight below gets its own independent transcribe+diarize pass,
+    // so "speaker 0" in one highlight's segments has no relation to "speaker
+    // 0" in another's — merging their pages onto one timeline needs a
+    // shared index space, not each highlight's raw local one. A voice that
+    // matches a saved profile always gets that profile's slot (so it reads
+    // as the same person, with the same color, across every highlight it
+    // appears in); an unmatched voice gets its own slot per highlight so it
+    // never accidentally shares a color/identity with an unrelated
+    // unmatched voice from a different highlight.
+    const profileSlot = new Map<string, number>(); // profile id -> global speaker index
+    const unnamedSlot = new Map<string, number>(); // "<highlightIdx>:<localIdx>" -> global index
+    let nextSlot = 0;
+    const globalSpeakerNames: Record<number, string> = {};
 
     try {
       set({ error: null, exportDone: null });
@@ -1009,7 +1108,32 @@ export const useApp = create<AppState>((set, get) => ({
           end: range.end,
         });
         const result = await waitForJob(tid);
-        const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
+        const { segments: rawSegments, speakerEmbeddings } = result
+          ? (JSON.parse(result) as TranscribeResult)
+          : { segments: [], speakerEmbeddings: {} };
+
+        const matched = matchSpeakerProfiles(speakerEmbeddings, speakerProfiles);
+        const remap = new Map<number, number>();
+        for (const seg of rawSegments) {
+          if (seg.speaker == null || remap.has(seg.speaker)) continue;
+          const profile = matched[seg.speaker];
+          let slot: number;
+          if (profile) {
+            slot = profileSlot.get(profile.id) ?? nextSlot++;
+            profileSlot.set(profile.id, slot);
+            globalSpeakerNames[slot] = profile.name;
+          } else {
+            const key = `${i}:${seg.speaker}`;
+            slot = unnamedSlot.get(key) ?? nextSlot++;
+            unnamedSlot.set(key, slot);
+          }
+          remap.set(seg.speaker, slot);
+        }
+        const segments = rawSegments.map((seg) => ({
+          ...seg,
+          speaker: seg.speaker == null ? null : remap.get(seg.speaker) ?? null,
+        }));
+
         let segs = censor ? applyCensor(segments) : segments;
         if (style.emojis) segs = addEmojis(segs);
         const pages = paginate(segs, style.maxWordsPerPage);
@@ -1025,7 +1149,7 @@ export const useApp = create<AppState>((set, get) => ({
       const outH = targetH ?? mediaInfo.height;
       const ass =
         mergedPages.length > 0
-          ? buildAss(mergedPages, style, { playResX: outW, playResY: outH })
+          ? buildAss(mergedPages, style, { playResX: outW, playResY: outH, speakerNames: globalSpeakerNames })
           : "";
 
       const eid = await invoke<string>("export_video", {
@@ -1130,7 +1254,15 @@ export const useApp = create<AppState>((set, get) => ({
         );
         currentBatchJobId = null;
 
-        const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
+        const { segments, speakerEmbeddings } = result
+          ? (JSON.parse(result) as TranscribeResult)
+          : { segments: [], speakerEmbeddings: {} };
+        // Each batch clip is its own file with its own independent
+        // diarization pass (and often a different source video entirely),
+        // so — same as exportSelectedHighlights — names are resolved by
+        // voice match against the project's saved profiles, not by raw
+        // index.
+        const speakerNames = resolveSpeakerNames(speakerEmbeddings, get().speakerProfiles);
         let segs = censor ? applyCensor(segments) : segments;
         if (style.emojis) segs = addEmojis(segs);
         const pages = paginate(segs, style.maxWordsPerPage);
@@ -1138,7 +1270,7 @@ export const useApp = create<AppState>((set, get) => ({
         const outH = targetH ?? info.height;
         const ass =
           pages.length > 0
-            ? buildAss(pages, style, { playResX: outW, playResY: outH })
+            ? buildAss(pages, style, { playResX: outW, playResY: outH, speakerNames })
             : "";
 
         const dir =
@@ -1328,6 +1460,7 @@ export const useApp = create<AppState>((set, get) => ({
       highlights,
       clipOverrides,
       clipNames,
+      speakerProfiles,
       selectedRanks,
       activeRange,
       segments,
@@ -1335,6 +1468,7 @@ export const useApp = create<AppState>((set, get) => ({
       waveform,
       waveformStep,
       waveformOffset,
+      speakerEmbeddings,
     } = get();
     if (!videoPath) return false;
     const project: ProjectFile = {
@@ -1346,6 +1480,7 @@ export const useApp = create<AppState>((set, get) => ({
       highlights,
       clipOverrides,
       clipNames,
+      speakerProfiles,
       selectedRanks,
       activeRange,
       segments,
@@ -1353,6 +1488,7 @@ export const useApp = create<AppState>((set, get) => ({
       waveform,
       waveformStep,
       waveformOffset,
+      speakerEmbeddings,
     };
     try {
       await invoke("write_text_file", { path, content: JSON.stringify(project, null, 2) });
@@ -1378,6 +1514,7 @@ export const useApp = create<AppState>((set, get) => ({
         highlights: project.highlights ?? [],
         clipOverrides: project.clipOverrides ?? {},
         clipNames: project.clipNames ?? {},
+        speakerProfiles: project.speakerProfiles ?? [],
         selectedRanks: project.selectedRanks ?? [],
         activeRange: project.activeRange ?? null,
         segments: project.segments ?? [],
@@ -1385,6 +1522,7 @@ export const useApp = create<AppState>((set, get) => ({
         waveform: project.waveform ?? [],
         waveformStep: project.waveformStep ?? 0.01,
         waveformOffset: project.waveformOffset ?? 0,
+        speakerEmbeddings: project.speakerEmbeddings ?? {},
         projectPath: path,
       });
     } catch (e) {

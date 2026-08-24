@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import type { CaptionStyle, Segment } from "../types";
 import { paginate, pageAt, activeWordIndex, applyCensor, captionDynamics } from "../lib/captions";
 import { addEmojis } from "../lib/emojis";
-import { containerCss, wordCss } from "../lib/styles";
+import { containerCss, speakerNameCss, wordCss } from "../lib/styles";
 
 interface Props {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -12,9 +12,20 @@ interface Props {
   censor: boolean;
   /** Rendered height of the visible video area in px */
   stageHeight: number;
+  /** Resolved speaker names (see lib/captions.ts's resolveSpeakerNames) —
+   * only shown when style.showSpeakerNames is on and this page's speaker
+   * has an entry here (unnamed/unmatched speakers get no label). */
+  speakerNames: Record<number, string>;
 }
 
-export default function CaptionOverlay({ videoRef, segments, style, censor, stageHeight }: Props) {
+export default function CaptionOverlay({
+  videoRef,
+  segments,
+  style,
+  censor,
+  stageHeight,
+  speakerNames,
+}: Props) {
   const [time, setTime] = useState(0);
   const raf = useRef(0);
 
@@ -38,6 +49,8 @@ export default function CaptionOverlay({ videoRef, segments, style, censor, stag
   if (!page || stageHeight <= 0) return null;
   const active = activeWordIndex(page, time);
   const dyn = captionDynamics(page, style);
+  const speakerName =
+    style.showSpeakerNames && page.speaker != null ? speakerNames[page.speaker] : undefined;
 
   return (
     <div
@@ -47,6 +60,7 @@ export default function CaptionOverlay({ videoRef, segments, style, censor, stag
       className={dyn.shake ? "caption-shake" : undefined}
       style={containerCss(style, stageHeight, dyn)}
     >
+      {speakerName && <div style={speakerNameCss(style, stageHeight, page.speaker!)}>{speakerName}</div>}
       {page.words.map((w, i) => (
         <span
           key={`${page.start}-${i}`}

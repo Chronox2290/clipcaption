@@ -31,6 +31,12 @@ function esc(text: string): string {
 export interface AssOptions {
   playResX: number;
   playResY: number;
+  /** Resolved speaker names (see lib/captions.ts's resolveSpeakerNames) —
+   * keyed the same way as CaptionPage.speaker. Only rendered when
+   * style.showSpeakerNames is on; a speaker with no entry here (unnamed, or
+   * didn't match a saved voice closely enough) gets no label, same as when
+   * the toggle is off. */
+  speakerNames?: Record<number, string>;
 }
 
 export function buildAss(pages: CaptionPage[], style: CaptionStyle, opts: AssOptions): string {
@@ -71,6 +77,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
   const lines: string[] = [];
   const activeC = assColor(style.activeFill);
+  // Deliberately smaller than the caption text itself (name tags are a
+  // secondary cue, not competing for attention) but with a floor so it
+  // stays legible on tiny fontSizePct presets.
+  const nameFontSize = Math.max(12, Math.round(fontSize * 0.55));
 
   for (const page of pages) {
     const words = page.words;
@@ -109,9 +119,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       page.speaker != null ? style.speakerColors[page.speaker % style.speakerColors.length] : style.fill;
     const pagePrimary = assColor(pagePrimaryHex);
 
+    const speakerName =
+      style.showSpeakerNames && page.speaker != null ? opts.speakerNames?.[page.speaker] : undefined;
+    // \N is a hard line break within the same dialogue event, so the name
+    // rides along with the caption text on one Dialogue line rather than
+    // needing its own separately-timed event; \fs is reset back to the
+    // normal caption size afterward so it doesn't leak into the rest of the
+    // line (every word/segment chunk below sets its own \1c already, but
+    // font size is only ever set here).
+    const namePrefix = speakerName
+      ? `{\\1c${pagePrimary}\\fs${nameFontSize}}${esc(speakerName)}\\N{\\fs${fontSize}}`
+      : "";
+
     if (style.animation === "none") {
       const text = words.map((w) => wordText(w.text, style)).join(" ");
-      lines.push(dialogue(page.start, page.end, `${pre}{\\fad(40,40)}{\\1c${pagePrimary}}${esc(text)}`));
+      lines.push(
+        dialogue(page.start, page.end, `${pre}{\\fad(40,40)}${namePrefix}{\\1c${pagePrimary}}${esc(text)}`)
+      );
       continue;
     }
 
@@ -151,7 +175,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         }
       }
       const fade = i === 0 ? "{\\fad(40,0)}" : "";
-      lines.push(dialogue(start, end, pre + fade + parts.join(" ")));
+      // namePrefix repeats on every one of a page's per-word dialogue
+      // events (not just the first) since each event only covers one
+      // word's active window and doesn't overlap the next - without it on
+      // every line, the name would vanish the instant the second word in
+      // the page became active instead of staying up for the whole page.
+      lines.push(dialogue(start, end, pre + fade + namePrefix + parts.join(" ")));
     }
   }
 

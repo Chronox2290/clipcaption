@@ -6,7 +6,7 @@ import TranscriptPanel from "../components/TranscriptPanel";
 import StylePanel from "../components/StylePanel";
 import ExportDrawer from "../components/ExportDrawer";
 import HighlightsPanel from "../components/HighlightsPanel";
-import { fmtTime } from "../lib/captions";
+import { fmtTime, resolveSpeakerNames } from "../lib/captions";
 
 type Tab = "transcript" | "highlights" | "style" | "export";
 
@@ -26,7 +26,10 @@ export default function Editor() {
     projectPath,
     saveProject,
     saveProjectAs,
+    speakerEmbeddings,
+    speakerProfiles,
   } = useApp();
+  const speakerNames = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
   const [savedFlash, setSavedFlash] = useState(false);
   const doSave = async () => {
     const ok = await saveProject();
@@ -182,6 +185,7 @@ export default function Editor() {
                 style={style}
                 censor={censor}
                 stageHeight={stage.h}
+                speakerNames={speakerNames}
               />
             </div>
             {!playing && <div className="play-badge">▶</div>}

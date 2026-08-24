@@ -37,6 +37,28 @@ export interface TranscribeResult {
   /** Full-video-timeline seconds that `waveform[0]` represents — add this to
    * `bucketIndex * waveformStep` to line the waveform up with word times. */
   waveformOffset: number;
+  /** One voice-fingerprint embedding per distinct speaker id diarization
+   * found *in this run* (keyed by Segment.speaker as a string, since that's
+   * only ever a small local index — JS object keys are strings regardless).
+   * Match these against SpeakerProfile.embedding (see resolveSpeakerNames in
+   * lib/captions.ts) to recover a user-assigned name: sherpa-onnx's own
+   * numbering is reassigned by clustering on every run and carries no
+   * identity across them on its own, so a name can never be pinned to a raw
+   * speaker index — only to a voice. */
+  speakerEmbeddings: Record<string, number[]>;
+}
+
+/** A user-named voice, identified by a fingerprint rather than by any
+ * particular transcription run's speaker index (which isn't stable across
+ * runs — see TranscribeResult.speakerEmbeddings). `embedding` is whichever
+ * voice sample the user was looking at when they typed the name; matching a
+ * fresh transcription's speakers against every stored profile (cosine
+ * similarity) is how a name follows a real person across the live preview
+ * and every separately re-diarized export. */
+export interface SpeakerProfile {
+  id: string;
+  name: string;
+  embedding: number[];
 }
 
 /** A caption "page" — the chunk of words shown on screen at once. A page
@@ -131,6 +153,12 @@ export interface CaptionStyle {
   /** How far the reaction goes, 0-100. 100 is the full range; lower values
    * keep the same behaviour but more subtly. */
   dynamicAmountPct: number;
+  /** Show a resolved speaker name (e.g. "Alex") above/beside each caption
+   * page whose speaker matched a saved SpeakerProfile — in both the live
+   * preview (CaptionOverlay.tsx) and burned-in export (lib/ass.ts). A page
+   * whose speaker didn't match any saved profile falls back to no label at
+   * all, same as when this is off. Off by default. */
+  showSpeakerNames: boolean;
 }
 
 export interface ExportPreset {
@@ -219,6 +247,10 @@ export interface ProjectFile {
   highlights: Highlight[];
   clipOverrides: Record<number, { start: number; end: number }>;
   clipNames: Record<number, string>;
+  /** Named voices for this project — persists across re-transcribes and
+   * exports since it's keyed by voice fingerprint, not by any one
+   * transcription run's speaker index. See SpeakerProfile. */
+  speakerProfiles: SpeakerProfile[];
   selectedRanks: number[];
   activeRange: { start: number; end: number } | null;
   segments: Segment[];
@@ -226,4 +258,8 @@ export interface ProjectFile {
   waveform: number[];
   waveformStep: number;
   waveformOffset: number;
+  /** The embeddings behind `segments`' own speaker indices — without these,
+   * a reloaded project's captions couldn't be matched back against
+   * `speakerProfiles` at all (see TranscribeResult.speakerEmbeddings). */
+  speakerEmbeddings: Record<string, number[]>;
 }
