@@ -11,6 +11,19 @@ export interface Segment {
   words: WordSpan[];
 }
 
+/** What a "transcribe" job resolves with — the word-level transcript plus a
+ * waveform amplitude envelope (free byproduct of the audio already extracted
+ * for Whisper) used to draw the word-timing editor. */
+export interface TranscribeResult {
+  segments: Segment[];
+  /** RMS amplitude, 0..1, one value per `waveformStep` seconds. */
+  waveform: number[];
+  waveformStep: number;
+  /** Full-video-timeline seconds that `waveform[0]` represents — add this to
+   * `bucketIndex * waveformStep` to line the waveform up with word times. */
+  waveformOffset: number;
+}
+
 /** A caption "page" — the chunk of words shown on screen at once. */
 export interface CaptionPage {
   start: number;
@@ -139,4 +152,26 @@ export interface BatchState {
   total: number;
   stage: string;
   outputDir: string;
+}
+
+/** Everything needed to resume editing later — written to a .ccproj file by
+ * "Save Project" and restored by "Open Project". Deliberately excludes the
+ * things that get regenerated from `videoPath` on load (mediaInfo, the
+ * preview clip). */
+export interface ProjectFile {
+  version: 1;
+  videoPath: string;
+  selectedModel: string;
+  style: CaptionStyle;
+  censor: boolean;
+  highlights: Highlight[];
+  clipOverrides: Record<number, { start: number; end: number }>;
+  clipNames: Record<number, string>;
+  selectedRanks: number[];
+  activeRange: { start: number; end: number } | null;
+  segments: Segment[];
+  transcriptSourceRank: number | null;
+  waveform: number[];
+  waveformStep: number;
+  waveformOffset: number;
 }

@@ -10,12 +10,22 @@ import type {
   MediaInfo,
   ModelInfo,
   Segment,
+  TranscribeResult,
+  ProjectFile,
 } from "./types";
-import { invoke, fileSrc, listenJobProgress, isTauri } from "./lib/tauri";
+import {
+  invoke,
+  fileSrc,
+  listenJobProgress,
+  isTauri,
+  pickProjectSavePath,
+  pickProjectOpenPath,
+} from "./lib/tauri";
 import { getPreset } from "./lib/styles";
 import { applyCensor, nextId, paginate, shiftPages } from "./lib/captions";
 import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
+import { sanitizeFilename } from "./lib/naming";
 
 interface JobState {
   id: string;
@@ -55,6 +65,9 @@ interface AppState {
   videoPath: string | null;
   previewSrc: string | null;
   mediaInfo: MediaInfo | null;
+  /** Path of the .ccproj file this session was saved to/loaded from, so
+   * "Save Project" can write straight back without prompting again. */
+  projectPath: string | null;
 
   // transcript
   segments: Segment[];
@@ -63,6 +76,13 @@ interface AppState {
    * this range", so the Transcript tab can show which clip is being edited.
    * Null for a whole-clip transcript. */
   transcriptSourceRank: number | null;
+  /** Waveform amplitude envelope for `segments`' time range, for the word
+   * timing editor — a free byproduct of transcription, so it arrives (or
+   * clears) alongside segments. */
+  waveform: number[];
+  waveformStep: number;
+  /** Full-video-timeline seconds `waveform[0]` represents — see TranscribeResult. */
+  waveformOffset: number;
 
   // style
   style: CaptionStyle;
@@ -76,6 +96,9 @@ interface AppState {
   selectedRanks: number[];
   /** User-adjusted start/end per highlight rank, overriding the AI-detected window */
   clipOverrides: Record<number, { start: number; end: number }>;
+  /** User-assigned custom name per highlight rank — used as the export filename
+   * (sanitized) instead of the auto-generated "_highlight_NN" pattern when set. */
+  clipNames: Record<number, string>;
   /** Which highlight (by rank) currently has its trim nudge controls open */
   editingRank: number | null;
   batch: BatchState | null;
@@ -128,6 +151,7 @@ interface AppState {
   startEditingHighlight: (h: Highlight) => void;
   stopEditingHighlight: () => void;
   adjustHighlightRange: (rank: number, start: number, end: number) => void;
+  setClipName: (rank: number, name: string) => void;
   exportSelectedHighlights: (
     outputDir: string,
     presetId?: string,
@@ -156,6 +180,13 @@ interface AppState {
   ) => Promise<void>;
   cancelFileBatch: () => void;
   clearError: () => void;
+  /** Returns true if the project was actually written (false if e.g. the save
+   * dialog was cancelled or there's no open video). */
+  saveProject: () => Promise<boolean>;
+  saveProjectAs: () => Promise<boolean>;
+  loadProject: () => Promise<void>;
+  /** Internal — shared write path for saveProject/saveProjectAs. Not called from the UI. */
+  _writeProject: (path: string) => Promise<boolean>;
 }
 
 function loadRecent(): string[] {
@@ -172,15 +203,20 @@ export const useApp = create<AppState>((set, get) => ({
   videoPath: null,
   previewSrc: null,
   mediaInfo: null,
+  projectPath: null,
   segments: [],
   censor: false,
   transcriptSourceRank: null,
+  waveform: [],
+  waveformStep: 0.01,
+  waveformOffset: 0,
   style: getPreset("beast"),
   highlights: [],
   analyzeJob: null,
   activeRange: null,
   selectedRanks: [],
   clipOverrides: {},
+  clipNames: {},
   editingRank: null,
   batch: null,
   batchItems: [],
@@ -230,8 +266,10 @@ export const useApp = create<AppState>((set, get) => ({
         } else if (p.done) {
           if (key === "transcribeJob" && p.result) {
             try {
-              const segments = JSON.parse(p.result) as Segment[];
-              set({ segments, transcribeJob: null });
+              const { segments, waveform, waveformStep, waveformOffset } = JSON.parse(
+                p.result
+              ) as TranscribeResult;
+              set({ segments, waveform, waveformStep, waveformOffset, transcribeJob: null });
             } catch {
               set({ transcribeJob: null, error: "Failed to parse transcript" });
             }
@@ -245,6 +283,7 @@ export const useApp = create<AppState>((set, get) => ({
                 analyzeJob: null,
                 selectedRanks: highlights.map((h) => h.rank),
                 clipOverrides: {},
+                clipNames: {},
                 editingRank: null,
               });
             } catch {
@@ -297,12 +336,17 @@ export const useApp = create<AppState>((set, get) => ({
         videoPath: path,
         previewSrc,
         mediaInfo,
+        projectPath: null,
         segments: [],
         transcriptSourceRank: null,
+        waveform: [],
+        waveformStep: 0.01,
+        waveformOffset: 0,
         highlights: [],
         activeRange: null,
         selectedRanks: [],
         clipOverrides: {},
+        clipNames: {},
         editingRank: null,
         batch: null,
         exportDone: null,
@@ -320,12 +364,17 @@ export const useApp = create<AppState>((set, get) => ({
       videoPath: null,
       previewSrc: null,
       mediaInfo: null,
+      projectPath: null,
       segments: [],
       transcriptSourceRank: null,
+      waveform: [],
+      waveformStep: 0.01,
+      waveformOffset: 0,
       highlights: [],
       activeRange: null,
       selectedRanks: [],
       clipOverrides: {},
+      clipNames: {},
       editingRank: null,
       batch: null,
       transcribeJob: null,
@@ -341,7 +390,14 @@ export const useApp = create<AppState>((set, get) => ({
     try {
       // editingRank is only set while a highlight's trim controls are open,
       // so this correctly clears to null for a plain whole-clip transcribe.
-      set({ error: null, segments: [], transcriptSourceRank: editingRank });
+      set({
+        error: null,
+        segments: [],
+        transcriptSourceRank: editingRank,
+        waveform: [],
+        waveformStep: 0.01,
+        waveformOffset: 0,
+      });
       const id = await invoke<string>("transcribe", {
         path: videoPath,
         model: selectedModel,
@@ -510,6 +566,16 @@ export const useApp = create<AppState>((set, get) => ({
     });
   },
 
+  /** Names a highlight for display and as its export filename. An empty/whitespace
+   * name clears the override, falling back to the auto-generated "_highlight_NN". */
+  setClipName: (rank, name) => {
+    const trimmed = name.trim();
+    const next = { ...get().clipNames };
+    if (trimmed) next[rank] = trimmed;
+    else delete next[rank];
+    set({ clipNames: next });
+  },
+
   /**
    * For every checked highlight (using the user's extended/trimmed range if they
    * adjusted it) — transcribe just that window, build captions in the current
@@ -522,7 +588,7 @@ export const useApp = create<AppState>((set, get) => ({
     resolutionId = "source",
     fitMode: "fill" | "fit" = "fill"
   ) => {
-    const { highlights, videoPath, mediaInfo, selectedModel, selectedRanks, clipOverrides } =
+    const { highlights, videoPath, mediaInfo, selectedModel, selectedRanks, clipOverrides, clipNames } =
       get();
     const clips = highlights.filter((h) => selectedRanks.includes(h.rank));
     if (!videoPath || !mediaInfo || clips.length === 0) return;
@@ -538,6 +604,7 @@ export const useApp = create<AppState>((set, get) => ({
         .pop()
         ?.replace(/\.[^.]+$/, "") ?? "clip";
     const total = clips.length;
+    const usedNames = new Set<string>();
 
     try {
       for (let i = 0; i < clips.length; i++) {
@@ -555,7 +622,7 @@ export const useApp = create<AppState>((set, get) => ({
           end: range.end,
         });
         const result = await waitForJob(tid);
-        const segments = result ? (JSON.parse(result) as Segment[]) : [];
+        const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
         const segs = censor ? applyCensor(segments) : segments;
         const pages = shiftPages(paginate(segs, style.maxWordsPerPage), range.start);
         const ass =
@@ -567,7 +634,18 @@ export const useApp = create<AppState>((set, get) => ({
           batch: { current: i + 1, total, stage: "exporting", outputDir },
         });
         const n = String(h.rank).padStart(2, "0");
-        const outputPath = `${outputDir}/${baseName}_highlight_${n}.mp4`;
+        const fallback = `${baseName}_highlight_${n}`;
+        const custom = clipNames[h.rank];
+        let stem = custom ? sanitizeFilename(custom, fallback) : fallback;
+        // Guard against two clips landing on the same name (custom names collide,
+        // or a sanitized name happens to match another) — never silently overwrite.
+        if (usedNames.has(stem)) {
+          let i2 = 2;
+          while (usedNames.has(`${stem} (${i2})`)) i2++;
+          stem = `${stem} (${i2})`;
+        }
+        usedNames.add(stem);
+        const outputPath = `${outputDir}/${stem}.mp4`;
         const eid = await invoke<string>("export_video", {
           req: {
             inputPath: videoPath,
@@ -638,7 +716,7 @@ export const useApp = create<AppState>((set, get) => ({
           end: range.end,
         });
         const result = await waitForJob(tid);
-        const segments = result ? (JSON.parse(result) as Segment[]) : [];
+        const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
         const segs = censor ? applyCensor(segments) : segments;
         const pages = paginate(segs, style.maxWordsPerPage);
         // source time t -> (t - range.start) + cumulative on the compiled timeline
@@ -757,7 +835,7 @@ export const useApp = create<AppState>((set, get) => ({
         );
         currentBatchJobId = null;
 
-        const segments = result ? (JSON.parse(result) as Segment[]) : [];
+        const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
         const segs = censor ? applyCensor(segments) : segments;
         const pages = paginate(segs, style.maxWordsPerPage);
         const outW = targetW ?? info.width;
@@ -819,4 +897,98 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  saveProject: async () => {
+    const existing = get().projectPath;
+    if (existing) return get()._writeProject(existing);
+    return get().saveProjectAs();
+  },
+
+  saveProjectAs: async () => {
+    const { videoPath } = get();
+    if (!videoPath) return false;
+    const base =
+      videoPath
+        .split(/[/\\]/)
+        .pop()
+        ?.replace(/\.[^.]+$/, "") ?? "project";
+    const path = await pickProjectSavePath(`${base}.ccproj`);
+    if (!path) return false;
+    return get()._writeProject(path);
+  },
+
+  // Not part of AppState's public surface (no UI calls it directly) — shared
+  // write path for saveProject/saveProjectAs once a target path is known.
+  _writeProject: async (path: string) => {
+    const {
+      videoPath,
+      selectedModel,
+      style,
+      censor,
+      highlights,
+      clipOverrides,
+      clipNames,
+      selectedRanks,
+      activeRange,
+      segments,
+      transcriptSourceRank,
+      waveform,
+      waveformStep,
+      waveformOffset,
+    } = get();
+    if (!videoPath) return false;
+    const project: ProjectFile = {
+      version: 1,
+      videoPath,
+      selectedModel,
+      style,
+      censor,
+      highlights,
+      clipOverrides,
+      clipNames,
+      selectedRanks,
+      activeRange,
+      segments,
+      transcriptSourceRank,
+      waveform,
+      waveformStep,
+      waveformOffset,
+    };
+    try {
+      await invoke("write_text_file", { path, content: JSON.stringify(project, null, 2) });
+      set({ projectPath: path });
+      return true;
+    } catch (e) {
+      set({ error: String(e) });
+      return false;
+    }
+  },
+
+  loadProject: async () => {
+    const path = await pickProjectOpenPath();
+    if (!path) return;
+    try {
+      const raw = await invoke<string>("read_text_file", { path });
+      const project = JSON.parse(raw) as ProjectFile;
+      await get().openVideo(project.videoPath); // resets to a clean slate for that video
+      set({
+        selectedModel: project.selectedModel ?? get().selectedModel,
+        style: project.style ?? get().style,
+        censor: project.censor ?? get().censor,
+        highlights: project.highlights ?? [],
+        clipOverrides: project.clipOverrides ?? {},
+        clipNames: project.clipNames ?? {},
+        selectedRanks: project.selectedRanks ?? [],
+        activeRange: project.activeRange ?? null,
+        segments: project.segments ?? [],
+        transcriptSourceRank: project.transcriptSourceRank ?? null,
+        waveform: project.waveform ?? [],
+        waveformStep: project.waveformStep ?? 0.01,
+        waveformOffset: project.waveformOffset ?? 0,
+        projectPath: path,
+      });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
 }));

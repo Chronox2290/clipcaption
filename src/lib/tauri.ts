@@ -67,3 +67,23 @@ export async function pickSavePath(defaultName: string): Promise<string | null> 
   });
   return res ?? null;
 }
+
+export async function pickProjectSavePath(defaultName: string): Promise<string | null> {
+  if (!isTauri) return null;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const res = await save({
+    defaultPath: defaultName,
+    filters: [{ name: "ClipCaption project", extensions: ["ccproj"] }],
+  });
+  return res ?? null;
+}
+
+export async function pickProjectOpenPath(): Promise<string | null> {
+  if (!isTauri) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({
+    multiple: false,
+    filters: [{ name: "ClipCaption project", extensions: ["ccproj"] }],
+  });
+  return typeof res === "string" ? res : null;
+}

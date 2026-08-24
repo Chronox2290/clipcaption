@@ -21,6 +21,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
     setActiveRange,
     selectedRanks,
     clipOverrides,
+    clipNames,
     editingRank,
     toggleHighlightSelected,
     selectAllHighlights,
@@ -28,6 +29,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
     startEditingHighlight,
     stopEditingHighlight,
     adjustHighlightRange,
+    setClipName,
     batch,
     exportSelectedHighlights,
     compileSelectedHighlights,
@@ -207,6 +209,14 @@ export default function HighlightsPanel({ videoRef }: Props) {
                   {sortMode === "hype" && <span className="hl-hype-tag"> · 🔥{h.rank}</span>}
                 </span>
                 <div className="hl-mid">
+                  <input
+                    className="hl-name-input"
+                    value={clipNames[h.rank] ?? ""}
+                    placeholder={`Clip ${chrono[h.rank]} (name it, or keep the default filename)`}
+                    title="Custom name — used as the exported file's name"
+                    onChange={(e) => setClipName(h.rank, e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  />
                   <div className="hl-times">
                     {fmtTime(range.start)} – {fmtTime(range.end)}
                     <span className="muted"> · {(range.end - range.start).toFixed(0)}s</span>

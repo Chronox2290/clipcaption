@@ -9,6 +9,7 @@ export default function Library() {
   const setSelectedModel = useApp((s) => s.setSelectedModel);
   const downloadModel = useApp((s) => s.downloadModel);
   const modelJob = useApp((s) => s.modelJob);
+  const loadProject = useApp((s) => s.loadProject);
 
   const selected = models.find((m) => m.name === selectedModel);
 
@@ -55,6 +56,15 @@ export default function Library() {
           <span>
             <strong>Batch process clips</strong>
             <span className="muted"> — caption + compress a whole folder in one go</span>
+          </span>
+          <span className="batch-launch-arrow">→</span>
+        </button>
+
+        <button className="batch-launch" onClick={() => void loadProject()}>
+          <span className="batch-launch-icon">📁</span>
+          <span>
+            <strong>Open a saved project</strong>
+            <span className="muted"> — resume highlights, names, and captions from a .ccproj file</span>
           </span>
           <span className="batch-launch-arrow">→</span>
         </button>

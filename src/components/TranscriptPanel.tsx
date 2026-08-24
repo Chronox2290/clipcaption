@@ -2,6 +2,7 @@ import { useState, type RefObject } from "react";
 import { useApp } from "../store";
 import { fmtTime, isProfane } from "../lib/captions";
 import { chronoPositions } from "../lib/highlights";
+import WaveformEditor from "./WaveformEditor";
 
 interface Props {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -104,8 +105,8 @@ export default function TranscriptPanel({ videoRef }: Props) {
         <span>Censor profanity (f***)</span>
       </label>
       <p className="muted small">
-        Click a word to jump the preview there. If a caption's timing is off, scrub/play to the
-        exact moment it's spoken, then use “here” below to snap it.
+        Click a word to jump the preview there. Drag a word directly on the waveform below it to
+        retime it — drag an edge to move just that boundary, or the middle to shift the whole word.
       </p>
       <div className="transcript-list">
         {segments.map((seg) => (
@@ -167,10 +168,18 @@ export default function TranscriptPanel({ videoRef }: Props) {
                 ))}
               </div>
 
+              <WaveformEditor
+                segId={seg.id}
+                words={seg.words}
+                activeIndex={tuning?.segId === seg.id ? tuning.idx : null}
+                onSelectWord={(idx) => setTuning({ segId: seg.id, idx })}
+                videoRef={videoRef}
+              />
+
               {tuning?.segId === seg.id && seg.words[tuning.idx] && (
                 <div className="word-tune">
                   <div className="word-tune-head">
-                    <span className="muted small">Tuning “{seg.words[tuning.idx].text}”</span>
+                    <span className="muted small">Tuning “{seg.words[tuning.idx].text}” — drag it on the waveform, or nudge precisely:</span>
                     <button className="btn btn-ghost btn-small" onClick={() => setTuning(null)}>
                       Done
                     </button>

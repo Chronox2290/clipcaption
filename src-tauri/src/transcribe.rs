@@ -21,6 +21,24 @@ pub struct Segment {
     pub words: Vec<WordSpan>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TranscribeResult {
+    segments: Vec<Segment>,
+    /// RMS amplitude (0..1) per bucket, for drawing a waveform in the word
+    /// timing editor — computed from the same 16kHz mono audio already
+    /// extracted for Whisper, so it's free (no extra ffmpeg pass).
+    waveform: Vec<f32>,
+    /// Seconds spanned by each `waveform` bucket.
+    waveform_step: f64,
+    /// Full-video-timeline seconds that `waveform[0]` corresponds to (i.e.
+    /// the same `offset` already added back onto word start/end times when a
+    /// range was transcribed). The waveform editor needs this to line the
+    /// waveform up with word times when only a highlight (not the whole
+    /// clip) was transcribed.
+    waveform_offset: f64,
+}
+
 #[derive(Deserialize)]
 struct WhisperOut {
     transcription: Vec<WSeg>,
@@ -113,6 +131,15 @@ fn run_inner(
             "1",
             "-ar",
             "16000",
+            // Game clips bury speech under music/SFX far more than the clean
+            // audio Whisper is trained on. A high-pass to cut sub-vocal
+            // rumble/bass, plus dynamic normalization to lift quiet speech
+            // relative to loud game audio, measurably helps both what
+            // Whisper transcribes and how confidently (hence accurately) it
+            // times each word — deliberately conservative (no spectral
+            // denoiser) so it can't introduce its own artifacts.
+            "-af",
+            "highpass=f=80,dynaudnorm=f=150:g=15:p=0.9",
             "-c:a",
             "pcm_s16le",
             wav.to_string_lossy().as_ref(),
@@ -148,6 +175,16 @@ fn run_inner(
             "-t",
             &threads,
             "-pp", // print progress
+            // Cross-attention DTW alignment for word timestamps — this is
+            // the single biggest lever for accurate word timing. Without it,
+            // whisper.cpp buckets words into ~20ms encoder-frame timestamp
+            // tokens, which is noticeably imprecise; -dtw instead derives
+            // each word's timing from the model's own attention weights.
+            // Every model this app offers (tiny.en/base.en/small.en/
+            // medium.en) has a matching built-in alignment-head preset, and
+            // it needs no extra download — just this flag.
+            "-dtw",
+            model,
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -221,10 +258,101 @@ fn run_inner(
             }
         }
     }
+
+    // Waveform for the timing editor, read from the WAV before we delete it.
+    // Cap total buckets so an hours-long whole-clip transcribe doesn't
+    // balloon the JSON payload — short clips get fine ~10ms resolution,
+    // long ones scale down gracefully.
+    let (waveform, waveform_step) = read_wav_peaks(&wav, 20_000).unwrap_or_default();
+
     let _ = std::fs::remove_file(&wav);
     let _ = std::fs::remove_file(&json_path);
 
-    serde_json::to_string(&segments).map_err(|e| e.to_string())
+    serde_json::to_string(&TranscribeResult {
+        segments,
+        waveform,
+        waveform_step,
+        waveform_offset: offset,
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// Reads a mono 16-bit PCM WAV file and computes an RMS amplitude envelope
+/// (0..1, mildly gamma-boosted so quiet speech is still visible) bucketed at
+/// up to `max_buckets` buckets across the file's duration. Returns
+/// (peaks, seconds_per_bucket); (vec![], 0.0) on any parse failure so a
+/// waveform read glitch never breaks the transcript itself.
+fn read_wav_peaks(path: &std::path::Path, max_buckets: usize) -> Option<(Vec<f32>, f64)> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return None;
+    }
+
+    let mut pos = 12usize;
+    let mut sample_rate: u32 = 16000;
+    let mut bits_per_sample: u16 = 16;
+    let mut channels: u16 = 1;
+    let mut data: Option<&[u8]> = None;
+
+    while pos + 8 <= bytes.len() {
+        let chunk_id = &bytes[pos..pos + 4];
+        let chunk_size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().ok()?) as usize;
+        let body_start = pos + 8;
+        let body_end = (body_start + chunk_size).min(bytes.len());
+        let body = &bytes[body_start..body_end];
+
+        if chunk_id == b"fmt " && body.len() >= 16 {
+            channels = u16::from_le_bytes(body[2..4].try_into().ok()?);
+            sample_rate = u32::from_le_bytes(body[4..8].try_into().ok()?);
+            bits_per_sample = u16::from_le_bytes(body[14..16].try_into().ok()?);
+        } else if chunk_id == b"data" {
+            data = Some(body);
+        }
+
+        // chunks are word-aligned (padded to an even size)
+        pos = body_start + chunk_size + (chunk_size % 2);
+    }
+
+    let data = data?;
+    if bits_per_sample != 16 || channels == 0 || sample_rate == 0 {
+        return None; // matches the format we always ask ffmpeg for
+    }
+
+    let samples: Vec<i16> = data
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]))
+        .collect();
+    let frames = samples.len() / channels as usize;
+    if frames == 0 {
+        return Some((vec![], 0.0));
+    }
+
+    let duration = frames as f64 / sample_rate as f64;
+    let step = (duration / max_buckets as f64).max(0.01);
+    let frames_per_bucket = ((step * sample_rate as f64).round() as usize).max(1);
+
+    let mut peaks = Vec::with_capacity(frames / frames_per_bucket + 1);
+    let mut i = 0usize;
+    while i < frames {
+        let end = (i + frames_per_bucket).min(frames);
+        let mut sum_sq = 0f64;
+        let mut n = 0usize;
+        for f in i..end {
+            // mono-mix all channels for this frame
+            let mut v = 0f64;
+            for c in 0..channels as usize {
+                v += samples[f * channels as usize + c] as f64 / 32768.0;
+            }
+            v /= channels as f64;
+            sum_sq += v * v;
+            n += 1;
+        }
+        let rms = if n > 0 { (sum_sq / n as f64).sqrt() } else { 0.0 };
+        peaks.push((rms.sqrt().min(1.0)) as f32); // sqrt: gently lift quiet parts for visibility
+        i = end;
+    }
+
+    Some((peaks, step))
 }
 
 fn build_segments(out: WhisperOut) -> Vec<Segment> {
@@ -296,4 +424,113 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
     }
 
     segments
+}
+
+#[cfg(test)]
+mod waveform_tests {
+    use super::*;
+
+    /// Builds a minimal valid mono 16-bit PCM WAV file in memory from raw
+    /// i16 samples, matching exactly what ffmpeg's `-c:a pcm_s16le` produces.
+    fn make_wav(sample_rate: u32, samples: &[i16]) -> Vec<u8> {
+        let data_bytes: Vec<u8> = samples.iter().flat_map(|s| s.to_le_bytes()).collect();
+        let byte_rate = sample_rate * 2; // mono * 16-bit
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"RIFF");
+        buf.extend_from_slice(&(36 + data_bytes.len() as u32).to_le_bytes());
+        buf.extend_from_slice(b"WAVE");
+        buf.extend_from_slice(b"fmt ");
+        buf.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
+        buf.extend_from_slice(&1u16.to_le_bytes()); // PCM
+        buf.extend_from_slice(&1u16.to_le_bytes()); // mono
+        buf.extend_from_slice(&sample_rate.to_le_bytes());
+        buf.extend_from_slice(&byte_rate.to_le_bytes());
+        buf.extend_from_slice(&2u16.to_le_bytes()); // block align
+        buf.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        buf.extend_from_slice(b"data");
+        buf.extend_from_slice(&(data_bytes.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&data_bytes);
+        buf
+    }
+
+    fn write_temp(bytes: &[u8], name: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("clipcaption_test_{name}_{:p}.wav", bytes));
+        std::fs::write(&p, bytes).unwrap();
+        p
+    }
+
+    #[test]
+    fn silence_produces_near_zero_peaks() {
+        let samples = vec![0i16; 16000]; // 1s of silence at 16kHz
+        let path = write_temp(&make_wav(16000, &samples), "silence");
+        let (peaks, step) = read_wav_peaks(&path, 100).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(!peaks.is_empty());
+        assert!(peaks.iter().all(|&p| p < 0.001), "silence should read as ~0: {peaks:?}");
+        assert!(step > 0.0);
+    }
+
+    #[test]
+    fn full_scale_tone_produces_peaks_near_one() {
+        // alternating +/- full scale is the loudest possible 16-bit signal
+        let samples: Vec<i16> = (0..16000).map(|i| if i % 2 == 0 { i16::MAX } else { i16::MIN }).collect();
+        let path = write_temp(&make_wav(16000, &samples), "loud");
+        let (peaks, _) = read_wav_peaks(&path, 100).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(peaks.iter().all(|&p| p > 0.9), "full-scale signal should read near 1.0: {peaks:?}");
+    }
+
+    #[test]
+    fn bucket_count_is_capped_and_step_scales_with_duration() {
+        let samples = vec![100i16; 16000 * 10]; // 10s
+        let path = write_temp(&make_wav(16000, &samples), "long");
+        let (peaks, step) = read_wav_peaks(&path, 50).unwrap();
+        let _ = std::fs::remove_file(&path);
+        // ~10s / 50 buckets => step ~0.2s, so bucket count should land near 50
+        assert!(peaks.len() <= 55 && peaks.len() >= 45, "expected ~50 buckets, got {}", peaks.len());
+        assert!((step - 0.2).abs() < 0.02, "expected ~0.2s step, got {step}");
+    }
+
+    #[test]
+    fn short_clip_gets_fine_resolution_not_forced_to_max_buckets() {
+        let samples = vec![100i16; 1600]; // 0.1s
+        let path = write_temp(&make_wav(16000, &samples), "short");
+        let (_, step) = read_wav_peaks(&path, 20_000).unwrap();
+        let _ = std::fs::remove_file(&path);
+        // step is clamped to a 10ms floor, not stretched down to fill 20,000 buckets
+        assert!((step - 0.01).abs() < 1e-9, "expected the 10ms floor, got {step}");
+    }
+
+    #[test]
+    fn skips_unknown_chunks_like_ffmpegs_list_chunk() {
+        // Real ffmpeg output (verified against the actual binary) inserts a
+        // LIST chunk between fmt and data — the parser must skip over
+        // unrecognized chunks by their declared size, not assume a fixed
+        // fmt-then-data layout.
+        let samples = vec![1000i16; 1600];
+        let mut wav = make_wav(16000, &samples);
+        // splice a fake 10-byte LIST chunk right after the fmt chunk (at byte 36,
+        // same position ffmpeg puts its LIST chunk in the real file above)
+        let mut list_chunk = b"LIST".to_vec();
+        list_chunk.extend_from_slice(&10u32.to_le_bytes());
+        list_chunk.extend_from_slice(&[0u8; 10]);
+        wav.splice(36..36, list_chunk);
+        // fix up the RIFF size to account for the inserted bytes
+        let new_riff_size = (wav.len() - 8) as u32;
+        wav[4..8].copy_from_slice(&new_riff_size.to_le_bytes());
+
+        let path = write_temp(&wav, "list_chunk");
+        let (peaks, _) = read_wav_peaks(&path, 100).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert!(!peaks.is_empty());
+        assert!(peaks.iter().any(|&p| p > 0.0), "should still find real audio past the LIST chunk");
+    }
+
+    #[test]
+    fn garbage_input_returns_none_not_a_panic() {
+        let path = write_temp(b"not a wav file at all", "garbage");
+        let result = read_wav_peaks(&path, 100);
+        let _ = std::fs::remove_file(&path);
+        assert!(result.is_none());
+    }
 }

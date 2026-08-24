@@ -114,6 +114,20 @@ fn cancel_job(jobs: State<Jobs>, id: String) -> Result<(), String> {
     Ok(())
 }
 
+// Generic small-file read/write, used for saving/loading a .ccproj project
+// file (JSON built entirely on the frontend). Deliberately not a real file
+// picker/browser — just enough to persist and restore one JSON document at a
+// path the user already chose via the dialog plugin.
+#[tauri::command]
+fn write_text_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content).map_err(|e| format!("Could not save to {path}: {e}"))
+}
+
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| format!("Could not read {path}: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -135,7 +149,9 @@ pub fn run() {
             ensure_model,
             transcribe,
             export_video,
-            cancel_job
+            cancel_job,
+            write_text_file,
+            read_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipCaption");

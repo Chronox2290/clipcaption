@@ -10,8 +10,27 @@ import { fmtTime } from "../lib/captions";
 type Tab = "transcript" | "highlights" | "style" | "export";
 
 export default function Editor() {
-  const { videoPath, previewSrc, mediaInfo, segments, style, censor, closeVideo, activeRange } =
-    useApp();
+  const {
+    videoPath,
+    previewSrc,
+    mediaInfo,
+    segments,
+    style,
+    censor,
+    closeVideo,
+    activeRange,
+    projectPath,
+    saveProject,
+    saveProjectAs,
+  } = useApp();
+  const [savedFlash, setSavedFlash] = useState(false);
+  const doSave = async () => {
+    const ok = await saveProject();
+    if (ok) {
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1800);
+    }
+  };
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
   const [tab, setTab] = useState<Tab>("transcript");
@@ -114,6 +133,14 @@ export default function Editor() {
             {(mediaInfo.sizeBytes / 1024 / 1024).toFixed(1)} MB
           </span>
         )}
+        <span className="ed-header-spacer" />
+        {savedFlash && <span className="ed-saved-flash">✔ Saved</span>}
+        <button className="btn btn-ghost btn-small" onClick={doSave} title={projectPath ?? "Save the highlights, names, style, and transcript so far"}>
+          💾 Save Project
+        </button>
+        <button className="btn btn-ghost btn-small" onClick={() => void saveProjectAs()}>
+          Save As…
+        </button>
       </header>
 
       <div className="ed-body">
