@@ -1,28 +1,19 @@
 @echo off
 cd /d "%~dp0"
 
-echo Building a standalone ClipCaption installer...
-echo This does a full optimized release build (small, fast binary) so it
-echo takes longer than the dev mode you're used to — several minutes,
-echo maybe more on the first run. Grab a coffee.
+echo Building a standalone ClipCaption installer on this PC.
+echo This is a full optimized release build, so it takes several minutes -
+echo much less if you've built before, since it reuses what it can.
+echo.
+echo For everyday testing you probably want RUN.cmd instead - it launches
+echo the app straight away without building an installer at all.
 echo.
 
-call npm.cmd run tauri build
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts/build-local.ps1"
 
 if errorlevel 1 (
     echo.
-    echo Build failed — scroll up for the error. Common cause: the
-    echo dev app (RUN.cmd) still running in another window. Close it
-    echo and try again.
-    pause
-    exit /b
+    echo Build failed - scroll up for the error.
 )
 
-echo.
-echo Done. Your installer is here:
-echo   src-tauri\target\release\bundle\nsis\
-echo.
-echo Run that .exe on this or any other Windows PC to install ClipCaption
-echo as a normal desktop app — Start Menu shortcut, uninstaller, no
-echo terminal window required.
 pause
