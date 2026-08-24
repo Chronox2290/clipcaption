@@ -1,5 +1,5 @@
-# ClipCaption one-shot setup: Rust + VS Build Tools + npm deps, then launch.
-# Run via SETUP.cmd (double-click) — logs everything to setup-log.txt.
+﻿# ClipCaption one-shot setup: Rust + VS Build Tools + npm deps, then launch.
+# Run via SETUP.cmd (double-click) - logs everything to setup-log.txt.
 
 $ErrorActionPreference = "Continue"
 Set-Location $PSScriptRoot

@@ -1,4 +1,4 @@
-# Downloads the sidecar binaries (ffmpeg, ffprobe, whisper-cli) for Windows x64
+﻿# Downloads the sidecar binaries (ffmpeg, ffprobe, whisper-cli) for Windows x64
 # and places them in src-tauri/binaries with the target-triple names Tauri expects.
 # Run from the repo root:  powershell -ExecutionPolicy Bypass -File scripts/get-sidecars.ps1
 
@@ -53,7 +53,7 @@ if (Done "whisper-cli") {
     if (Test-Path $wDir) { Remove-Item -Recurse -Force $wDir }
     Expand-Archive -Path $wZip -DestinationPath $wDir
     # IMPORTANT: the zip also ships deprecation STUBS (e.g. main.exe) that just
-    # print a warning and exit 1 — match the real whisper-cli.exe exactly.
+    # print a warning and exit 1 - match the real whisper-cli.exe exactly.
     $cli = Get-ChildItem -Path $wDir -Recurse -Filter "whisper-cli.exe" | Select-Object -First 1
     if (-not $cli) {
         $cli = Get-ChildItem -Path $wDir -Recurse -Filter "whisper-command.exe" | Select-Object -First 1
