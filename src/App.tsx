@@ -4,6 +4,7 @@ import { isTauri } from "./lib/tauri";
 import Library from "./screens/Library";
 import Editor from "./screens/Editor";
 import BatchScreen from "./screens/BatchScreen";
+import UpdateBanner from "./components/UpdateBanner";
 
 export default function App() {
   const screen = useApp((s) => s.screen);
@@ -36,6 +37,7 @@ export default function App() {
       {screen === "library" && <Library />}
       {screen === "editor" && <Editor />}
       {screen === "batch" && <BatchScreen />}
+      <UpdateBanner />
       {error && (
         <div className="toast toast-error" role="alert">
           <span>⚠ {error}</span>

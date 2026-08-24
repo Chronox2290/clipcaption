@@ -1,0 +1,51 @@
+name: Release
+
+# Builds a signed Windows installer + the updater manifest (latest.json) and
+# attaches them to a GitHub Release whenever a version tag (v1.2.3) is pushed.
+# tauri-plugin-updater (wired up in the app) then finds new releases here
+# automatically — see src/lib.rs / src/components/UpdateBanner.tsx.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Fetch sidecar binaries (ffmpeg, ffprobe, whisper-cli)
+        run: powershell -ExecutionPolicy Bypass -File scripts/get-sidecars.ps1
+
+      - name: Build + release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "ClipCaption ${{ github.ref_name }}"
+          releaseBody: |
+            See clipcaption/05-build-log.md (in the Mini Programming Fun project) for what changed.
+          # Left as a draft on purpose: the workflow builds and uploads
+          # everything, but nothing goes live for auto-update until you open
+          # the release on GitHub and click "Publish release" yourself — a
+          # deliberate checkpoint before every user's app auto-updates.
+          releaseDraft: true
+          prerelease: false

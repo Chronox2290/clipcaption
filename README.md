@@ -101,6 +101,42 @@ Both the Export tab and Batch mode share two settings (remembered between runs):
   exports are capped with VBV (maxrate/bufsize) to stay under the limit in a
   single pass; x264 keeps its more accurate two-pass mode.
 
+## Installer + auto-updates
+
+`npm run tauri build` (or **BUILD-EXE.cmd**) already produces a real NSIS
+installer. On top of that, the app can now check GitHub Releases for new
+versions and update itself in place — no reinstalling, no losing your
+downloaded Whisper models.
+
+One-time setup, from this folder:
+
+1. **Push this repo to GitHub** (public — needed for the update check to
+   work without extra hosting): run **GITHUB-SETUP.cmd**, which creates an
+   empty repo at github.com/new for you to paste in, then pushes.
+2. **Add two repository secrets** — GitHub → your repo → Settings → Secrets
+   and variables → Actions → "New repository secret":
+   - `TAURI_SIGNING_PRIVATE_KEY` — contents of the private key file you were
+     given alongside this update (`clipcaption.key`)
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — the password that came with it
+   Keep both of those out of the repo itself — they're what proves an update
+   really came from you, so GitHub's encrypted secrets store is where they
+   belong, not a committed file. (That's also why `signing-key/` is
+   gitignored.)
+
+From then on, cutting a release is: **RELEASE.cmd** → enter a version number
+(e.g. `0.2.0`) → it bumps the version, commits, tags, and pushes. That tag
+push triggers `.github/workflows/release.yml` on GitHub, which builds a
+signed Windows installer on a clean `windows-latest` runner and uploads it as
+a **draft** release. Open the Releases page and click **Publish** when you're
+happy with it — that's the deliberate go-live step; nothing auto-updates
+before that.
+
+Already-installed copies of ClipCaption check for updates ~2.5s after launch
+(quietly — no banner if you're current) and via the "Check for updates"
+button on the home screen. Finding one shows a banner with **Update &
+restart**, which downloads, verifies the signature against the public key
+baked into the app, installs, and relaunches.
+
 ## Roadmap
 
 See the project docs (feature brainstorm + architecture spec): profanity

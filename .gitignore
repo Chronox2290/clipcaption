@@ -10,3 +10,7 @@ src-tauri/binaries/*-unknown-linux-gnu
 *.bundle
 whisper-diag.txt
 setup-log.txt
+# Updater signing keypair — the PRIVATE half must never be committed. It's
+# delivered to you separately and only needs to live in GitHub's encrypted
+# Actions secrets (see clipcaption/05-build-log.md for setup steps).
+signing-key/

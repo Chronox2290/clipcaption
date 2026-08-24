@@ -187,6 +187,13 @@ select {
   font-size: 13px;
 }
 
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
 .lib-main {
   display: flex;
   flex-direction: column;
@@ -1314,6 +1321,10 @@ kbd {
 }
 .toast-error {
   border-color: rgba(255, 92, 122, 0.5);
+}
+.toast-update {
+  border-color: rgba(120, 220, 160, 0.5);
+  align-items: center;
 }
 .toast-error span:first-child {
   max-height: 30vh;

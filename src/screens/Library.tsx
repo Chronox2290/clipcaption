@@ -12,6 +12,9 @@ export default function Library() {
   const loadProject = useApp((s) => s.loadProject);
   const diarizeEnabled = useApp((s) => s.diarizeEnabled);
   const setDiarizeEnabled = useApp((s) => s.setDiarizeEnabled);
+  const appVersion = useApp((s) => s.appVersion);
+  const updateStatus = useApp((s) => s.updateStatus);
+  const checkForUpdates = useApp((s) => s.checkForUpdates);
 
   const selected = models.find((m) => m.name === selectedModel);
   const pickerModels = models.filter((m) => !m.capabilityOnly);
@@ -32,6 +35,19 @@ export default function Library() {
           <span className="logo-text">ClipCaption</span>
         </div>
         <span className="tagline">local captions for game clips — no uploads, no limits</span>
+        {isTauri && (
+          <div className="version-row">
+            {appVersion && <span className="muted small">v{appVersion}</span>}
+            <button
+              className="btn btn-ghost btn-small"
+              disabled={updateStatus === "checking"}
+              onClick={() => void checkForUpdates(false)}
+            >
+              {updateStatus === "checking" ? "Checking…" : "Check for updates"}
+            </button>
+            {updateStatus === "none" && <span className="muted small">You're up to date.</span>}
+          </div>
+        )}
       </header>
 
       <main className="lib-main">

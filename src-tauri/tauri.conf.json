@@ -32,11 +32,20 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": ["icons/icon.ico", "icons/128x128.png", "icons/32x32.png"],
     "externalBin": [
       "binaries/ffmpeg",
       "binaries/ffprobe",
       "binaries/whisper-cli"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFENkE1QjExNDc2N0FFQzEKUldUQnJtZEhFVnRxSGZLUXlCMWkyejB5TnNlMGhidXdVTTU5a0NkbEhtYkdGV2trK2FxRVFIeEEK",
+      "endpoints": [
+        "https://github.com/Chronox2290/clipcaption/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

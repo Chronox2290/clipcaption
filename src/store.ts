@@ -58,6 +58,14 @@ function waitForJob(
 let currentBatchJobId: string | null = null;
 let batchCancelRequested = false;
 
+// The live Update handle from @tauri-apps/plugin-updater, once a check finds
+// one. It carries a downloadAndInstall() method and isn't plain data, so —
+// same reasoning as pendingJobs above — it lives outside the store instead of
+// in state; only the plain fields the UI needs (version, body, progress) go
+// into AppState.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let pendingUpdate: any = null;
+
 interface AppState {
   screen: "library" | "editor" | "batch";
   error: string | null;
@@ -132,8 +140,22 @@ interface AppState {
 
   recent: string[];
 
+  // auto-update (GitHub Releases via tauri-plugin-updater)
+  appVersion: string | null;
+  updateStatus: "idle" | "checking" | "available" | "none" | "downloading" | "error";
+  updateInfo: { version: string; body: string | null } | null;
+  updateProgress: number | null;
+  updateError: string | null;
+
   // actions
   init: () => Promise<void>;
+  /** silent=true (used for the automatic startup check) stays quiet when
+   * there's nothing new or the check fails — no point nagging the user with
+   * a network hiccup they didn't ask about. The manual "Check for updates"
+   * button passes silent=false so it always reports something. */
+  checkForUpdates: (silent?: boolean) => Promise<void>;
+  installUpdate: () => Promise<void>;
+  dismissUpdateBanner: () => void;
   openVideo: (path: string) => Promise<void>;
   closeVideo: () => void;
   transcribe: () => Promise<void>;
@@ -252,8 +274,25 @@ export const useApp = create<AppState>((set, get) => ({
   })(),
   recent: loadRecent(),
 
+  appVersion: null,
+  updateStatus: "idle",
+  updateInfo: null,
+  updateProgress: null,
+  updateError: null,
+
   init: async () => {
     if (!isTauri) return;
+    void (async () => {
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        set({ appVersion: await getVersion() });
+      } catch {
+        // non-essential — version just won't show in the UI
+      }
+    })();
+    // Give the window a moment to paint before doing a network check no one
+    // asked for yet; stays silent unless it actually finds something.
+    setTimeout(() => void get().checkForUpdates(true), 2500);
     await listenJobProgress((p: JobProgressPayload) => {
       // 1) jobs awaited as promises (batch pipeline)
       const pending = pendingJobs.get(p.id);
@@ -970,6 +1009,56 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  checkForUpdates: async (silent = false) => {
+    if (!isTauri) return;
+    set({ updateStatus: "checking", updateError: null });
+    try {
+      const { check } = await import("@tauri-apps/plugin-updater");
+      const update = await check();
+      if (update) {
+        pendingUpdate = update;
+        set({
+          updateStatus: "available",
+          updateInfo: { version: update.version, body: update.body ?? null },
+        });
+      } else {
+        pendingUpdate = null;
+        set({ updateStatus: silent ? "idle" : "none", updateInfo: null });
+      }
+    } catch (e) {
+      pendingUpdate = null;
+      set({ updateStatus: silent ? "idle" : "error", updateError: String(e) });
+    }
+  },
+
+  installUpdate: async () => {
+    if (!pendingUpdate) return;
+    set({ updateStatus: "downloading", updateProgress: null, updateError: null });
+    try {
+      let total = 0;
+      let done = 0;
+      await pendingUpdate.downloadAndInstall(
+        (event: { event: string; data?: { contentLength?: number; chunkLength?: number } }) => {
+          if (event.event === "Started") {
+            total = event.data?.contentLength ?? 0;
+            set({ updateProgress: total ? 0 : null });
+          } else if (event.event === "Progress") {
+            done += event.data?.chunkLength ?? 0;
+            set({ updateProgress: total ? Math.min(99, Math.round((done / total) * 100)) : null });
+          } else if (event.event === "Finished") {
+            set({ updateProgress: 100 });
+          }
+        }
+      );
+      const { relaunch } = await import("@tauri-apps/plugin-process");
+      await relaunch();
+    } catch (e) {
+      set({ updateStatus: "error", updateError: String(e) });
+    }
+  },
+
+  dismissUpdateBanner: () => set({ updateStatus: "idle" }),
 
   saveProject: async () => {
     const existing = get().projectPath;
