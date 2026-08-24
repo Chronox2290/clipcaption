@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store";
 import CaptionOverlay from "../components/CaptionOverlay";
+import MainWaveform from "../components/MainWaveform";
 import TranscriptPanel from "../components/TranscriptPanel";
 import StylePanel from "../components/StylePanel";
 import ExportDrawer from "../components/ExportDrawer";
@@ -204,6 +205,8 @@ export default function Editor() {
             <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> seek 5s
             <span className="kbd-hint-shift"> (+ Shift for 1s)</span>
           </p>
+
+          <MainWaveform videoRef={videoRef} />
         </div>
 
         <aside className="ed-side">

@@ -611,6 +611,62 @@ kbd {
   cursor: pointer;
   touch-action: none;
 }
+
+.main-waveform {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mw-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.mw-toolbar .muted {
+  flex: 1;
+  min-width: 0;
+}
+.mw-zoom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.mw-zoom-val {
+  min-width: 46px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.mw-wrap {
+  width: 100%;
+}
+.mw-insert-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(255, 196, 84, 0.08);
+  border: 1px solid rgba(255, 196, 84, 0.35);
+}
+.mw-insert-bar .muted {
+  white-space: nowrap;
+}
+.mw-insert-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg0);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 13px;
+}
+.mw-insert-input:focus {
+  outline: none;
+  border-color: #ffc454;
+}
 .word-tune {
   display: flex;
   flex-direction: column;

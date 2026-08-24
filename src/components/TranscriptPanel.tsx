@@ -1,8 +1,7 @@
-import { useState, type RefObject } from "react";
+import type { RefObject } from "react";
 import { useApp } from "../store";
 import { fmtTime, isProfane } from "../lib/captions";
 import { chronoPositions } from "../lib/highlights";
-import WaveformEditor from "./WaveformEditor";
 
 interface Props {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -24,8 +23,8 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const highlights = useApp((s) => s.highlights);
   const clipOverrides = useApp((s) => s.clipOverrides);
   const style = useApp((s) => s.style);
-
-  const [tuning, setTuning] = useState<{ segId: string; idx: number } | null>(null);
+  const tuning = useApp((s) => s.tuningWord);
+  const setTuning = useApp((s) => s.setTuningWord);
 
   const model = models.find((m) => m.name === selectedModel);
 
@@ -114,8 +113,9 @@ export default function TranscriptPanel({ videoRef }: Props) {
         <span>Censor profanity (f***)</span>
       </label>
       <p className="muted small">
-        Click a word to jump the preview there. Drag a word directly on the waveform below it to
-        retime it — drag an edge to move just that boundary, or the middle to shift the whole word.
+        Click a word to jump the preview there and select it for fine-tuning. Drag its timing on
+        the big waveform below the video — that's also where you can drag on an empty stretch to
+        add a line whisper missed entirely.
       </p>
       <div className="transcript-list">
         {segments.map((seg) => (
@@ -183,14 +183,6 @@ export default function TranscriptPanel({ videoRef }: Props) {
                   </span>
                 ))}
               </div>
-
-              <WaveformEditor
-                segId={seg.id}
-                words={seg.words}
-                activeIndex={tuning?.segId === seg.id ? tuning.idx : null}
-                onSelectWord={(idx) => setTuning({ segId: seg.id, idx })}
-                videoRef={videoRef}
-              />
 
               {tuning?.segId === seg.id && seg.words[tuning.idx] && (
                 <div className="word-tune">

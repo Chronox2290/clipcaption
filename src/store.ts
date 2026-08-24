@@ -84,6 +84,10 @@ interface AppState {
   waveformStep: number;
   /** Full-video-timeline seconds `waveform[0]` represents — see TranscribeResult. */
   waveformOffset: number;
+  /** Word currently selected for fine-tuning — drives both the nudge panel in
+   * the Transcript tab and which word is highlighted in the main waveform
+   * editor beneath the video. Null when nothing is selected. */
+  tuningWord: { segId: string; idx: number } | null;
 
   // style
   style: CaptionStyle;
@@ -141,6 +145,12 @@ interface AppState {
   insertWord: (segId: string, atIndex: number) => void;
   removeWord: (segId: string, wordIdx: number) => void;
   setWordTime: (segId: string, wordIdx: number, field: "start" | "end", time: number) => void;
+  setTuningWord: (w: { segId: string; idx: number } | null) => void;
+  /** Creates a brand-new caption from scratch at an absolute-timeline range
+   * that whisper produced nothing for at all (not just a mistimed word) —
+   * used by the main waveform editor's click-drag-on-empty-space gesture.
+   * Returns the new segment's id. */
+  insertSegment: (start: number, end: number, text: string) => string;
   setSelectedModel: (m: string) => void;
   setDiarizeEnabled: (v: boolean) => void;
   setEncoder: (e: string) => void;
@@ -215,6 +225,7 @@ export const useApp = create<AppState>((set, get) => ({
   waveform: [],
   waveformStep: 0.01,
   waveformOffset: 0,
+  tuningWord: null,
   style: getPreset("beast"),
   highlights: [],
   analyzeJob: null,
@@ -348,6 +359,7 @@ export const useApp = create<AppState>((set, get) => ({
         waveform: [],
         waveformStep: 0.01,
         waveformOffset: 0,
+        tuningWord: null,
         highlights: [],
         activeRange: null,
         selectedRanks: [],
@@ -376,6 +388,7 @@ export const useApp = create<AppState>((set, get) => ({
       waveform: [],
       waveformStep: 0.01,
       waveformOffset: 0,
+      tuningWord: null,
       highlights: [],
       activeRange: null,
       selectedRanks: [],
@@ -403,6 +416,7 @@ export const useApp = create<AppState>((set, get) => ({
         waveform: [],
         waveformStep: 0.01,
         waveformOffset: 0,
+        tuningWord: null,
       });
       const id = await invoke<string>("transcribe", {
         path: videoPath,
@@ -485,6 +499,26 @@ export const useApp = create<AppState>((set, get) => ({
         };
       }),
     });
+  },
+
+  setTuningWord: (w) => set({ tuningWord: w }),
+
+  /** Creates a brand-new one-word segment at an absolute-timeline [start,end]
+   * range and drops it into `segments` in chronological order — the words
+   * list stays sorted so pagination/rendering keep working the same as any
+   * whisper-produced segment. Used when whisper missed a stretch of speech
+   * entirely (no segment at all covers that time), which `insertWord` can't
+   * fix since it only adds a word inside an *existing* segment. */
+  insertSegment: (start, end, text) => {
+    const id = nextId("useg");
+    const s0 = Math.max(0, Math.min(start, end - 0.02));
+    const e0 = Math.max(s0 + 0.02, end);
+    const seg: Segment = { id, words: [{ text, start: s0, end: e0 }], speaker: null };
+    const segments = [...get().segments, seg].sort(
+      (a, b) => (a.words[0]?.start ?? 0) - (b.words[0]?.start ?? 0)
+    );
+    set({ segments });
+    return id;
   },
 
   setSelectedModel: (m) => {
