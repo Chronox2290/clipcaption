@@ -269,31 +269,80 @@ export default function MainWaveform({ videoRef }: Props) {
     if (draft?.confirming) insertInputRef.current?.focus();
   }, [draft?.confirming]);
 
-  // Delete/Backspace removes the selected word. The timeline is a canvas and
-  // never takes keyboard focus, so this listens at the window and bails out
-  // whenever a text field has focus - otherwise it would eat every Backspace
-  // typed into the transcript or a clip name.
+  // Keyboard editing for the selected word. The timeline is a canvas and never
+  // takes keyboard focus, so this listens at the window and bails out whenever
+  // a text field has focus - otherwise it would eat every Backspace typed into
+  // the transcript or a clip name.
+  //
+  // This exists because the mouse is the wrong tool here: a hurried word runs
+  // about 60ms, which is under a pixel at fit zoom, and no amount of zooming
+  // makes dragging one comfortable. Stepping and nudging by key sidesteps the
+  // problem instead of working around it.
   useEffect(() => {
+    const NUDGE_SMALL = 0.02; // roughly a frame at 60fps
+    const NUDGE_BIG = 0.1;
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "z" && e.key !== "Z") return;
       if (!tuningWord) return;
-      if (e.ctrlKey || e.metaKey) return; // leave Ctrl+Z to undo
+      if (e.ctrlKey || e.metaKey) return; // leave Ctrl+Z and friends alone
       const el = document.activeElement;
       const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement)?.isContentEditable) {
         return;
       }
-      e.preventDefault();
+
+      const idx = flat.findIndex(
+        (entry) => entry.segId === tuningWord.segId && entry.idx === tuningWord.idx
+      );
+      const current = flat[idx];
+
+      // Alt+arrows step between words. Plain arrows stay with the transport -
+      // seeking is what they do everywhere else in the app.
+      if (e.altKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        const next = flat[idx + (e.key === "ArrowRight" ? 1 : -1)];
+        if (!next) return;
+        e.preventDefault();
+        setTuningWord({ segId: next.segId, idx: next.idx });
+        const v = videoRef.current;
+        if (v) v.currentTime = Math.max(0, next.w.start + 0.001);
+        const wrap = wrapRef.current;
+        if (wrap) {
+          const x = xAtTime(next.w.start);
+          if (x < wrap.scrollLeft + 40 || x > wrap.scrollLeft + wrap.clientWidth - 40) {
+            wrap.scrollLeft = Math.max(0, x - wrap.clientWidth / 2);
+          }
+        }
+        return;
+      }
+
+      // [ and ] slide the whole word earlier or later, keeping its length -
+      // the common correction when timing drifts but the word is right.
+      if ((e.key === "[" || e.key === "]") && current) {
+        e.preventDefault();
+        const delta = (e.key === "]" ? 1 : -1) * (e.shiftKey ? NUDGE_BIG : NUDGE_SMALL);
+        const dur = current.w.end - current.w.start;
+        const start = Math.max(0, current.w.start + delta);
+        setWordTime(tuningWord.segId, tuningWord.idx, "end", start + dur);
+        setWordTime(tuningWord.segId, tuningWord.idx, "start", start);
+        return;
+      }
+
       if (e.key === "z" || e.key === "Z") {
+        e.preventDefault();
         zoomToWord();
         return;
       }
-      removeWord(tuningWord.segId, tuningWord.idx);
-      setTuningWord(null);
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        removeWord(tuningWord.segId, tuningWord.idx);
+        setTuningWord(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tuningWord, removeWord, setTuningWord]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tuningWord, flat, removeWord, setTuningWord, setWordTime, pxPerSec, range.start]);
 
   // Draw.
   useEffect(() => {
@@ -654,7 +703,7 @@ export default function MainWaveform({ videoRef }: Props) {
       <div className="mw-toolbar">
         <span className="muted small">
           {activeRange
-            ? "Editing the selected clip range — drag a word to retime it, or drag empty space to add a missed line."
+            ? "Editing the selected clip range — drag a word to retime it, or drag empty space to add a missed line. With a word selected: Alt+←/→ steps, [ ] nudges (Shift = bigger), Z zooms, Del removes, drag up/down moves it to another speaker."
             : segments.length
             ? "Editing the full transcript — drag a word to retime it, or drag empty space to add a missed line."
             : "No captions yet — drag on the waveform below to add one by hand."}
