@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useApp } from "../store";
+import TimeField from "./TimeField";
 import { fmtTime, isProfane } from "../lib/captions";
 import { chronoPositions } from "../lib/highlights";
 
@@ -91,12 +92,6 @@ export default function TranscriptPanel({ videoRef }: Props) {
     : null;
   const chrono = chronoPositions(highlights);
   const sourceClipNum = sourceHighlight ? chrono[sourceHighlight.rank] : null;
-
-  const NUDGE = 0.1;
-  const nudgeWord = (segId: string, idx: number, field: "start" | "end", delta: number) => {
-    const w = segments.find((s) => s.id === segId)?.words[idx];
-    if (w) setWordTime(segId, idx, field, w[field] + delta);
-  };
 
   const syncWordToPlayhead = (segId: string, idx: number, field: "start" | "end") => {
     const v = videoRef.current;
@@ -225,36 +220,43 @@ export default function TranscriptPanel({ videoRef }: Props) {
               {tuning?.segId === seg.id && seg.words[tuning.idx] && (
                 <div className="word-tune">
                   <div className="word-tune-head">
-                    <span className="muted small">Tuning “{seg.words[tuning.idx].text}” — drag it on the waveform, or nudge precisely:</span>
+                    <span className="muted small">Tuning “{seg.words[tuning.idx].text}” — drag it on the waveform, or type exact times:</span>
                     <button className="btn btn-ghost btn-small" onClick={() => setTuning(null)}>
                       Done
                     </button>
                   </div>
                   <div className="word-tune-row">
                     <span className="hl-nudge-label">Start</span>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "start", -NUDGE)}>
-                      −0.1s
-                    </button>
-                    <span className="hl-nudge-val">{seg.words[tuning.idx].start.toFixed(2)}s</span>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "start", NUDGE)}>
-                      +0.1s
-                    </button>
-                    <button className="btn btn-small" onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "start")}>
-                      📍 here
-                    </button>
-                  </div>
-                  <div className="word-tune-row">
+                    <TimeField
+                      value={seg.words[tuning.idx].start}
+                      min={0}
+                      max={seg.words[tuning.idx].end - 0.02}
+                      title="Type a time like 29:08.4 and press Enter"
+                      onCommit={(t) => setWordTime(seg.id, tuning.idx, "start", t)}
+                    >
+                      <button
+                        className="btn btn-ghost btn-small"
+                        title="Set to where the video is paused"
+                        onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "start")}
+                      >
+                        📍 here
+                      </button>
+                    </TimeField>
                     <span className="hl-nudge-label">End</span>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "end", -NUDGE)}>
-                      −0.1s
-                    </button>
-                    <span className="hl-nudge-val">{seg.words[tuning.idx].end.toFixed(2)}s</span>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudgeWord(seg.id, tuning.idx, "end", NUDGE)}>
-                      +0.1s
-                    </button>
-                    <button className="btn btn-small" onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "end")}>
-                      📍 here
-                    </button>
+                    <TimeField
+                      value={seg.words[tuning.idx].end}
+                      min={seg.words[tuning.idx].start + 0.02}
+                      title="Type a time like 29:09.1 and press Enter"
+                      onCommit={(t) => setWordTime(seg.id, tuning.idx, "end", t)}
+                    >
+                      <button
+                        className="btn btn-ghost btn-small"
+                        title="Set to where the video is paused"
+                        onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "end")}
+                      >
+                        📍 here
+                      </button>
+                    </TimeField>
                   </div>
                 </div>
               )}

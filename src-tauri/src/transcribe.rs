@@ -69,6 +69,17 @@ struct WOff {
 struct WTok {
     text: String,
     offsets: Option<WOff>,
+    /// Cross-attention DTW timestamp for this token, in centiseconds, or -1
+    /// when whisper.cpp didn't compute one. This is the accurate timing that
+    /// `-dtw` exists to produce; `offsets` is the coarse fallback, which for
+    /// a segment whose tokens carry no timestamps of their own collapses to
+    /// "every token starts and ends at the segment start".
+    #[serde(default = "no_dtw")]
+    t_dtw: i64,
+}
+
+fn no_dtw() -> i64 {
+    -1
 }
 
 pub fn run(
@@ -79,8 +90,9 @@ pub fn run(
     model: String,
     start: Option<f64>,
     end: Option<f64>,
+    prompt: Option<String>,
 ) {
-    let result = run_inner(&app, &job_id, &handle, &path, &model, start, end);
+    let result = run_inner(&app, &job_id, &handle, &path, &model, start, end, prompt);
     match result {
         Ok(json) => emit_done(&app, &job_id, "transcribing", Some(json)),
         Err(e) => {
@@ -101,6 +113,7 @@ fn run_inner(
     model: &str,
     start: Option<f64>,
     end: Option<f64>,
+    prompt: Option<String>,
 ) -> Result<String, String> {
     let model_path = models::model_path(app, model)?;
     if !model_path.exists() {
@@ -190,7 +203,26 @@ fn run_inner(
     let wav_s = wav.to_string_lossy().into_owned();
     let out_base_s = out_base.to_string_lossy().into_owned();
 
-    let args: Vec<&str> = vec![
+    // Whisper's initial prompt: text it treats as though it had just decoded
+    // it, which biases spelling and vocabulary for what follows. Worth real
+    // accuracy on proper nouns it has never heard (player and game names) and
+    // on a strong regional accent, where its guess between two plausible
+    // words is exactly what a prompt can tip. Capped because whisper only
+    // accepts n_text_ctx/2 tokens and silently drops the excess otherwise.
+    const PROMPT_MAX_CHARS: usize = 800;
+    let prompt_s = build_prompt(prompt.as_deref(), PROMPT_MAX_CHARS);
+
+    // Deliberately NOT passing --vad here. whisper.cpp's VAD maps each
+    // segment's times back onto the real timeline but leaves every token
+    // timestamp on the silence-stripped one it decoded, and word timing is
+    // what this app lives on. Measured on a 2-minute game clip, scoring word
+    // starts against the audio's own speech/silence mask: 80% land in speech
+    // without VAD, versus 73% with it even using the best of three
+    // reconstructions (per-segment shift 63%, stretch-to-segment 73%,
+    // discard-token-times 72%). It also only saved 1.4s of 16s on this
+    // speech-dense audio. Revisit only if whisper.cpp starts remapping token
+    // timestamps too.
+    let mut args: Vec<&str> = vec![
         "-m",
         &model_path_s,
         "-f",
@@ -201,9 +233,26 @@ fn run_inner(
         "-t",
         &threads,
         "-pp", // print progress
+        // Flash attention is ON by default in current whisper.cpp builds, and
+        // whisper silently drops DTW when it's enabled:
+        //   "dtw_token_timestamps is not supported with flash_attn - disabling"
+        // It prints that to stderr and carries on, so -dtw below looked like
+        // it was working while every token came back t_dtw = -1 and word
+        // times fell back to `offsets`. Word timing matters far more here
+        // than the modest speed flash attention buys.
+        "-nfa",
+        // The .en models are English-only anyway, but large-v3-turbo is
+        // multilingual and will happily auto-detect a strong regional accent
+        // as another language on noisy game audio. Pin it.
+        "-l",
+        "en",
         "-dtw",
         dtw,
     ];
+
+    if !prompt_s.is_empty() {
+        args.extend_from_slice(&["--prompt", &prompt_s]);
+    }
 
     let mut child = sidecar::command("whisper-cli")
         .args(&args)
@@ -392,6 +441,30 @@ fn read_wav_peaks(path: &std::path::Path, max_buckets: usize) -> Option<(Vec<f32
     Some((peaks, step))
 }
 
+/// Wraps the user's vocabulary list into whisper's initial prompt.
+///
+/// Whisper copies its prompt's *style* as well as its vocabulary, and a bare
+/// comma-separated list is a disastrous style to copy: prompted with one,
+/// transcription of a 2-minute clip came back almost entirely lowercase and
+/// unpunctuated (2 of 12 segments capitalised, 1 punctuated) versus 41 of 42
+/// with no prompt at all. Wrapping the same words in one properly written
+/// sentence restores it (14 of 15 capitalised, 13 punctuated) while keeping
+/// the vocabulary benefit. Text that already ends in sentence punctuation is
+/// assumed to be a deliberately-written prompt and is passed through as-is.
+fn build_prompt(raw: Option<&str>, max_chars: usize) -> String {
+    let trimmed = raw.unwrap_or_default().trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let wrapped = if trimmed.ends_with(['.', '!', '?']) {
+        trimmed.to_string()
+    } else {
+        format!("Names and terms you may hear: {}.", trimmed.trim_end_matches(&[',', ';'][..]))
+    };
+    wrapped.chars().take(max_chars).collect()
+}
+
+/// Turns whisper's JSON into word-level segments.
 fn build_segments(out: WhisperOut) -> Vec<Segment> {
     let mut segments = Vec::new();
 
@@ -406,6 +479,7 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
         }
 
         let mut words: Vec<WordSpan> = Vec::new();
+        let seg_end = seg.offsets.to as f64 / 1000.0;
 
         if let Some(tokens) = seg.tokens {
             for tok in tokens {
@@ -414,29 +488,67 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
                 if t.starts_with("[_") || t.trim().is_empty() {
                     continue;
                 }
-                let (from, to) = match &tok.offsets {
-                    Some(o) => (o.from as f64 / 1000.0, o.to as f64 / 1000.0),
-                    None => continue,
+                // DTW gives one accurate *instant* per token rather than a
+                // span; `offsets` is the fallback for builds/runs without it.
+                let start = if tok.t_dtw >= 0 {
+                    tok.t_dtw as f64 / 100.0 // centiseconds
+                } else {
+                    match &tok.offsets {
+                        Some(o) => o.from as f64 / 1000.0,
+                        None => continue,
+                    }
                 };
 
                 let starts_word = t.starts_with(' ') || words.is_empty();
                 if starts_word {
                     words.push(WordSpan {
                         text: t.trim().to_string(),
-                        start: from,
-                        end: to,
+                        start,
+                        end: start, // real end assigned in the pass below
                     });
                 } else if let Some(last) = words.last_mut() {
+                    // Punctuation and sub-word pieces join the word they
+                    // belong to and deliberately do NOT move its end: a
+                    // trailing "," routinely carries a timestamp that jumps
+                    // backwards, and letting it set the end produced words
+                    // ending *before* they start.
                     last.text.push_str(t.trim_end());
-                    last.end = to;
                 }
             }
+        }
+
+        // Word timing is derived here rather than taken per-token, because
+        // neither timing source gives a usable span on its own:
+        //   - DTW yields a single instant per token, no end at all.
+        //   - `offsets` collapses to zero-length words whenever whisper
+        //     emitted no per-token timestamps for a segment (measured at 35%
+        //     of all words on a real 2-minute game clip). A zero-length word
+        //     can never satisfy the renderer's `t >= start && t <= end`, so
+        //     those words were silently never drawn on screen.
+        // A word therefore runs from its own start until the next word
+        // starts. MAX_WORD caps that so the last word before a genuine pause
+        // doesn't stretch across the whole silence - the caption paginator
+        // reads the resulting gaps to decide where to clear the screen.
+        const MIN_WORD: f64 = 0.06;
+        const MAX_WORD: f64 = 1.5;
+        for i in 1..words.len() {
+            if words[i].start < words[i - 1].start {
+                words[i].start = words[i - 1].start;
+            }
+        }
+        for i in 0..words.len() {
+            let next = if i + 1 < words.len() {
+                words[i + 1].start
+            } else {
+                seg_end
+            };
+            let w = &mut words[i];
+            w.end = next.clamp(w.start + MIN_WORD, w.start + MAX_WORD);
         }
 
         // Fallback: no usable tokens — split the segment text evenly
         if words.is_empty() {
             let seg_start = seg.offsets.from as f64 / 1000.0;
-            let seg_end = seg.offsets.to as f64 / 1000.0;
             let parts: Vec<&str> = text_trim.split_whitespace().collect();
             let n = parts.len().max(1) as f64;
             let dur = (seg_end - seg_start).max(0.1);
@@ -464,6 +576,111 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
     }
 
     segments
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+
+    fn parse(json: &str) -> Vec<Segment> {
+        build_segments(serde_json::from_str::<WhisperOut>(json).expect("valid whisper json"))
+    }
+
+    /// The exact shape whisper.cpp emits when a segment's tokens carry no
+    /// timestamps of their own: every token reports the segment's start for
+    /// both ends. This used to yield zero-length words, which the renderer
+    /// (`t >= start && t <= end`) could never draw.
+    #[test]
+    fn tokens_without_timestamps_still_get_drawable_durations() {
+        let segs = parse(
+            r#"{"transcription":[{"text":" Yeah it should be","offsets":{"from":7200,"to":8080},
+            "tokens":[
+              {"text":" Yeah","offsets":{"from":7200,"to":7200}},
+              {"text":" it","offsets":{"from":7200,"to":7200}},
+              {"text":" should","offsets":{"from":7200,"to":7200}},
+              {"text":" be","offsets":{"from":7200,"to":7200}}]}]}"#,
+        );
+        assert_eq!(segs.len(), 1);
+        for w in &segs[0].words {
+            assert!(w.end > w.start, "{} is undrawable: {}-{}", w.text, w.start, w.end);
+        }
+    }
+
+    /// A trailing punctuation token routinely carries a timestamp that jumps
+    /// backwards. Merging it must not drag the word's end before its start -
+    /// that produced words (and whole caption pages) that never appeared.
+    #[test]
+    fn backwards_punctuation_token_cannot_invert_a_word() {
+        let segs = parse(
+            r#"{"transcription":[{"text":" Oh, Jesus","offsets":{"from":1748000,"to":1750000},
+            "tokens":[
+              {"text":" Oh","offsets":{"from":1748000,"to":1748100}},
+              {"text":",","offsets":{"from":1746520,"to":1746520}},
+              {"text":" Jesus","offsets":{"from":1748600,"to":1749000}}]}]}"#,
+        );
+        let words = &segs[0].words;
+        assert_eq!(words[0].text, "Oh,");
+        assert!(words[0].end > words[0].start);
+        assert!(words[1].start >= words[0].start);
+    }
+
+    /// `-dtw` timings are centiseconds and win over `offsets` when present.
+    #[test]
+    fn dtw_timestamps_are_preferred_and_read_as_centiseconds() {
+        let segs = parse(
+            r#"{"transcription":[{"text":" Oh yeah","offsets":{"from":0,"to":5590},
+            "tokens":[
+              {"text":" Oh","offsets":{"from":0,"to":430},"t_dtw":404},
+              {"text":" yeah","offsets":{"from":430,"to":1290},"t_dtw":420}]}]}"#,
+        );
+        let words = &segs[0].words;
+        assert!((words[0].start - 4.04).abs() < 1e-9, "got {}", words[0].start);
+        assert!((words[1].start - 4.20).abs() < 1e-9, "got {}", words[1].start);
+    }
+
+    #[test]
+    fn a_bare_vocabulary_list_is_wrapped_into_a_sentence() {
+        assert_eq!(
+            build_prompt(Some("Christian, Luke, Tommy"), 800),
+            "Names and terms you may hear: Christian, Luke, Tommy."
+        );
+        // trailing separator shouldn't produce ",."
+        assert_eq!(
+            build_prompt(Some("Christian, Luke,"), 800),
+            "Names and terms you may hear: Christian, Luke."
+        );
+    }
+
+    #[test]
+    fn an_already_written_prompt_is_left_alone() {
+        let written = "The players are Christian and Luke. They play Lethal Company.";
+        assert_eq!(build_prompt(Some(written), 800), written);
+    }
+
+    #[test]
+    fn an_empty_vocabulary_produces_no_prompt() {
+        assert!(build_prompt(None, 800).is_empty());
+        assert!(build_prompt(Some("   "), 800).is_empty());
+    }
+
+    #[test]
+    fn an_overlong_prompt_is_truncated() {
+        assert_eq!(build_prompt(Some(&"a,".repeat(900)), 40).chars().count(), 40);
+    }
+
+    /// The last word before a long silence shouldn't stretch across it - the
+    /// paginator needs that gap to know when to clear the screen.
+    #[test]
+    fn a_word_does_not_stretch_across_a_long_silence() {
+        let segs = parse(
+            r#"{"transcription":[{"text":" Hi there","offsets":{"from":0,"to":20000},
+            "tokens":[
+              {"text":" Hi","offsets":{"from":0,"to":100},"t_dtw":10},
+              {"text":" there","offsets":{"from":100,"to":200},"t_dtw":20}]}]}"#,
+        );
+        let last = segs[0].words.last().unwrap();
+        assert!(last.end - last.start <= 1.5 + 1e-9, "ran {}s", last.end - last.start);
+    }
 }
 
 #[cfg(test)]

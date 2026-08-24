@@ -287,6 +287,30 @@ select {
   font-size: 12.5px;
 }
 
+.vocab-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--bg2);
+}
+.vocab-field input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--bg);
+  color: inherit;
+  font-size: 13px;
+  font-family: inherit;
+}
+.vocab-field input:focus {
+  outline: none;
+  border-color: rgba(124, 92, 255, 0.6);
+}
+
 .recent {
   display: flex;
   flex-direction: column;
@@ -646,7 +670,107 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 .mw-wrap {
-  width: 100%;
+  /* flex child of .mw-tracks: min-width:0 is what actually lets it shrink
+     instead of forcing the row wider than the panel and pushing the track
+     headers off-screen. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Track headers sit beside the scrolling canvas, like a video editor's track
+   list: they must not scroll horizontally with it, but must line up with the
+   lanes drawn inside it - hence the shared LANE_H/LANE_GAP geometry, applied
+   here as inline styles from the component so the two can't drift apart. */
+.time-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.time-field input {
+  width: 78px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--bg0);
+  color: inherit;
+  font-size: 12.5px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.time-field input:focus {
+  outline: none;
+  border-color: rgba(124, 92, 255, 0.7);
+}
+.hl-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.hl-count select {
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--bg0);
+  color: inherit;
+  font-size: 12px;
+  font-family: inherit;
+}
+.hl-manual-tag {
+  color: var(--muted);
+}
+
+.ed-restored {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  margin: 0 12px 8px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--muted);
+  background: rgba(124, 92, 255, 0.1);
+  border: 1px solid rgba(124, 92, 255, 0.3);
+}
+.ed-restored span {
+  flex: 1;
+}
+
+.mw-tracks {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+.mw-gutter {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  width: 96px;
+  box-sizing: border-box;
+}
+.mw-lane-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--bg2);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+.mw-lane-chip {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  flex: 0 0 auto;
+}
+.mw-lane-name {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .mw-insert-bar {
   display: flex;

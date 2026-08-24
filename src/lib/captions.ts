@@ -29,7 +29,7 @@ export function paginate(
     let current: WordSpan[] = [];
     for (const w of seg.words) {
       const prev = current[current.length - 1];
-      const gapBreak = prev && w.start - prev.end > gapThreshold;
+      const gapBreak = prev && w.start - Math.min(prev.end, w.start) > gapThreshold;
       if (current.length >= maxWordsPerPage || gapBreak) {
         if (current.length) pages.push(toPage(current, seg.speaker));
         current = [];
@@ -42,7 +42,15 @@ export function paginate(
 }
 
 function toPage(words: WordSpan[], speaker: number | null): CaptionPage {
-  return { start: words[0].start, end: words[words.length - 1].end, words, speaker };
+  const start = words[0].start;
+  // Belt-and-braces against a page that can never satisfy pageAt's
+  // `t >= start && t <= end`. The backend now guarantees every word ends
+  // after it starts, but a project saved before that fix - or a hand edit -
+  // can still carry an inverted word, and the failure mode is silent: the
+  // caption simply never appears, with the words all present and correct in
+  // the transcript panel.
+  const end = Math.max(words[words.length - 1].end, start + 0.06);
+  return { start, end, words, speaker };
 }
 
 export function pageAt(pages: CaptionPage[], t: number, linger = 0.25): CaptionPage | null {
@@ -112,6 +120,23 @@ export function fmtTime(t: number): string {
   const m = Math.floor(t / 60);
   const s = t - m * 60;
   return `${m}:${s.toFixed(1).padStart(4, "0")}`;
+}
+
+/** Parses what fmtTime prints, plus the obvious variations people type:
+ * "1:23.4", "1:23", "83.4", "83". Returns null for anything unparseable so
+ * the caller can leave the field's previous value alone rather than
+ * committing a NaN that would blow up the timeline. */
+export function parseTime(text: string): number | null {
+  const t = text.trim().replace(/\s+/g, "");
+  if (!t) return null;
+  const m = t.match(/^(?:(\d+):)?(\d+(?:\.\d+)?)$/);
+  if (!m) return null;
+  const mins = m[1] ? Number(m[1]) : 0;
+  const secs = Number(m[2]);
+  // "1:75" is a typo, not 2:15 — reject rather than silently reinterpret.
+  if (m[1] && secs >= 60) return null;
+  const total = mins * 60 + secs;
+  return Number.isFinite(total) ? total : null;
 }
 
 /** Job-stage strings from the Rust backend ("exporting", "pass 1/2", …) are

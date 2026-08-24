@@ -1,9 +1,10 @@
 import { useState, type RefObject } from "react";
-import { useApp } from "../store";
+import { useApp, autoHighlightCount } from "../store";
 import { fmtTime, capitalize } from "../lib/captions";
 import { pickDirectory, pickSavePath } from "../lib/tauri";
 import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
 import { chronoPositions } from "../lib/highlights";
+import TimeField from "./TimeField";
 import type { Highlight } from "../types";
 
 interface Props {
@@ -17,6 +18,9 @@ export default function HighlightsPanel({ videoRef }: Props) {
     highlights,
     analyzeJob,
     analyzeHighlights,
+    addBookmark,
+    highlightCount,
+    setHighlightCount,
     activeRange,
     setActiveRange,
     selectedRanks,
@@ -77,14 +81,16 @@ export default function HighlightsPanel({ videoRef }: Props) {
 
   const rangeOf = (h: Highlight) => clipOverrides[h.rank] ?? { start: h.start, end: h.end };
 
-  // "+" always makes the clip longer, "−" always makes it shorter — same
-  // meaning on both the Start and End row, regardless of which direction
-  // that actually moves the underlying timestamp.
-  const nudge = (h: Highlight, field: "start" | "end", durationDelta: number) => {
+  const setEdgeFromPlayhead = (h: Highlight, field: "start" | "end") => {
+    const v = videoRef.current;
+    if (!v) return;
     const r = rangeOf(h);
-    const start = field === "start" ? r.start - durationDelta : r.start;
-    const end = field === "end" ? r.end + durationDelta : r.end;
-    adjustHighlightRange(h.rank, start, end);
+    const t = v.currentTime;
+    adjustHighlightRange(
+      h.rank,
+      field === "start" ? Math.min(t, r.end - 0.2) : r.start,
+      field === "end" ? Math.max(t, r.start + 0.2) : r.end
+    );
   };
 
   const captionThisRange = (h: Highlight) => {
@@ -173,9 +179,37 @@ export default function HighlightsPanel({ videoRef }: Props) {
           <button className="btn btn-ghost btn-small" onClick={selectNoneHighlights}>
             Select none
           </button>
+          <button
+            className="btn btn-ghost btn-small"
+            title="Mark a clip around where the video is paused — for the moments the loudness scan won't find"
+            onClick={() => {
+              const v = videoRef.current;
+              if (v) addBookmark(v.currentTime);
+            }}
+          >
+            ＋ Mark here
+          </button>
           <button className="btn btn-ghost btn-small" onClick={() => analyzeHighlights()}>
             ↻ Re-scan
           </button>
+          <label className="hl-count" title="How many clips a scan may return. Auto scales with the length of the recording.">
+            <span className="muted small">Find</span>
+            <select
+              value={highlightCount == null ? "auto" : String(highlightCount)}
+              onChange={(e) =>
+                setHighlightCount(e.target.value === "auto" ? null : Number(e.target.value))
+              }
+            >
+              <option value="auto">
+                auto ({autoHighlightCount(null, mediaInfo?.durationSec)})
+              </option>
+              {[12, 25, 40, 60, 100].map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         {sortMode === "hype" && (
           <p className="muted small">
@@ -206,7 +240,14 @@ export default function HighlightsPanel({ videoRef }: Props) {
                 />
                 <span className="hl-rank">
                   Clip #{chrono[h.rank]}
-                  {sortMode === "hype" && <span className="hl-hype-tag"> · 🔥{h.rank}</span>}
+                  {h.manual ? (
+                    <span className="hl-manual-tag" title="You marked this clip by hand">
+                      {" "}
+                      · 📌
+                    </span>
+                  ) : (
+                    sortMode === "hype" && <span className="hl-hype-tag"> · 🔥{h.rank}</span>
+                  )}
                 </span>
                 <div className="hl-mid">
                   <input
@@ -249,35 +290,37 @@ export default function HighlightsPanel({ videoRef }: Props) {
                 <div className="hl-edit">
                   <div className="hl-nudge-row">
                     <span className="hl-nudge-label">Start</span>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudge(h, "start", -5)}>
-                      −5s
-                    </button>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudge(h, "start", -1)}>
-                      −1s
-                    </button>
-                    <span className="hl-nudge-val">{fmtTime(range.start)}</span>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudge(h, "start", 1)}>
-                      +1s
-                    </button>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudge(h, "start", 5)}>
-                      +5s
-                    </button>
-                  </div>
-                  <div className="hl-nudge-row">
+                    <TimeField
+                      value={range.start}
+                      min={0}
+                      max={range.end - 0.2}
+                      title="Type a time like 29:02.4 and press Enter"
+                      onCommit={(t) => adjustHighlightRange(h.rank, t, range.end)}
+                    >
+                      <button
+                        className="btn btn-ghost btn-small"
+                        title="Set to where the video is paused"
+                        onClick={() => setEdgeFromPlayhead(h, "start")}
+                      >
+                        📍 here
+                      </button>
+                    </TimeField>
                     <span className="hl-nudge-label">End</span>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudge(h, "end", -5)}>
-                      −5s
-                    </button>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudge(h, "end", -1)}>
-                      −1s
-                    </button>
-                    <span className="hl-nudge-val">{fmtTime(range.end)}</span>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudge(h, "end", 1)}>
-                      +1s
-                    </button>
-                    <button className="btn btn-ghost btn-small" onClick={() => nudge(h, "end", 5)}>
-                      +5s
-                    </button>
+                    <TimeField
+                      value={range.end}
+                      min={range.start + 0.2}
+                      max={duration}
+                      title="Type a time like 29:16.0 and press Enter"
+                      onCommit={(t) => adjustHighlightRange(h.rank, range.start, t)}
+                    >
+                      <button
+                        className="btn btn-ghost btn-small"
+                        title="Set to where the video is paused"
+                        onClick={() => setEdgeFromPlayhead(h, "end")}
+                      >
+                        📍 here
+                      </button>
+                    </TimeField>
                   </div>
                   <div className="hl-edit-actions">
                     <span className="muted small">

@@ -67,11 +67,12 @@ fn transcribe(
     model: String,
     start: Option<f64>,
     end: Option<f64>,
+    prompt: Option<String>,
 ) -> Result<String, String> {
     let (id, handle) = jobs.create("stt");
     let job_id = id.clone();
     std::thread::spawn(move || {
-        transcribe::run(app, job_id, handle, path, model, start, end);
+        transcribe::run(app, job_id, handle, path, model, start, end, prompt);
     });
     Ok(id)
 }
@@ -129,6 +130,36 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("Could not read {path}: {e}"))
 }
 
+/// Where the autosaved working state for one video lives.
+///
+/// Opening a video used to reset the editor to a clean slate, so anything not
+/// explicitly saved to a .ccproj was gone the moment you went back to the
+/// library. The frontend autosaves here instead and restores on reopen, which
+/// is why this is keyed by the video's own path rather than by a user-chosen
+/// filename: there's no name to ask for, and reopening the same video has to
+/// find the same file.
+#[tauri::command]
+fn session_file(app: AppHandle, video_path: String) -> Result<String, String> {
+    use std::hash::{Hash, Hasher};
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("sessions");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    // The path is hashed rather than sanitised into a filename because video
+    // paths are long, contain separators and colons, and differ only deep in
+    // the string ("...6-08-23 22-07-17.mp4"). A hash sidesteps every
+    // filename-length and illegal-character question at once.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    video_path.hash(&mut hasher);
+    Ok(dir
+        .join(format!("{:016x}.json", hasher.finish()))
+        .to_string_lossy()
+        .into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -154,7 +185,8 @@ pub fn run() {
             export_video,
             cancel_job,
             write_text_file,
-            read_text_file
+            read_text_file,
+            session_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipCaption");

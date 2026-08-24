@@ -19,6 +19,9 @@ export default function Editor() {
     style,
     censor,
     closeVideo,
+    restoredSession,
+    dismissRestoredNotice,
+    discardSession,
     activeRange,
     projectPath,
     saveProject,
@@ -143,6 +146,20 @@ export default function Editor() {
           Save As…
         </button>
       </header>
+      {restoredSession && (
+        <div className="ed-restored">
+          <span>
+            Picked up where you left off — your transcript, clips and tweaks for this video were
+            restored from an autosave.
+          </span>
+          <button className="btn btn-ghost btn-small" onClick={() => void discardSession()}>
+            Start fresh
+          </button>
+          <button className="btn btn-ghost btn-small" onClick={dismissRestoredNotice}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="ed-body">
         <div className="ed-preview">

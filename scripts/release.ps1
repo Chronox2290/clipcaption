@@ -26,11 +26,25 @@ if ($Version -eq "") {
     Write-Error "Version must look like 0.2.0 (three numbers, dots, no leading 'v') - got '$Version'."
 }
 
-Write-Host "Bumping version to $Version in tauri.conf.json and package.json..."
+Write-Host "Bumping version to $Version in tauri.conf.json, package.json and package-lock.json..."
 (Get-Content $tauriConf -Raw) -replace '"version":\s*"[^"]+"', "`"version`": `"$Version`"" |
     Set-Content $tauriConf -NoNewline
-(Get-Content $pkgJson -Raw) -replace '"version":\s*"[^"]+"', "`"version`": `"$Version`"" |
-    Set-Content $pkgJson -NoNewline
+
+# `npm version` rather than the same regex trick used on tauri.conf.json above:
+# it bumps package.json AND the two version fields at the top of
+# package-lock.json. A regex over a lockfile would be reckless - every one of
+# the hundreds of dependencies in there has a "version" key of its own.
+# --no-git-tag-version keeps npm out of git; committing and tagging is this
+# script's job, below. A native command's non-zero exit is NOT a terminating
+# PowerShell error even under $ErrorActionPreference = "Stop", so check
+# $LASTEXITCODE by hand.
+Push-Location $root
+npm version $Version --no-git-tag-version --allow-same-version | Out-Null
+$npmExit = $LASTEXITCODE
+Pop-Location
+if ($npmExit -ne 0) {
+    Write-Error "npm version failed (exit $npmExit) - package.json and package-lock.json were not bumped."
+}
 
 Push-Location $root
 try {

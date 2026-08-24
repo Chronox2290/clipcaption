@@ -7,6 +7,8 @@ export default function Library() {
   const models = useApp((s) => s.models);
   const selectedModel = useApp((s) => s.selectedModel);
   const setSelectedModel = useApp((s) => s.setSelectedModel);
+  const vocabulary = useApp((s) => s.vocabulary);
+  const setVocabulary = useApp((s) => s.setVocabulary);
   const downloadModel = useApp((s) => s.downloadModel);
   const modelJob = useApp((s) => s.modelJob);
   const loadProject = useApp((s) => s.loadProject);
@@ -119,6 +121,20 @@ export default function Library() {
               <p className="muted">Models appear here when running inside the app.</p>
             )}
           </div>
+          <label className="vocab-field">
+            <span className="model-name">Names &amp; jargon</span>
+            <input
+              type="text"
+              value={vocabulary}
+              placeholder="Christian, Luke, Tommy, proximity chat, skinwalker"
+              onChange={(e) => setVocabulary(e.target.value)}
+            />
+            <span className="muted small">
+              Fed to whisper as context before it transcribes, so it spells names it has never
+              heard the way you do — and has a better shot at accented speech. Applies next time
+              you transcribe.
+            </span>
+          </label>
           {modelJob && (
             <div className="progress-wrap">
               <div className="progress-bar">

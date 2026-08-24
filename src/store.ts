@@ -129,6 +129,9 @@ interface AppState {
   // models
   models: ModelInfo[];
   selectedModel: string;
+  /** Names, jargon and spellings fed to whisper as its initial prompt, to
+   * bias transcription of proper nouns and strongly-accented speech. */
+  vocabulary: string;
 
   // encoding options
   encoder: string; // "auto" | "x264" | "nvenc" | "amf" | "qsv"
@@ -171,6 +174,7 @@ interface AppState {
    * Returns the new segment's id. */
   insertSegment: (start: number, end: number, text: string) => string;
   setSelectedModel: (m: string) => void;
+  setVocabulary: (v: string) => void;
   setEncoder: (e: string) => void;
   setFpsOverride: (fps: number | null) => void;
   downloadModel: (name: string) => Promise<void>;
@@ -213,6 +217,19 @@ interface AppState {
   ) => Promise<void>;
   cancelFileBatch: () => void;
   clearError: () => void;
+  /** True when reopening this video restored autosaved work, until dismissed.
+   * Purely so the UI can say so — the restore itself is unconditional. */
+  restoredSession: boolean;
+  /** Adds a hand-marked clip centred on `center` seconds; returns its rank. */
+  addBookmark: (center: number) => number;
+  /** How many clips a scan may return, or null to scale it to the video's
+   * length. */
+  highlightCount: number | null;
+  setHighlightCount: (n: number | null) => void;
+  dismissRestoredNotice: () => void;
+  /** Throws away the autosaved working state for the current video and resets
+   * the editor to a clean slate for it. */
+  discardSession: () => Promise<void>;
   /** Returns true if the project was actually written (false if e.g. the save
    * dialog was cancelled or there's no open video). */
   saveProject: () => Promise<boolean>;
@@ -230,6 +247,131 @@ function loadRecent(): string[] {
   }
 }
 
+
+/** Clips a scan may return when the count is left on auto.
+ *
+ * This used to be hardcoded at 12 regardless of length, so a two-hour session
+ * and a two-minute clip both came back with at most a dozen — the single
+ * biggest reason long VODs felt like they were missing most of their good
+ * moments. Roughly one candidate per four minutes matches how often something
+ * worth clipping actually happens, with a floor so short clips still get a
+ * usable spread and a ceiling so an all-nighter doesn't return hundreds.
+ */
+export function autoHighlightCount(configured: number | null, durationSec?: number): number {
+  if (configured != null) return configured;
+  if (!durationSec) return 12;
+  return Math.max(12, Math.min(60, Math.round(durationSec / 240)));
+}
+
+/** How much of a hand-marked clip sits before and after the playhead. Biased
+ * backwards because you press the button *after* the thing happens. */
+const BOOKMARK_BEFORE = 12;
+const BOOKMARK_AFTER = 4;
+
+// ---------------- autosaved working state ----------------
+//
+// Opening a video resets the editor, and going back to the library used to
+// throw away everything not explicitly saved to a .ccproj. These keep a
+// working copy per video in app data (see the session_file command) so the
+// round trip is lossless. It's deliberately separate from .ccproj files:
+// those are documents the user names and manages, this is just "don't lose my
+// work".
+
+/** The slices worth persisting. Compared by identity, which is reliable
+ * because every store update replaces these objects rather than mutating
+ * them — and cheap, unlike hashing a two-hour transcript on every keystroke. */
+function sessionSlice(s: AppState) {
+  return {
+    segments: s.segments,
+    transcriptSourceRank: s.transcriptSourceRank,
+    waveform: s.waveform,
+    waveformStep: s.waveformStep,
+    waveformOffset: s.waveformOffset,
+    highlights: s.highlights,
+    clipOverrides: s.clipOverrides,
+    clipNames: s.clipNames,
+    selectedRanks: s.selectedRanks,
+    activeRange: s.activeRange,
+    style: s.style,
+    censor: s.censor,
+  };
+}
+
+type SessionSlice = ReturnType<typeof sessionSlice>;
+
+let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
+let autosaveArmed = false;
+let lastSlice: SessionSlice | null = null;
+
+function armAutosave() {
+  autosaveArmed = true;
+}
+
+function disarmAutosave() {
+  autosaveArmed = false;
+  lastSlice = null;
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }
+}
+
+async function writeSession(state: AppState) {
+  const { videoPath } = state;
+  if (!videoPath) return;
+  try {
+    const path = await invoke<string>("session_file", { videoPath });
+    await invoke("write_text_file", {
+      path,
+      content: JSON.stringify({ version: 1, videoPath, ...sessionSlice(state) }),
+    });
+  } catch {
+    // An autosave failure must never interrupt editing with an error banner —
+    // the explicit Save Project path still reports failures loudly.
+  }
+}
+
+async function flushAutosave(state: AppState) {
+  if (!autosaveArmed) return;
+  if (autosaveTimer) {
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+  }
+  await writeSession(state);
+}
+
+async function restoreSession(
+  videoPath: string,
+  set: (partial: Partial<AppState>) => void,
+  get: () => AppState
+) {
+  try {
+    const path = await invoke<string>("session_file", { videoPath });
+    const raw = await invoke<string>("read_text_file", { path });
+    const saved = JSON.parse(raw) as Partial<SessionSlice> & { videoPath?: string };
+    // A session with no transcript and no highlights is nothing worth
+    // announcing (or restoring) — e.g. one just cleared by discardSession.
+    if (!saved.segments?.length && !saved.highlights?.length) return;
+    set({
+      segments: saved.segments ?? [],
+      transcriptSourceRank: saved.transcriptSourceRank ?? null,
+      waveform: saved.waveform ?? [],
+      waveformStep: saved.waveformStep ?? 0.01,
+      waveformOffset: saved.waveformOffset ?? 0,
+      highlights: saved.highlights ?? [],
+      clipOverrides: saved.clipOverrides ?? {},
+      clipNames: saved.clipNames ?? {},
+      selectedRanks: saved.selectedRanks ?? [],
+      activeRange: saved.activeRange ?? null,
+      style: saved.style ?? get().style,
+      censor: saved.censor ?? get().censor,
+      restoredSession: true,
+    });
+  } catch {
+    // No session yet (the common case on a first open), or an unreadable one.
+  }
+}
+
 export const useApp = create<AppState>((set, get) => ({
   screen: "library",
   error: null,
@@ -237,6 +379,11 @@ export const useApp = create<AppState>((set, get) => ({
   previewSrc: null,
   mediaInfo: null,
   projectPath: null,
+  restoredSession: false,
+  highlightCount: (() => {
+    const v = localStorage.getItem("cc.highlightCount");
+    return v == null || v === "auto" ? null : Number(v);
+  })(),
   segments: [],
   censor: false,
   transcriptSourceRank: null,
@@ -261,6 +408,7 @@ export const useApp = create<AppState>((set, get) => ({
   modelJob: null,
   models: [],
   selectedModel: localStorage.getItem("cc.model") ?? "large-v3-turbo",
+  vocabulary: localStorage.getItem("cc.vocabulary") ?? "",
   encoder: localStorage.getItem("cc.encoder") ?? "auto",
   availableEncoders: ["x264"],
   fpsOverride: (() => {
@@ -341,13 +489,29 @@ export const useApp = create<AppState>((set, get) => ({
             set({ exportJob: null, exportDone: p.result ?? null });
           } else if (key === "analyzeJob" && p.result) {
             try {
-              const highlights = JSON.parse(p.result) as Highlight[];
+              const found = JSON.parse(p.result) as Highlight[];
+              // Hand-marked clips outlive a re-scan — the user put them there
+              // deliberately, and a scan they asked for shouldn't delete them.
+              // Their ranks are renumbered above the detected ones so the two
+              // sets can't collide (rank keys clipOverrides and clipNames).
+              const kept = get().highlights.filter((h) => h.manual);
+              const base = found.reduce((m, h) => Math.max(m, h.rank), -1) + 1;
+              const renumbered = kept.map((h, i) => ({ ...h, rank: base + i }));
+              const oldOverrides = get().clipOverrides;
+              const oldNames = get().clipNames;
+              const clipOverrides: Record<number, { start: number; end: number }> = {};
+              const clipNames: Record<number, string> = {};
+              kept.forEach((h, i) => {
+                if (oldOverrides[h.rank]) clipOverrides[base + i] = oldOverrides[h.rank];
+                if (oldNames[h.rank]) clipNames[base + i] = oldNames[h.rank];
+              });
+              const highlights = [...found, ...renumbered];
               set({
                 highlights,
                 analyzeJob: null,
                 selectedRanks: highlights.map((h) => h.rank),
-                clipOverrides: {},
-                clipNames: {},
+                clipOverrides,
+                clipNames,
                 editingRank: null,
               });
             } catch {
@@ -390,6 +554,12 @@ export const useApp = create<AppState>((set, get) => ({
 
   openVideo: async (path: string) => {
     try {
+      // Before anything else: a debounced autosave from the previous video may
+      // still be pending, and it writes whatever the state is when it fires —
+      // which would be this new video's blank slate, landing in the new
+      // video's session file and wiping the work we're about to restore.
+      void flushAutosave(get());
+      disarmAutosave();
       set({ error: null });
       const mediaInfo = await invoke<MediaInfo>("probe_video", { path });
       const previewPath = await invoke<string>("prepare_preview", { path });
@@ -416,16 +586,24 @@ export const useApp = create<AppState>((set, get) => ({
         batch: null,
         exportDone: null,
         screen: "editor",
+        restoredSession: false,
         recent,
       });
+      await restoreSession(path, set, get);
+      armAutosave();
     } catch (e) {
       set({ error: String(e) });
     }
   },
 
   closeVideo: () => {
+    // Flush before tearing the state down, not after: the debounce may still
+    // be pending, and everything it would save is about to be set to null.
+    void flushAutosave(get());
+    disarmAutosave();
     set({
       screen: "library",
+      restoredSession: false,
       videoPath: null,
       previewSrc: null,
       mediaInfo: null,
@@ -468,6 +646,7 @@ export const useApp = create<AppState>((set, get) => ({
       const id = await invoke<string>("transcribe", {
         path: videoPath,
         model: selectedModel,
+        prompt: get().vocabulary || null,
         start: activeRange?.start ?? null,
         end: activeRange?.end ?? null,
       });
@@ -578,6 +757,11 @@ export const useApp = create<AppState>((set, get) => ({
     set({ selectedModel: m });
   },
 
+  setVocabulary: (v) => {
+    localStorage.setItem("cc.vocabulary", v);
+    set({ vocabulary: v });
+  },
+
   setEncoder: (encoder) => {
     localStorage.setItem("cc.encoder", encoder);
     set({ encoder });
@@ -611,10 +795,10 @@ export const useApp = create<AppState>((set, get) => ({
     const { videoPath } = get();
     if (!videoPath) return;
     try {
-      set({ error: null, highlights: [] });
+      set({ error: null, highlights: get().highlights.filter((h) => h.manual) });
       const id = await invoke<string>("analyze_highlights", {
         path: videoPath,
-        maxCount: 12,
+        maxCount: autoHighlightCount(get().highlightCount, get().mediaInfo?.durationSec),
       });
       set({ analyzeJob: { id, stage: "analyzing", progress: 0 } });
     } catch (e) {
@@ -718,6 +902,7 @@ export const useApp = create<AppState>((set, get) => ({
         const tid = await invoke<string>("transcribe", {
           path: videoPath,
           model: selectedModel,
+          prompt: get().vocabulary || null,
           start: range.start,
           end: range.end,
         });
@@ -819,6 +1004,7 @@ export const useApp = create<AppState>((set, get) => ({
         const tid = await invoke<string>("transcribe", {
           path: videoPath,
           model: selectedModel,
+          prompt: get().vocabulary || null,
           start: range.start,
           end: range.end,
         });
@@ -934,6 +1120,7 @@ export const useApp = create<AppState>((set, get) => ({
         const tid = await invoke<string>("transcribe", {
           path: item.path,
           model: selectedModel,
+          prompt: get().vocabulary || null,
           start: null,
           end: null,
         });
@@ -1057,6 +1244,60 @@ export const useApp = create<AppState>((set, get) => ({
 
   dismissUpdateBanner: () => set({ updateStatus: "idle" }),
 
+  /** Marks a clip by hand around `center`, for the moments the loudness scan
+   * won't find — a quiet line that lands, or something visual with no audio
+   * spike at all. */
+  addBookmark: (center) => {
+    const { highlights, mediaInfo } = get();
+    const duration = mediaInfo?.durationSec ?? center + BOOKMARK_AFTER;
+    const start = Math.max(0, center - BOOKMARK_BEFORE);
+    const end = Math.min(duration, Math.max(start + 1, center + BOOKMARK_AFTER));
+    const rank = highlights.reduce((m, h) => Math.max(m, h.rank), -1) + 1;
+    const mark: Highlight = { start, end, peak: 0, score: 0, rank, manual: true };
+    set({
+      highlights: [...highlights, mark],
+      selectedRanks: [...get().selectedRanks, rank],
+      activeRange: { start, end },
+      editingRank: rank,
+    });
+    return rank;
+  },
+
+  setHighlightCount: (n) => {
+    localStorage.setItem("cc.highlightCount", n == null ? "auto" : String(n));
+    set({ highlightCount: n });
+  },
+
+  dismissRestoredNotice: () => set({ restoredSession: false }),
+
+  discardSession: async () => {
+    const { videoPath } = get();
+    if (!videoPath) return;
+    disarmAutosave();
+    set({
+      segments: [],
+      transcriptSourceRank: null,
+      tuningWord: null,
+      highlights: [],
+      activeRange: null,
+      selectedRanks: [],
+      clipOverrides: {},
+      clipNames: {},
+      editingRank: null,
+      projectPath: null,
+      restoredSession: false,
+    });
+    // Overwrite rather than delete: the next autosave would recreate it
+    // anyway, and there's no delete-file command to add for one caller.
+    try {
+      const path = await invoke<string>("session_file", { videoPath });
+      await invoke("write_text_file", { path, content: "{}" });
+    } catch {
+      /* an autosave we couldn't clear isn't worth an error banner */
+    }
+    armAutosave();
+  },
+
   saveProject: async () => {
     const existing = get().projectPath;
     if (existing) return get()._writeProject(existing);
@@ -1151,3 +1392,19 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 }));
+
+// Debounced autosave. Subscribing here rather than calling a save from each
+// mutation means a new action can't forget to persist itself.
+useApp.subscribe((state) => {
+  if (!autosaveArmed || !state.videoPath) return;
+  const slice = sessionSlice(state);
+  const changed =
+    !lastSlice || (Object.keys(slice) as (keyof SessionSlice)[]).some((k) => slice[k] !== lastSlice![k]);
+  lastSlice = slice;
+  if (!changed) return;
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    autosaveTimer = null;
+    void writeSession(useApp.getState());
+  }, 1200);
+});

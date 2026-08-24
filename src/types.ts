@@ -162,6 +162,10 @@ export interface Highlight {
   peak: number;
   score: number;
   rank: number;
+  /** Set on clips the user marked by hand rather than ones the loudness scan
+   * found. They survive a re-scan (which replaces the detected ones) and are
+   * badged in the list. */
+  manual?: boolean;
 }
 
 /** One clip in the multi-file batch queue. */

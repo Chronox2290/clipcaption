@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../store";
 import { fmtTime } from "../lib/captions";
+import { speakerColor, speakerLabel, speakerLanes } from "../lib/speakers";
 import type { WordSpan } from "../types";
 
 interface Props {
   videoRef: React.RefObject<HTMLVideoElement | null>;
 }
 
-const HEIGHT = 92;
+// Vertical layout. The waveform keeps its own band across the top; below it
+// every speaker gets a lane of their own, like video-editor tracks, so people
+// talking over each other (proximity chat, constantly) stop overlapping into
+// one illegible pile of blocks.
+const TICKS_H = 14;
+const WAVE_H = 52;
+const LANE_H = 26;
+const LANE_GAP = 3;
+const LANES_TOP = TICKS_H + WAVE_H;
+const laneTop = (lane: number) => LANES_TOP + lane * (LANE_H + LANE_GAP);
+const heightFor = (laneCount: number) => laneTop(laneCount) + 2;
+
 const MIN_WORD_DUR = 0.05;
 const MIN_CREATE_DUR = 0.1; // shorter than this on pointerup is treated as a plain click/seek
 const HANDLE_VISUAL_PX = 6;
@@ -69,6 +81,7 @@ export default function MainWaveform({ videoRef }: Props) {
   const setTuningWord = useApp((s) => s.setTuningWord);
   const setWordTime = useApp((s) => s.setWordTime);
   const insertSegment = useApp((s) => s.insertSegment);
+  const style = useApp((s) => s.style);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -102,12 +115,31 @@ export default function MainWaveform({ videoRef }: Props) {
 
   const totalDur = Math.max(0.5, range.end - range.start);
 
+  const lanes = useMemo(() => speakerLanes(segments.map((s) => s.speaker)), [segments]);
+
   const flat = useMemo(() => {
-    const arr: { segId: string; idx: number; w: WordSpan }[] = [];
-    for (const s of segments) s.words.forEach((w, idx) => arr.push({ segId: s.id, idx, w }));
+    const laneOf = new Map(lanes.map((sp, i) => [sp ?? "?", i] as const));
+    const arr: { segId: string; idx: number; w: WordSpan; speaker: number | null; lane: number }[] = [];
+    for (const s of segments) {
+      const lane = laneOf.get(s.speaker ?? "?") ?? 0;
+      s.words.forEach((w, idx) => arr.push({ segId: s.id, idx, w, speaker: s.speaker, lane }));
+    }
     arr.sort((a, b) => a.w.start - b.w.start);
     return arr;
-  }, [segments]);
+  }, [segments, lanes]);
+
+  const HEIGHT = heightFor(lanes.length);
+
+  // With a single lane there's nothing to disambiguate, so the whole strip
+  // stays grabbable exactly as it was before lanes existed. With several,
+  // pointer Y picks the lane - dragging in the waveform band above them means
+  // "draw a new caption", not "grab whichever word happens to be at this time".
+  const laneAtY = (y: number): number | null => {
+    if (lanes.length <= 1) return 0;
+    if (y < LANES_TOP) return null;
+    const lane = Math.floor((y - LANES_TOP) / (LANE_H + LANE_GAP));
+    return lane >= 0 && lane < lanes.length ? lane : null;
+  };
 
   // Measure the visible (non-scrolling) width of the strip.
   useEffect(() => {
@@ -194,8 +226,8 @@ export default function MainWaveform({ videoRef }: Props) {
       ctx.fillText(fmtTime(t), x + 3, 2);
     }
 
-    // waveform bars
-    const mid = HEIGHT / 2;
+    // waveform bars, confined to their own band above the speaker lanes
+    const mid = TICKS_H + WAVE_H / 2;
     ctx.fillStyle = "rgba(232, 235, 242, 0.28)";
     if (waveform.length > 0 && waveformStep > 0) {
       for (let x = 0; x < width; x++) {
@@ -203,50 +235,60 @@ export default function MainWaveform({ videoRef }: Props) {
         const bucket = Math.floor((t - waveformOffset) / waveformStep);
         if (bucket < 0 || bucket >= waveform.length) continue;
         const amp = Math.min(1, waveform[bucket]);
-        const h = Math.max(1, amp * (HEIGHT - 14));
+        const h = Math.max(1, amp * (WAVE_H - 6));
         ctx.fillRect(x, mid - h / 2, 1, h);
       }
     }
 
-    const drawHandle = (x: number, color: string) => {
+    // lane beds, so an empty lane still reads as a track rather than a void
+    for (let i = 0; i < lanes.length; i++) {
+      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.028)" : "rgba(255,255,255,0.014)";
+      ctx.fillRect(0, laneTop(i), width, LANE_H);
+    }
+
+    const drawHandle = (x: number, top: number, color: string) => {
       const hx = x - HANDLE_VISUAL_PX / 2;
       ctx.fillStyle = color;
       if (ctx.roundRect) {
         ctx.beginPath();
-        ctx.roundRect(hx, 10, HANDLE_VISUAL_PX, HEIGHT - 16, 2.5);
+        ctx.roundRect(hx, top + 2, HANDLE_VISUAL_PX, LANE_H - 4, 2.5);
         ctx.fill();
       } else {
-        ctx.fillRect(hx, 10, HANDLE_VISUAL_PX, HEIGHT - 16);
+        ctx.fillRect(hx, top + 2, HANDLE_VISUAL_PX, LANE_H - 4);
       }
       ctx.fillStyle = "rgba(11, 13, 18, 0.6)";
-      const cy = HEIGHT / 2 + 4;
-      for (const dy of [-6, 0, 6]) {
+      const cy = top + LANE_H / 2;
+      for (const dy of [-4, 0, 4]) {
         ctx.fillRect(hx + 1.5, cy + dy - 0.7, HANDLE_VISUAL_PX - 3, 1.4);
       }
     };
 
-    // word regions
-    for (const { segId, idx, w } of flat) {
+    // word regions, one lane per speaker
+    for (const { segId, idx, w, speaker, lane } of flat) {
       const x1 = xAtTime(w.start);
       const x2 = xAtTime(w.end);
       if (x2 < 0 || x1 > width) continue; // off-screen, skip drawing (still hit-testable via time math)
       const active = tuningWord?.segId === segId && tuningWord.idx === idx;
-      ctx.fillStyle = active ? "rgba(46, 230, 255, 0.22)" : "rgba(124, 92, 255, 0.14)";
-      ctx.fillRect(x1, 9, Math.max(1, x2 - x1), HEIGHT - 13);
-      ctx.strokeStyle = active ? "rgba(46, 230, 255, 0.85)" : "rgba(124, 92, 255, 0.5)";
-      ctx.lineWidth = active ? 2 : 1;
-      ctx.strokeRect(x1 + 0.5, 9.5, Math.max(1, x2 - x1 - 1), HEIGHT - 14);
+      const col = speakerColor(speaker, style.speakerColors);
+      const top = laneTop(lane);
+      const bw = Math.max(1, x2 - x1);
 
-      const handleColor = active ? "rgba(46, 230, 255, 0.95)" : "rgba(124, 92, 255, 0.7)";
-      drawHandle(x1, handleColor);
-      drawHandle(x2, handleColor);
+      ctx.fillStyle = active ? "rgba(255, 255, 255, 0.26)" : col.soft;
+      ctx.fillRect(x1, top, bw, LANE_H);
+      ctx.strokeStyle = active ? "#ffffff" : col.line;
+      ctx.lineWidth = active ? 2 : 1;
+      ctx.strokeRect(x1 + 0.5, top + 0.5, Math.max(1, bw - 1), LANE_H - 1);
+
+      const handleColor = active ? "#ffffff" : col.solid;
+      drawHandle(x1, top, handleColor);
+      drawHandle(x2, top, handleColor);
 
       const label = w.text.length > 18 ? w.text.slice(0, 17) + "…" : w.text;
-      ctx.fillStyle = "rgba(232, 235, 242, 0.92)";
+      ctx.fillStyle = "rgba(232, 235, 242, 0.95)";
       ctx.font = "11px -apple-system, Segoe UI, sans-serif";
       const tw = ctx.measureText(label).width;
-      if (tw < x2 - x1 - 4) {
-        ctx.fillText(label, x1 + (x2 - x1) / 2 - tw / 2, 12);
+      if (tw < bw - 4) {
+        ctx.fillText(label, x1 + bw / 2 - tw / 2, top + 7);
       }
     }
 
@@ -255,11 +297,11 @@ export default function MainWaveform({ videoRef }: Props) {
       const x1 = xAtTime(draft.start);
       const x2 = xAtTime(draft.end);
       ctx.fillStyle = "rgba(255, 196, 84, 0.22)";
-      ctx.fillRect(x1, 9, Math.max(1, x2 - x1), HEIGHT - 13);
+      ctx.fillRect(x1, LANES_TOP, Math.max(1, x2 - x1), HEIGHT - LANES_TOP - 2);
       ctx.strokeStyle = "rgba(255, 196, 84, 0.9)";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 3]);
-      ctx.strokeRect(x1 + 0.5, 9.5, Math.max(1, x2 - x1 - 1), HEIGHT - 14);
+      ctx.strokeRect(x1 + 0.5, LANES_TOP + 0.5, Math.max(1, x2 - x1 - 1), HEIGHT - LANES_TOP - 3);
       ctx.setLineDash([]);
     }
 
@@ -274,11 +316,14 @@ export default function MainWaveform({ videoRef }: Props) {
       ctx.stroke();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flat, tuningWord, waveform, waveformStep, waveformOffset, playhead, width, pxPerSec, range.start, range.end, draft]);
+  }, [flat, lanes, HEIGHT, style.speakerColors, tuningWord, waveform, waveformStep, waveformOffset, playhead, width, pxPerSec, range.start, range.end, draft]);
 
-  const hitTest = (x: number): WordHit | null => {
+  const hitTest = (x: number, y: number): WordHit | null => {
+    const lane = laneAtY(y);
+    if (lane == null) return null;
     for (let i = 0; i < flat.length; i++) {
       const { w } = flat[i];
+      if (flat[i].lane !== lane) continue;
       const x1 = xAtTime(w.start);
       const x2 = xAtTime(w.end);
       if (x < x1 - HANDLE_HIT_PX || x > x2 + HANDLE_HIT_PX) continue;
@@ -314,7 +359,7 @@ export default function MainWaveform({ videoRef }: Props) {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = clampX(e.clientX - rect.left);
     const t = timeAtX(x);
-    const hit = hitTest(x);
+    const hit = hitTest(x, e.clientY - rect.top);
 
     if (hit) {
       setTuningWord({ segId: hit.segId, idx: hit.idx });
@@ -354,7 +399,9 @@ export default function MainWaveform({ videoRef }: Props) {
     const x = clampX(e.clientX - rect.left);
 
     if (!drag) {
-      e.currentTarget.style.cursor = draft?.confirming ? "default" : cursorFor(hitTest(x)?.mode ?? null);
+      e.currentTarget.style.cursor = draft?.confirming
+        ? "default"
+        : cursorFor(hitTest(x, e.clientY - rect.top)?.mode ?? null);
       return;
     }
 
@@ -414,7 +461,9 @@ export default function MainWaveform({ videoRef }: Props) {
     }
 
     const rect = e.currentTarget.getBoundingClientRect();
-    e.currentTarget.style.cursor = cursorFor(hitTest(clampX(e.clientX - rect.left))?.mode ?? null);
+    e.currentTarget.style.cursor = cursorFor(
+      hitTest(clampX(e.clientX - rect.left), e.clientY - rect.top)?.mode ?? null
+    );
   };
 
   const commitInsert = () => {
@@ -453,6 +502,24 @@ export default function MainWaveform({ videoRef }: Props) {
           </button>
         </span>
       </div>
+      <div className="mw-tracks">
+        <div className="mw-gutter" style={{ paddingTop: LANES_TOP }}>
+          {lanes.map((sp, i) => (
+            <div
+              key={sp ?? "unknown"}
+              className="mw-lane-head"
+              style={{ height: LANE_H, marginBottom: LANE_GAP }}
+              title={
+                sp == null
+                  ? "Speech that voice-fingerprint diarization couldn't attribute to a speaker"
+                  : speakerLabel(sp)
+              }
+            >
+              <span className="mw-lane-chip" style={{ background: speakerColor(sp, style.speakerColors).solid }} />
+              <span className="mw-lane-name">{speakerLabel(sp)}</span>
+            </div>
+          ))}
+        </div>
       <div className="waveform-wrap mw-wrap" ref={wrapRef}>
         <canvas
           ref={canvasRef}
@@ -461,6 +528,7 @@ export default function MainWaveform({ videoRef }: Props) {
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
         />
+      </div>
       </div>
       {draft?.confirming && (
         <div className="mw-insert-bar">
