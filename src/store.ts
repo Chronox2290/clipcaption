@@ -23,6 +23,7 @@ import {
 } from "./lib/tauri";
 import { getPreset } from "./lib/styles";
 import { applyCensor, nextId, paginate, shiftPages } from "./lib/captions";
+import { addEmojis } from "./lib/emojis";
 import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
 import { sanitizeFilename } from "./lib/naming";
@@ -116,6 +117,9 @@ interface AppState {
   // models
   models: ModelInfo[];
   selectedModel: string;
+  /** Speaker-turn detection (tinydiarize) — off by default since it forces a
+   * smaller, less accurate model in exchange for speaker awareness. */
+  diarizeEnabled: boolean;
 
   // encoding options
   encoder: string; // "auto" | "x264" | "nvenc" | "amf" | "qsv"
@@ -138,6 +142,7 @@ interface AppState {
   removeWord: (segId: string, wordIdx: number) => void;
   setWordTime: (segId: string, wordIdx: number, field: "start" | "end", time: number) => void;
   setSelectedModel: (m: string) => void;
+  setDiarizeEnabled: (v: boolean) => void;
   setEncoder: (e: string) => void;
   setFpsOverride: (fps: number | null) => void;
   downloadModel: (name: string) => Promise<void>;
@@ -226,7 +231,8 @@ export const useApp = create<AppState>((set, get) => ({
   exportDone: null,
   modelJob: null,
   models: [],
-  selectedModel: localStorage.getItem("cc.model") ?? "small.en",
+  selectedModel: localStorage.getItem("cc.model") ?? "large-v3-turbo",
+  diarizeEnabled: localStorage.getItem("cc.diarize") === "1",
   encoder: localStorage.getItem("cc.encoder") ?? "auto",
   availableEncoders: ["x264"],
   fpsOverride: (() => {
@@ -385,7 +391,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   transcribe: async () => {
-    const { videoPath, selectedModel, activeRange, editingRank } = get();
+    const { videoPath, selectedModel, activeRange, editingRank, diarizeEnabled } = get();
     if (!videoPath) return;
     try {
       // editingRank is only set while a highlight's trim controls are open,
@@ -403,6 +409,7 @@ export const useApp = create<AppState>((set, get) => ({
         model: selectedModel,
         start: activeRange?.start ?? null,
         end: activeRange?.end ?? null,
+        diarize: diarizeEnabled,
       });
       set({ transcribeJob: { id, stage: "starting", progress: -1 } });
     } catch (e) {
@@ -483,6 +490,11 @@ export const useApp = create<AppState>((set, get) => ({
   setSelectedModel: (m) => {
     localStorage.setItem("cc.model", m);
     set({ selectedModel: m });
+  },
+
+  setDiarizeEnabled: (v) => {
+    localStorage.setItem("cc.diarize", v ? "1" : "0");
+    set({ diarizeEnabled: v });
   },
 
   setEncoder: (encoder) => {
@@ -588,8 +600,16 @@ export const useApp = create<AppState>((set, get) => ({
     resolutionId = "source",
     fitMode: "fill" | "fit" = "fill"
   ) => {
-    const { highlights, videoPath, mediaInfo, selectedModel, selectedRanks, clipOverrides, clipNames } =
-      get();
+    const {
+      highlights,
+      videoPath,
+      mediaInfo,
+      selectedModel,
+      selectedRanks,
+      clipOverrides,
+      clipNames,
+      diarizeEnabled,
+    } = get();
     const clips = highlights.filter((h) => selectedRanks.includes(h.rank));
     if (!videoPath || !mediaInfo || clips.length === 0) return;
 
@@ -620,10 +640,12 @@ export const useApp = create<AppState>((set, get) => ({
           model: selectedModel,
           start: range.start,
           end: range.end,
+          diarize: diarizeEnabled,
         });
         const result = await waitForJob(tid);
         const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
-        const segs = censor ? applyCensor(segments) : segments;
+        let segs = censor ? applyCensor(segments) : segments;
+        if (style.emojis) segs = addEmojis(segs);
         const pages = shiftPages(paginate(segs, style.maxWordsPerPage), range.start);
         const ass =
           pages.length > 0
@@ -687,8 +709,15 @@ export const useApp = create<AppState>((set, get) => ({
     resolutionId = "source",
     fitMode = "fill"
   ) => {
-    const { highlights, videoPath, mediaInfo, selectedModel, selectedRanks, clipOverrides } =
-      get();
+    const {
+      highlights,
+      videoPath,
+      mediaInfo,
+      selectedModel,
+      selectedRanks,
+      clipOverrides,
+      diarizeEnabled,
+    } = get();
     const ordered = highlights
       .filter((h) => selectedRanks.includes(h.rank))
       .map((h) => ({ h, range: clipOverrides[h.rank] ?? { start: h.start, end: h.end } }))
@@ -714,10 +743,12 @@ export const useApp = create<AppState>((set, get) => ({
           model: selectedModel,
           start: range.start,
           end: range.end,
+          diarize: diarizeEnabled,
         });
         const result = await waitForJob(tid);
         const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
-        const segs = censor ? applyCensor(segments) : segments;
+        let segs = censor ? applyCensor(segments) : segments;
+        if (style.emojis) segs = addEmojis(segs);
         const pages = paginate(segs, style.maxWordsPerPage);
         // source time t -> (t - range.start) + cumulative on the compiled timeline
         mergedPages = mergedPages.concat(shiftPages(pages, range.start - cumulative));
@@ -800,7 +831,7 @@ export const useApp = create<AppState>((set, get) => ({
    * export with the chosen preset. Continues past per-file failures.
    */
   runFileBatch: async (presetId, customMb, outputDir, resolutionId = "source", fitMode = "fill") => {
-    const { selectedModel } = get();
+    const { selectedModel, diarizeEnabled } = get();
     const preset = getExportPreset(presetId);
     const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
     batchCancelRequested = false;
@@ -828,6 +859,7 @@ export const useApp = create<AppState>((set, get) => ({
           model: selectedModel,
           start: null,
           end: null,
+          diarize: diarizeEnabled,
         });
         currentBatchJobId = tid;
         const result = await waitForJob(tid, (p) =>
@@ -836,7 +868,8 @@ export const useApp = create<AppState>((set, get) => ({
         currentBatchJobId = null;
 
         const segments = result ? (JSON.parse(result) as TranscribeResult).segments : [];
-        const segs = censor ? applyCensor(segments) : segments;
+        let segs = censor ? applyCensor(segments) : segments;
+        if (style.emojis) segs = addEmojis(segs);
         const pages = paginate(segs, style.maxWordsPerPage);
         const outW = targetW ?? info.width;
         const outH = targetH ?? info.height;

@@ -20,6 +20,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "pop",
     positionPct: 76,
     maxWordsPerPage: 4,
+    speakerColors: ["#FFFFFF", "#B9AFFF"],
+    emojis: false,
   },
   {
     id: "neon",
@@ -36,6 +38,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "karaoke",
     positionPct: 78,
     maxWordsPerPage: 5,
+    speakerColors: ["#EDFDFF", "#FF6FD8"],
+    emojis: false,
   },
   {
     id: "clean",
@@ -52,6 +56,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "none",
     positionPct: 80,
     maxWordsPerPage: 6,
+    speakerColors: ["#FFFFFF", "#FFD866"],
+    emojis: false,
   },
   {
     id: "retro",
@@ -68,6 +74,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     animation: "bounce",
     positionPct: 74,
     maxWordsPerPage: 3,
+    speakerColors: ["#FFF200", "#00E5FF"],
+    emojis: false,
   },
 ];
 
@@ -97,7 +105,12 @@ export function containerCss(style: CaptionStyle, videoHeightPx: number): CSSPro
   };
 }
 
-export function wordCss(style: CaptionStyle, active: boolean, videoHeightPx: number): CSSProperties {
+export function wordCss(
+  style: CaptionStyle,
+  active: boolean,
+  videoHeightPx: number,
+  speaker?: number | null
+): CSSProperties {
   const ow = (style.outlineWidthPct / 100) * videoHeightPx;
   const stroke =
     ow > 0
@@ -106,8 +119,10 @@ export function wordCss(style: CaptionStyle, active: boolean, videoHeightPx: num
   const shadow = style.shadow ? `0 ${ow * 2.2}px ${ow * 2.5}px rgba(0,0,0,0.55)` : undefined;
   const textShadow = [stroke, shadow].filter(Boolean).join(", ") || undefined;
 
+  const baseFill =
+    speaker != null ? style.speakerColors[speaker % style.speakerColors.length] : style.fill;
   const base: CSSProperties = {
-    color: active ? style.activeFill : style.fill,
+    color: active ? style.activeFill : baseFill,
     textShadow,
     padding: style.boxColor ? "0.05em 0.28em" : undefined,
     background: style.boxColor ? hex8ToRgba(style.boxColor) : undefined,

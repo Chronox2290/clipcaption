@@ -13,25 +13,36 @@ export function paginate(
   // genuine pause.
   maxGapSec = 0.45
 ): CaptionPage[] {
+  // A whisper "segment" is already one continuous spoken unit (whisper's own
+  // silence detection drew that boundary) — if it fits on one page by word
+  // count, a merely-noticeable gap inside it (a dramatic pause, or timing
+  // jitter from word-level alignment) shouldn't fragment it into orphaned
+  // one/two-word captions that lose their sentence's context. Only break a
+  // short segment early for a genuinely long pause; a segment that has to
+  // split anyway (too many words) still uses the tighter threshold to find a
+  // natural place to do it.
+  const hardGapSec = maxGapSec * 2;
+
   const pages: CaptionPage[] = [];
   for (const seg of segments) {
+    const gapThreshold = seg.words.length <= maxWordsPerPage ? hardGapSec : maxGapSec;
     let current: WordSpan[] = [];
     for (const w of seg.words) {
       const prev = current[current.length - 1];
-      const gapBreak = prev && w.start - prev.end > maxGapSec;
+      const gapBreak = prev && w.start - prev.end > gapThreshold;
       if (current.length >= maxWordsPerPage || gapBreak) {
-        if (current.length) pages.push(toPage(current));
+        if (current.length) pages.push(toPage(current, seg.speaker));
         current = [];
       }
       current.push(w);
     }
-    if (current.length) pages.push(toPage(current));
+    if (current.length) pages.push(toPage(current, seg.speaker));
   }
   return pages;
 }
 
-function toPage(words: WordSpan[]): CaptionPage {
-  return { start: words[0].start, end: words[words.length - 1].end, words };
+function toPage(words: WordSpan[], speaker: number | null): CaptionPage {
+  return { start: words[0].start, end: words[words.length - 1].end, words, speaker };
 }
 
 export function pageAt(pages: CaptionPage[], t: number, linger = 0.25): CaptionPage | null {
@@ -86,6 +97,7 @@ export function shiftPages(pages: CaptionPage[], offset: number): CaptionPage[] 
   return pages.map((p) => ({
     start: Math.max(0, p.start - offset),
     end: Math.max(0, p.end - offset),
+    speaker: p.speaker,
     words: p.words.map((w) => ({
       ...w,
       start: Math.max(0, w.start - offset),

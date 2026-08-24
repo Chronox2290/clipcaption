@@ -14,6 +14,8 @@ const PX_PER_SEC = 170;
 const PAD_SEC = 0.6; // context shown before/after the segment's own words
 const HEIGHT = 64;
 const MIN_WORD_DUR = 0.05;
+const HANDLE_VISUAL_PX = 6; // drawn width of each drag bar
+const HANDLE_HIT_PX = 9; // grabbable radius around a drag bar — wider than the visual for forgiving hit-testing
 
 /** Drag-to-retime waveform strip for one transcript segment. Renders the
  * segment's own slice of the shared amplitude envelope with each word drawn
@@ -101,6 +103,26 @@ export default function WaveformEditor({ segId, words, activeIndex, onSelectWord
       }
     }
 
+    // A visible, grabbable "drag bar" at each word boundary — wider than a
+    // plain outline and marked with grip notches so it reads as draggable at
+    // a glance, not just as the edge of a highlighted region.
+    const drawHandle = (x: number, color: string) => {
+      const hx = x - HANDLE_VISUAL_PX / 2;
+      ctx.fillStyle = color;
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(hx, 3, HANDLE_VISUAL_PX, HEIGHT - 6, 2.5);
+        ctx.fill();
+      } else {
+        ctx.fillRect(hx, 3, HANDLE_VISUAL_PX, HEIGHT - 6);
+      }
+      ctx.fillStyle = "rgba(11, 13, 18, 0.6)";
+      const cy = HEIGHT / 2;
+      for (const dy of [-6, 0, 6]) {
+        ctx.fillRect(hx + 1.5, cy + dy - 0.7, HANDLE_VISUAL_PX - 3, 1.4);
+      }
+    };
+
     // word regions
     words.forEach((w, i) => {
       const x1 = Math.max(0, xAtTime(w.start));
@@ -112,10 +134,9 @@ export default function WaveformEditor({ segId, words, activeIndex, onSelectWord
       ctx.lineWidth = active ? 2 : 1;
       ctx.strokeRect(x1 + 0.5, 2.5, Math.max(1, x2 - x1 - 1), HEIGHT - 5);
 
-      // edge grips
-      ctx.fillStyle = active ? "rgba(46, 230, 255, 0.9)" : "rgba(124, 92, 255, 0.55)";
-      ctx.fillRect(x1, 2, 3, HEIGHT - 4);
-      ctx.fillRect(x2 - 3, 2, 3, HEIGHT - 4);
+      const handleColor = active ? "rgba(46, 230, 255, 0.95)" : "rgba(124, 92, 255, 0.7)";
+      drawHandle(x1, handleColor);
+      drawHandle(x2, handleColor);
 
       // label
       const label = w.text.length > 14 ? w.text.slice(0, 13) + "…" : w.text;
@@ -141,19 +162,20 @@ export default function WaveformEditor({ segId, words, activeIndex, onSelectWord
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [words, activeIndex, waveform, waveformStep, waveformOffset, playhead, width]);
 
-  const HANDLE_PX = 7;
-
   const hitTest = (x: number): { idx: number; mode: "move" | "start" | "end" } | null => {
     for (let i = 0; i < words.length; i++) {
       const x1 = xAtTime(words[i].start);
       const x2 = xAtTime(words[i].end);
-      if (x < x1 - 2 || x > x2 + 2) continue;
-      if (x <= x1 + HANDLE_PX) return { idx: i, mode: "start" };
-      if (x >= x2 - HANDLE_PX) return { idx: i, mode: "end" };
+      if (x < x1 - HANDLE_HIT_PX || x > x2 + HANDLE_HIT_PX) continue;
+      if (x <= x1 + HANDLE_HIT_PX) return { idx: i, mode: "start" };
+      if (x >= x2 - HANDLE_HIT_PX) return { idx: i, mode: "end" };
       return { idx: i, mode: "move" };
     }
     return null;
   };
+
+  const cursorFor = (mode: "move" | "start" | "end" | null) =>
+    mode === "start" || mode === "end" ? "ew-resize" : mode === "move" ? "grab" : "pointer";
 
   const onPointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -173,6 +195,7 @@ export default function WaveformEditor({ segId, words, activeIndex, onSelectWord
         origEnd: words[hit.idx].end,
         moved: false,
       };
+      e.currentTarget.style.cursor = hit.mode === "move" ? "grabbing" : "ew-resize";
       e.currentTarget.setPointerCapture(e.pointerId);
     } else {
       // click on empty waveform: just seek
@@ -183,9 +206,16 @@ export default function WaveformEditor({ segId, words, activeIndex, onSelectWord
 
   const onPointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current;
-    if (!drag) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
+
+    if (!drag) {
+      // Not dragging — just update the cursor so a resize/grab affordance
+      // shows up before the user commits to clicking.
+      e.currentTarget.style.cursor = cursorFor(hitTest(x)?.mode ?? null);
+      return;
+    }
+
     const t = timeAtX(x);
     const delta = t - drag.startPointerTime;
     if (Math.abs(delta) > 0.005) drag.moved = true;
@@ -223,6 +253,8 @@ export default function WaveformEditor({ segId, words, activeIndex, onSelectWord
     } catch {
       /* not captured — fine */
     }
+    const rect = e.currentTarget.getBoundingClientRect();
+    e.currentTarget.style.cursor = cursorFor(hitTest(e.clientX - rect.left)?.mode ?? null);
   };
 
   if (!hasWords) return null;

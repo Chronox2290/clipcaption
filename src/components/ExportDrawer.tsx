@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useApp } from "../store";
 import { buildAss } from "../lib/ass";
 import { paginate, applyCensor, shiftPages, fmtTime, capitalize } from "../lib/captions";
+import { addEmojis } from "../lib/emojis";
 import { pickSavePath } from "../lib/tauri";
 import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
 import EncodingOptions from "./EncodingOptions";
@@ -40,7 +41,8 @@ export default function ExportDrawer() {
 
     const outW = targetW ?? mediaInfo.width;
     const outH = targetH ?? mediaInfo.height;
-    const segs = censor ? applyCensor(segments) : segments;
+    let segs = censor ? applyCensor(segments) : segments;
+    if (style.emojis) segs = addEmojis(segs);
     let pages = paginate(segs, style.maxWordsPerPage);
     if (activeRange) {
       pages = shiftPages(

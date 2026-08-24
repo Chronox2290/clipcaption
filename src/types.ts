@@ -9,6 +9,11 @@ export interface WordSpan {
 export interface Segment {
   id: string;
   words: WordSpan[];
+  /** 0 or 1 when speaker-turn detection was used for this transcribe, else
+   * null. This is turn-taking (whisper.cpp's tinydiarize), not real voice
+   * identification — it alternates each time the speaker changes, but can't
+   * recognize "this is the same person as before" after a gap. */
+  speaker: number | null;
 }
 
 /** What a "transcribe" job resolves with — the word-level transcript plus a
@@ -24,11 +29,14 @@ export interface TranscribeResult {
   waveformOffset: number;
 }
 
-/** A caption "page" — the chunk of words shown on screen at once. */
+/** A caption "page" — the chunk of words shown on screen at once. A page
+ * never spans more than one transcript segment, so it inherits that
+ * segment's speaker (see Segment.speaker) directly. */
 export interface CaptionPage {
   start: number;
   end: number;
   words: WordSpan[];
+  speaker: number | null;
 }
 
 export interface MediaInfo {
@@ -60,6 +68,10 @@ export interface ModelInfo {
   downloaded: boolean;
   recommended?: boolean;
   description: string;
+  /** True for a model that unlocks a capability (currently: speaker-turn
+   * detection) rather than being a normal transcription accuracy choice —
+   * kept out of the main "Speech model" picker. */
+  capabilityOnly?: boolean;
 }
 
 export type AnimationKind = "pop" | "karaoke" | "bounce" | "none";
@@ -83,6 +95,12 @@ export interface CaptionStyle {
   /** Vertical anchor position, % from top (e.g. 78 = lower third) */
   positionPct: number;
   maxWordsPerPage: number;
+  /** Base (non-active-word) fill color per speaker, used instead of `fill`
+   * when a caption page came from a diarized transcript — [speaker 0, speaker 1]. */
+  speakerColors: [string, string];
+  /** Auto-insert a relevant emoji after the key trigger word in each caption
+   * line (one per line, see lib/emojis.ts). Off by default. */
+  emojis: boolean;
 }
 
 export interface ExportPreset {

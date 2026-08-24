@@ -23,21 +23,30 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const transcriptSourceRank = useApp((s) => s.transcriptSourceRank);
   const highlights = useApp((s) => s.highlights);
   const clipOverrides = useApp((s) => s.clipOverrides);
+  const style = useApp((s) => s.style);
 
   const [tuning, setTuning] = useState<{ segId: string; idx: number } | null>(null);
 
   const model = models.find((m) => m.name === selectedModel);
 
   if (transcribeJob) {
+    const pct = transcribeJob.progress >= 0 ? Math.round(transcribeJob.progress * 100) : null;
     return (
       <div className="panel-empty">
-        <div className="spinner" />
-        <p>
-          {transcribeJob.stage === "extracting" && "Extracting audio…"}
-          {transcribeJob.stage === "transcribing" &&
-            `Transcribing… ${transcribeJob.progress >= 0 ? Math.round(transcribeJob.progress * 100) + "%" : ""}`}
-          {!["extracting", "transcribing"].includes(transcribeJob.stage) && "Working…"}
-        </p>
+        <div className="progress-wrap" style={{ width: "80%", maxWidth: 320 }}>
+          <div className="progress-bar">
+            <div
+              className={`progress-fill ${pct === null ? "indeterminate" : ""}`}
+              style={pct === null ? undefined : { width: `${pct}%` }}
+            />
+          </div>
+          <p className="muted" style={{ textAlign: "center" }}>
+            {transcribeJob.stage === "extracting" && "Extracting audio…"}
+            {transcribeJob.stage === "transcribing" &&
+              `Transcribing…${pct !== null ? ` ${pct}%` : ""}`}
+            {!["extracting", "transcribing"].includes(transcribeJob.stage) && "Working…"}
+          </p>
+        </div>
       </div>
     );
   }
@@ -118,6 +127,13 @@ export default function TranscriptPanel({ videoRef }: Props) {
                 if (v && seg.words.length) v.currentTime = seg.words[0].start + 0.001;
               }}
             >
+              {seg.speaker != null && (
+                <span
+                  className="speaker-dot"
+                  title={`Speaker ${seg.speaker === 0 ? "A" : "B"}`}
+                  style={{ background: style.speakerColors[seg.speaker % 2] }}
+                />
+              )}
               {seg.words.length ? fmtTime(seg.words[0].start) : "–"}
             </button>
             <div className="seg-body">

@@ -528,6 +528,15 @@ kbd {
 .seg-time:hover {
   background: rgba(46, 230, 255, 0.18);
 }
+.speaker-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
 .seg-words {
   display: flex;
   flex-wrap: wrap;
@@ -1203,6 +1212,17 @@ kbd {
   border-radius: 999px;
   background: linear-gradient(90deg, var(--accent), var(--accent2));
   transition: width 200ms ease;
+}
+/* Stage has no real % yet (e.g. extracting audio) — a moving shimmer reads
+ * as "working" instead of a static bar that looks stalled. */
+.progress-fill.indeterminate {
+  width: 40% !important;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent2), transparent);
+  animation: cc-shimmer 1.1s ease-in-out infinite;
+}
+@keyframes cc-shimmer {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(280%); }
 }
 .progress-row {
   display: flex;

@@ -113,6 +113,35 @@ export default function StylePanel() {
           onChange={(e) => set({ uppercase: e.target.checked })}
         />
       </div>
+      <div className="field">
+        <label title="Adds a relevant emoji after the key word in each caption line">
+          Emojis 🔥
+        </label>
+        <input
+          type="checkbox"
+          checked={style.emojis}
+          onChange={(e) => set({ emojis: e.target.checked })}
+        />
+      </div>
+      <div className="field colors">
+        <label>Speakers</label>
+        <span className="color-item">
+          <input
+            type="color"
+            value={style.speakerColors[0]}
+            onChange={(e) => set({ speakerColors: [e.target.value, style.speakerColors[1]] })}
+          />
+          A
+        </span>
+        <span className="color-item">
+          <input
+            type="color"
+            value={style.speakerColors[1]}
+            onChange={(e) => set({ speakerColors: [style.speakerColors[0], e.target.value] })}
+          />
+          B
+        </span>
+      </div>
     </div>
   );
 }

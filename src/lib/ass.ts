@@ -68,9 +68,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const words = page.words;
     if (!words.length) continue;
 
+    // A diarized page uses its speaker's color instead of the style's
+    // default fill, so alternating speakers read as visually distinct.
+    const pagePrimary =
+      page.speaker != null
+        ? assColor(style.speakerColors[page.speaker % style.speakerColors.length])
+        : primary;
+
     if (style.animation === "none") {
       const text = words.map((w) => wordText(w.text, style)).join(" ");
-      lines.push(dialogue(page.start, page.end, `{\\fad(40,40)}${esc(text)}`));
+      lines.push(dialogue(page.start, page.end, `{\\fad(40,40)}{\\1c${pagePrimary}}${esc(text)}`));
       continue;
     }
 
@@ -91,9 +98,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
           } else if (style.animation === "bounce") {
             anim = `\\t(0,110,\\fscx122\\fscy122)\\t(110,240,\\fscx100\\fscy100)`;
           }
-          parts.push(`{\\1c${activeC}${anim}}${t}{\\1c${primary}\\fscx100\\fscy100}`);
+          parts.push(`{\\1c${activeC}${anim}}${t}{\\1c${pagePrimary}\\fscx100\\fscy100}`);
         } else {
-          parts.push(t);
+          parts.push(`{\\1c${pagePrimary}}${t}`);
         }
       }
       const fade = i === 0 ? "{\\fad(40,0)}" : "";

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { CaptionStyle, Segment } from "../types";
 import { paginate, pageAt, activeWordIndex, applyCensor } from "../lib/captions";
+import { addEmojis } from "../lib/emojis";
 import { containerCss, wordCss } from "../lib/styles";
 
 interface Props {
@@ -28,9 +29,10 @@ export default function CaptionOverlay({ videoRef, segments, style, censor, stag
   }, [videoRef]);
 
   const pages = useMemo(() => {
-    const segs = censor ? applyCensor(segments) : segments;
+    let segs = censor ? applyCensor(segments) : segments;
+    if (style.emojis) segs = addEmojis(segs);
     return paginate(segs, style.maxWordsPerPage);
-  }, [segments, style.maxWordsPerPage, censor]);
+  }, [segments, style.maxWordsPerPage, censor, style.emojis]);
 
   const page = pageAt(pages, time);
   if (!page || stageHeight <= 0) return null;
@@ -39,7 +41,10 @@ export default function CaptionOverlay({ videoRef, segments, style, censor, stag
   return (
     <div style={containerCss(style, stageHeight)}>
       {page.words.map((w, i) => (
-        <span key={`${page.start}-${i}`} style={wordCss(style, i === active, stageHeight)}>
+        <span
+          key={`${page.start}-${i}`}
+          style={wordCss(style, i === active, stageHeight, page.speaker)}
+        >
           {style.uppercase ? w.text.toUpperCase() : w.text}
         </span>
       ))}

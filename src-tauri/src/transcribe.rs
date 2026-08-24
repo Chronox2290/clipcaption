@@ -19,6 +19,12 @@ pub struct WordSpan {
 pub struct Segment {
     pub id: String,
     pub words: Vec<WordSpan>,
+    /// 0 or 1 when speaker-turn detection (tinydiarize) was used, alternating
+    /// each time whisper.cpp reports a speaker change. This is turn-taking,
+    /// not voice identification — it can't tell you the same person spoke
+    /// again after a gap, only that the previous speaker vs. this one
+    /// differs. Null when diarization wasn't requested for this transcribe.
+    pub speaker: Option<u8>,
 }
 
 #[derive(Serialize)]
@@ -49,6 +55,11 @@ struct WSeg {
     text: String,
     offsets: WOff,
     tokens: Option<Vec<WTok>>,
+    /// Present (and meaningful) only when whisper-cli was run with -tdrz.
+    /// Verified field name against whisper.cpp's own JSON writer in
+    /// examples/cli/cli.cpp — true means the *next* segment is a new speaker.
+    #[serde(default)]
+    speaker_turn_next: bool,
 }
 
 #[derive(Deserialize)]
@@ -71,8 +82,9 @@ pub fn run(
     model: String,
     start: Option<f64>,
     end: Option<f64>,
+    diarize: bool,
 ) {
-    let result = run_inner(&app, &job_id, &handle, &path, &model, start, end);
+    let result = run_inner(&app, &job_id, &handle, &path, &model, start, end, diarize);
     match result {
         Ok(json) => emit_done(&app, &job_id, "transcribing", Some(json)),
         Err(e) => {
@@ -93,11 +105,18 @@ fn run_inner(
     model: &str,
     start: Option<f64>,
     end: Option<f64>,
+    diarize: bool,
 ) -> Result<String, String> {
-    let model_path = models::model_path(app, model)?;
+    // Speaker-turn detection requires whisper.cpp's tinydiarize fine-tune —
+    // it's a different, smaller model (small.en-tdrz) than whatever accuracy
+    // model the user picked, so diarizing trades some accuracy for speaker
+    // awareness rather than layering on top of e.g. large-v3.
+    let effective_model = if diarize { "small.en-tdrz" } else { model };
+    let model_path = models::model_path(app, effective_model)?;
     if !model_path.exists() {
+        let label = if diarize { "Speaker detection" } else { "Model" };
         return Err(format!(
-            "Model '{model}' is not downloaded yet — grab it from the home screen."
+            "{label} model '{effective_model}' is not downloaded yet — grab it from the home screen."
         ));
     }
 
@@ -163,29 +182,49 @@ fn run_inner(
         .unwrap_or(4)
         .to_string();
 
+    // Cross-attention DTW alignment for word timestamps — this is the single
+    // biggest lever for accurate word timing. Without it, whisper.cpp buckets
+    // words into ~20ms encoder-frame timestamp tokens, which is noticeably
+    // imprecise; -dtw instead derives each word's timing from the model's own
+    // attention weights. Every model this app offers has a matching built-in
+    // alignment-head preset and needs no extra download — just this flag.
+    // The preset string isn't always the model name verbatim (the large
+    // models take dotted names like "large.v3" while their file names use
+    // hyphens), so it's resolved through models::dtw_preset rather than
+    // passed through directly. Resolved against effective_model, not the
+    // originally-requested model, since that's the model actually running.
+    let dtw = models::dtw_preset(effective_model);
+
+    // Bind these as owned Strings first — the args Vec below borrows from
+    // them, and (unlike the single-chained-expression form this replaced)
+    // that borrow now needs to outlive more than one statement.
+    let model_path_s = model_path.to_string_lossy().into_owned();
+    let wav_s = wav.to_string_lossy().into_owned();
+    let out_base_s = out_base.to_string_lossy().into_owned();
+
+    let mut args: Vec<&str> = vec![
+        "-m",
+        &model_path_s,
+        "-f",
+        &wav_s,
+        "-ojf", // output full JSON (with token timestamps)
+        "-of",
+        &out_base_s,
+        "-t",
+        &threads,
+        "-pp", // print progress
+        "-dtw",
+        dtw,
+    ];
+    // Speaker-turn detection — combinable with -dtw (verified no conflict in
+    // whisper.cpp's own flag validation), adds a `speaker_turn_next` boolean
+    // to each segment in the JSON output parsed below.
+    if diarize {
+        args.push("-tdrz");
+    }
+
     let mut child = sidecar::command("whisper-cli")
-        .args([
-            "-m",
-            model_path.to_string_lossy().as_ref(),
-            "-f",
-            wav.to_string_lossy().as_ref(),
-            "-ojf", // output full JSON (with token timestamps)
-            "-of",
-            out_base.to_string_lossy().as_ref(),
-            "-t",
-            &threads,
-            "-pp", // print progress
-            // Cross-attention DTW alignment for word timestamps — this is
-            // the single biggest lever for accurate word timing. Without it,
-            // whisper.cpp buckets words into ~20ms encoder-frame timestamp
-            // tokens, which is noticeably imprecise; -dtw instead derives
-            // each word's timing from the model's own attention weights.
-            // Every model this app offers (tiny.en/base.en/small.en/
-            // medium.en) has a matching built-in alignment-head preset, and
-            // it needs no extra download — just this flag.
-            "-dtw",
-            model,
-        ])
+        .args(&args)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
@@ -248,7 +287,7 @@ fn run_inner(
     let parsed: WhisperOut =
         serde_json::from_str(&raw).map_err(|e| format!("Transcript parse error: {e}"))?;
 
-    let mut segments = build_segments(parsed);
+    let mut segments = build_segments(parsed, diarize);
     // shift word times back onto the full-video timeline when a range was used
     if offset > 0.0 {
         for seg in &mut segments {
@@ -355,16 +394,26 @@ fn read_wav_peaks(path: &std::path::Path, max_buckets: usize) -> Option<(Vec<f32
     Some((peaks, step))
 }
 
-fn build_segments(out: WhisperOut) -> Vec<Segment> {
+fn build_segments(out: WhisperOut, diarize: bool) -> Vec<Segment> {
     let mut segments = Vec::new();
+    // Alternates 0/1 each time whisper.cpp reports a speaker-turn boundary.
+    // Only meaningful (and only assigned to segments) when diarize is on.
+    let mut speaker: u8 = 0;
 
     for (si, seg) in out.transcription.into_iter().enumerate() {
+        let turn_next = diarize && seg.speaker_turn_next;
         let text_trim = seg.text.trim();
         // skip non-speech annotations like [Music], (laughing), [BLANK_AUDIO]
         if text_trim.is_empty()
             || (text_trim.starts_with('[') && text_trim.ends_with(']'))
             || (text_trim.starts_with('(') && text_trim.ends_with(')'))
         {
+            // Still honor a turn boundary on a skipped annotation segment,
+            // so the alternation doesn't fall out of sync with whisper's own
+            // turn markers.
+            if turn_next {
+                speaker = 1 - speaker;
+            }
             continue;
         }
 
@@ -419,7 +468,11 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
             segments.push(Segment {
                 id: format!("seg_{si}"),
                 words,
+                speaker: if diarize { Some(speaker) } else { None },
             });
+        }
+        if turn_next {
+            speaker = 1 - speaker;
         }
     }
 
