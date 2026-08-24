@@ -242,6 +242,19 @@ export function parseTime(text: string): number | null {
   return Number.isFinite(total) ? total : null;
 }
 
+/** Below this, a word is worth a second look. Whisper is confidently wrong
+ * often enough that this can't be a guarantee - it's a shortlist, not a
+ * verdict. Set where it flags the genuinely mangled words on real game audio
+ * without lighting up half the transcript. */
+export const UNSURE_BELOW = 0.55;
+
+/** True when whisper wasn't sure about this word. Words with no confidence at
+ * all (typed by hand, or from an older transcript) are treated as certain -
+ * flagging them would bury the ones that need attention. */
+export function isUnsure(w: WordSpan): boolean {
+  return w.confidence != null && w.confidence < UNSURE_BELOW;
+}
+
 /** Job-stage strings from the Rust backend ("exporting", "pass 1/2", …) are
  * lowercase identifiers, not display text — capitalize the first letter
  * wherever one is shown directly in the UI. */

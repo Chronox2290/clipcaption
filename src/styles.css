@@ -843,6 +843,16 @@ kbd {
   margin: 10px 0 4px;
 }
 
+/* Words whisper wasn't sure about. Deliberately an underline rather than a
+   background or a colour swap: it has to be visible while scanning without
+   competing with the profanity highlight or the selected-word outline, both
+   of which already own colour in this list. */
+.word-input.unsure {
+  text-decoration: underline wavy rgba(255, 196, 84, 0.75);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+
 .speaker-count {
   display: flex;
   align-items: center;

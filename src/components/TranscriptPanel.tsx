@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useApp } from "../store";
 import TimeField from "./TimeField";
-import { fmtTime, isProfane, resolveSpeakerNames, speakerLetter } from "../lib/captions";
+import { fmtTime, isProfane, isUnsure, resolveSpeakerNames, speakerLetter } from "../lib/captions";
 import { chronoPositions } from "../lib/highlights";
 
 interface Props {
@@ -240,7 +240,12 @@ export default function TranscriptPanel({ videoRef }: Props) {
                         }}
                         className={`word-input ${isProfane(w.text) ? "profane" : ""} ${
                           tuning?.segId === seg.id && tuning.idx === i ? "tuning" : ""
-                        }`}
+                        } ${isUnsure(w) ? "unsure" : ""}`}
+                        title={
+                          isUnsure(w)
+                            ? `Whisper wasn't sure about this word (${Math.round((w.confidence ?? 0) * 100)}%)`
+                            : undefined
+                        }
                         value={w.text}
                         size={Math.max(w.text.length, 1)}
                         onChange={(e) => updateWord(seg.id, i, e.target.value)}

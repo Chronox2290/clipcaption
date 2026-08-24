@@ -15,6 +15,11 @@ pub struct WordSpan {
     pub text: String,
     pub start: f64,
     pub end: f64,
+    /// Lowest token probability in this word, 0..1. A word is only as
+    /// trustworthy as its least certain piece, so this takes the minimum
+    /// rather than the average - averaging hides a confident "Christ" glued
+    /// to a guessed "ian".
+    pub confidence: f32,
 }
 
 #[derive(Serialize, Debug)]
@@ -95,6 +100,16 @@ struct WTok {
     /// "every token starts and ends at the segment start".
     #[serde(default = "no_dtw")]
     t_dtw: i64,
+    /// Whisper's own probability for this token, 0..1. Kept so the editor can
+    /// point at the handful of words that are probably wrong instead of
+    /// making you scrub the whole clip - which matters far more to how fast
+    /// a clip ships than any decimal place of word error rate.
+    #[serde(default = "full_confidence")]
+    p: f32,
+}
+
+fn full_confidence() -> f32 {
+    1.0
 }
 
 fn no_dtw() -> i64 {
@@ -562,6 +577,7 @@ fn split_by_speaker(segments: Vec<Segment>, diarized: &[diarize::SpeakerSegment]
                     text: w.text.clone(),
                     start: w.start,
                     end: w.end,
+                    confidence: w.confidence,
                 })
                 .collect();
             if !words.is_empty() {
@@ -632,8 +648,11 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
                         text: t.trim().to_string(),
                         start,
                         end: start, // real end assigned in the pass below
+                        confidence: tok.p,
                     });
                 } else if let Some(last) = words.last_mut() {
+                    // A word is only as trustworthy as its least certain piece.
+                    last.confidence = last.confidence.min(tok.p);
                     // Punctuation and sub-word pieces join the word they
                     // belong to and deliberately do NOT move its end: a
                     // trailing "," routinely carries a timestamp that jumps
@@ -684,6 +703,11 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
                     text: (*p).to_string(),
                     start: seg_start + dur * (i as f64) / n,
                     end: seg_start + dur * ((i + 1) as f64) / n,
+                    // This path only runs when a segment had no usable tokens
+                    // at all, so there is no per-token probability to report.
+                    // Unknown, not certain - flagged low so it surfaces for
+                    // review rather than passing as trustworthy.
+                    confidence: 0.0,
                 });
             }
         }
@@ -718,7 +742,7 @@ mod speaker_split_tests {
             id: "seg_0".into(),
             words: words
                 .iter()
-                .map(|(t, s, e)| WordSpan { text: (*t).into(), start: *s, end: *e })
+                .map(|(t, s, e)| WordSpan { text: (*t).into(), start: *s, end: *e, confidence: 1.0 })
                 .collect(),
             speaker: None,
             pan: None,
@@ -833,6 +857,40 @@ mod timing_tests {
         assert_eq!(words[0].text, "Oh,");
         assert!(words[0].end > words[0].start);
         assert!(words[1].start >= words[0].start);
+    }
+
+    /// A word takes the LOWEST probability of its pieces. Averaging would let
+    /// a confident stem hide a guessed ending - exactly the words worth
+    /// checking - and the point of carrying this at all is to find them.
+    #[test]
+    fn a_word_is_only_as_confident_as_its_weakest_token() {
+        let segs = parse(
+            r#"{"transcription":[{"text":" Christian","offsets":{"from":0,"to":900},
+            "tokens":[
+              {"text":" Christ","offsets":{"from":0,"to":400},"t_dtw":10,"p":0.99},
+              {"text":"ian","offsets":{"from":400,"to":900},"t_dtw":40,"p":0.31}]}]}"#,
+        );
+        let w = &segs[0].words[0];
+        assert_eq!(w.text, "Christian");
+        assert!((w.confidence - 0.31).abs() < 1e-6, "got {}", w.confidence);
+    }
+
+    /// Whisper's JSON predates this field in older builds; a missing
+    /// probability must not read as "certain".
+    #[test]
+    fn a_missing_probability_defaults_to_certain_but_no_tokens_does_not() {
+        let with_tokens = parse(
+            r#"{"transcription":[{"text":" hi","offsets":{"from":0,"to":300},
+            "tokens":[{"text":" hi","offsets":{"from":0,"to":300},"t_dtw":5}]}]}"#,
+        );
+        assert_eq!(with_tokens[0].words[0].confidence, 1.0);
+
+        // No usable tokens at all - the evenly-spread fallback. Nothing is
+        // known about these words, so they surface for review.
+        let no_tokens = parse(
+            r#"{"transcription":[{"text":" hi there","offsets":{"from":0,"to":600},"tokens":[]}]}"#,
+        );
+        assert_eq!(no_tokens[0].words[0].confidence, 0.0);
     }
 
     /// `-dtw` timings are centiseconds and win over `offsets` when present.

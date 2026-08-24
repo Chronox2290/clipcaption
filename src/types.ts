@@ -4,6 +4,11 @@ export interface WordSpan {
   text: string;
   start: number; // seconds
   end: number; // seconds
+  /** How sure whisper was about this word, 0..1 (the lowest probability among
+   * its tokens — see WordSpan.confidence in transcribe.rs). Absent on words
+   * you typed yourself and on transcripts made before this existed, both of
+   * which are treated as certain. */
+  confidence?: number;
 }
 
 export interface Segment {

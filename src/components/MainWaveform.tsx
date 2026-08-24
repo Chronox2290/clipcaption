@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../store";
-import { fmtTime, resolveSpeakerNames } from "../lib/captions";
+import { fmtTime, isUnsure, resolveSpeakerNames } from "../lib/captions";
 import { speakerColor, speakerLabel, speakerLanes } from "../lib/speakers";
 import type { WordSpan } from "../types";
 
@@ -159,6 +159,7 @@ export default function MainWaveform({ videoRef }: Props) {
   }, [segments, lanes]);
 
   const HEIGHT = heightFor(lanes.length);
+  const unsureCount = useMemo(() => flat.filter((e) => isUnsure(e.w)).length, [flat]);
 
   // With a single lane there's nothing to disambiguate, so the whole strip
   // stays grabbable exactly as it was before lanes existed. With several,
@@ -197,6 +198,31 @@ export default function MainWaveform({ videoRef }: Props) {
 
   const zoom = (factor: number) =>
     setZoomOverride(clamp((zoomOverride ?? pxPerSec) * factor, MIN_PXSEC, MAX_PXSEC));
+
+  /** Selects the next word whisper wasn't sure about, after whatever is
+   * selected now (or after the playhead), and brings it into view.
+   *
+   * This is the whole point of carrying confidence: instead of scrubbing a
+   * two-hour clip looking for mistakes, you tap through the short list of
+   * words the model itself flagged as shaky. */
+  const nextUnsure = () => {
+    const from = tuningWord
+      ? flat.findIndex((e) => e.segId === tuningWord.segId && e.idx === tuningWord.idx)
+      : flat.findIndex((e) => e.w.start >= playhead) - 1;
+    // Wraps, so tapping it repeatedly cycles the clip rather than dead-ending.
+    for (let n = 1; n <= flat.length; n++) {
+      const e = flat[(Math.max(from, -1) + n + flat.length) % flat.length];
+      if (!isUnsure(e.w)) continue;
+      setTuningWord({ segId: e.segId, idx: e.idx });
+      const v = videoRef.current;
+      if (v) v.currentTime = Math.max(0, e.w.start + 0.001);
+      const wrap = wrapRef.current;
+      if (wrap) {
+        wrap.scrollLeft = Math.max(0, xAtTime(e.w.start) - wrap.clientWidth / 2);
+      }
+      return;
+    }
+  };
 
   /** Zooms and scrolls until the selected word is comfortably draggable.
    * Aims for it to fill about a quarter of the visible strip, which leaves
@@ -366,6 +392,14 @@ export default function MainWaveform({ videoRef }: Props) {
       const handleColor = active ? "#ffffff" : col.solid;
       drawHandle(x1, top, handleColor);
       drawHandle(x2, top, handleColor);
+
+      // Amber underline for a word whisper doubted - same meaning as the
+      // wavy underline in the transcript, drawn where it survives being one
+      // pixel wide.
+      if (isUnsure(w)) {
+        ctx.fillStyle = "rgba(255, 196, 84, 0.95)";
+        ctx.fillRect(x1, top + LANE_H - 3, bw, 2);
+      }
 
       const label = w.text.length > 18 ? w.text.slice(0, 17) + "…" : w.text;
       ctx.fillStyle = "rgba(232, 235, 242, 0.95)";
@@ -643,6 +677,18 @@ export default function MainWaveform({ videoRef }: Props) {
             title="Zoom in on the selected word until it's big enough to drag (Z)"
           >
             ⤢ Word
+          </button>
+          <button
+            className="btn btn-ghost btn-small"
+            onClick={nextUnsure}
+            disabled={unsureCount === 0}
+            title={
+              unsureCount === 0
+                ? "Nothing flagged - whisper was confident about every word here"
+                : `Jump to the next word whisper wasn't sure about (${unsureCount} in this transcript)`
+            }
+          >
+            ⚠ {unsureCount}
           </button>
         </span>
       </div>
