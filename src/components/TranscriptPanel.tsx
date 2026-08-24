@@ -270,7 +270,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
                       Done
                     </button>
                   </div>
-                  <div className="word-tune-row">
+                  <div className="range-grid">
                     <span className="hl-nudge-label">Start</span>
                     <TimeField
                       value={seg.words[tuning.idx].start}
@@ -284,7 +284,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
                         title="Set to where the video is paused"
                         onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "start")}
                       >
-                        📍 here
+                        📍
                       </button>
                     </TimeField>
                     <span className="hl-nudge-label">End</span>
@@ -299,7 +299,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
                         title="Set to where the video is paused"
                         onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "end")}
                       >
-                        📍 here
+                        📍
                       </button>
                     </TimeField>
                   </div>

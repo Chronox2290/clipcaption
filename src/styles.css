@@ -377,10 +377,78 @@ select {
   100% { opacity: 0; }
 }
 
+/* Edit-bay layout: preview and side panel share an upper row, the timeline
+   spans the full window width beneath them. The timeline used to live inside
+   the preview column, which cost it the sidebar's width - on a wide monitor
+   that was the most valuable strip on screen, spent on nothing. */
 .ed-body {
   flex: 1;
   display: flex;
+  flex-direction: column;
   min-height: 0;
+}
+
+.ed-upper {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.ed-timeline {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 12px 12px;
+  background: var(--bg1);
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+}
+.ed-timeline .main-waveform {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Pane dividers. Wider hit area than they look, because a 1px target is a
+   fight; the visible line only brightens on hover or while dragging. */
+.ed-split {
+  flex: 0 0 auto;
+  position: relative;
+  background: transparent;
+  transition: background 120ms ease;
+}
+.ed-split::after {
+  content: "";
+  position: absolute;
+  background: var(--line);
+}
+.ed-split:hover,
+.ed-split.dragging {
+  background: rgba(124, 92, 255, 0.35);
+}
+.ed-split:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.ed-split-h {
+  height: 7px;
+  cursor: ns-resize;
+}
+.ed-split-h::after {
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 1px;
+}
+.ed-split-v {
+  width: 7px;
+  cursor: ew-resize;
+}
+.ed-split-v::after {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
 }
 
 .ed-preview {
@@ -470,8 +538,11 @@ kbd {
 }
 
 .ed-side {
-  width: 380px;
-  border-left: 1px solid var(--line);
+  /* width comes from the splitter (inline style); this is the floor if it
+     ever renders without one */
+  width: 400px;
+  flex: 0 0 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: var(--bg1);
@@ -748,6 +819,28 @@ kbd {
   animation: caption-shake 0.34s ease-in-out 1;
 }
 
+/* Start/End as a labelled grid rather than one flex row. Two typed fields
+   plus their buttons came to roughly 420px of controls in a 380px panel, so
+   the second one was clipped at the edge; stacked, each gets a full row and
+   the labels align, which is what makes a small form scannable. */
+.range-grid {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 6px 8px;
+  margin-bottom: 8px;
+}
+.range-grid .hl-nudge-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+.range-grid .time-field {
+  width: 100%;
+}
+.range-grid .time-field input {
+  width: 100%;
+}
+
 .time-field {
   display: inline-flex;
   align-items: center;
@@ -808,6 +901,15 @@ kbd {
   align-items: flex-start;
   gap: 6px;
   min-width: 0;
+  /* Vertical scrolling lives here rather than on the canvas wrapper so the
+     track headers scroll in lockstep with the lanes they label. Horizontal
+     scrolling stays inside .mw-wrap, so the headers never slide away. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.main-waveform {
+  min-height: 0;
 }
 .mw-gutter {
   display: flex;

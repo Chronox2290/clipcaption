@@ -191,7 +191,16 @@ interface AppState {
    * that whisper produced nothing for at all (not just a mistimed word) —
    * used by the main waveform editor's click-drag-on-empty-space gesture.
    * Returns the new segment's id. */
-  insertSegment: (start: number, end: number, text: string) => string;
+  insertSegment: (
+    start: number,
+    end: number,
+    text: string,
+    /** Which speaker the new line belongs to. Defaults to unattributed, but
+     * the timeline passes the lane it was drawn in - a line you add by hand
+     * inside someone's track is theirs, and filing it under a separate
+     * "Unknown" speaker was both wrong and confusing. */
+    speaker?: number | null
+  ) => string;
   setSelectedModel: (m: string) => void;
   setVocabulary: (v: string) => void;
   setEncoder: (e: string) => void;
@@ -248,6 +257,18 @@ interface AppState {
   restoredSession: boolean;
   /** Adds a hand-marked clip centred on `center` seconds; returns its rank. */
   addBookmark: (center: number) => number;
+  /** Reassigns a whole segment to a speaker (or null for unattributed) - the
+   * timeline's drag-a-line-into-another-lane gesture, and the fastest way to
+   * correct diarization when it puts someone in the wrong lane. */
+  setSegmentSpeaker: (segId: string, speaker: number | null) => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  /** Snapshots the current edit state so the next mutation can be undone.
+   * `coalesceKey` groups a burst of related changes (a drag firing dozens of
+   * setWordTime calls) into one undo step. */
+  pushHistory: (coalesceKey?: string) => void;
+  undo: () => void;
+  redo: () => void;
   /** How many clips a scan may return, or null to scale it to the video's
    * length. */
   highlightCount: number | null;
@@ -273,6 +294,54 @@ function loadRecent(): string[] {
   }
 }
 
+
+// ---------------- undo / redo ----------------
+//
+// Snapshots rather than inverse operations: the edit surface here is a handful
+// of plain arrays and records, so copying the references is cheap (structural
+// sharing does the work - an unchanged segment is the same object in every
+// snapshot) and it can't drift out of sync with the actions the way
+// hand-written inverses do.
+
+interface EditSnapshot {
+  segments: Segment[];
+  highlights: Highlight[];
+  clipOverrides: Record<number, { start: number; end: number }>;
+  clipNames: Record<number, string>;
+  selectedRanks: number[];
+}
+
+/** Deep enough to be correct, shallow enough to be free: every mutating action
+ * replaces these containers rather than mutating them in place. */
+function snapshot(s: AppState): EditSnapshot {
+  return {
+    segments: s.segments,
+    highlights: s.highlights,
+    clipOverrides: s.clipOverrides,
+    clipNames: s.clipNames,
+    selectedRanks: s.selectedRanks,
+  };
+}
+
+/** Far more than anyone reaches for, still bounded so an all-day session
+ * can't grow the stack without limit. */
+const MAX_HISTORY = 100;
+/** A burst of changes sharing a coalesce key within this window collapses to
+ * one undo step - otherwise dragging a word across the timeline would take
+ * fifty Ctrl+Z presses to walk back. */
+const COALESCE_MS = 900;
+
+let undoPast: EditSnapshot[] = [];
+let undoFuture: EditSnapshot[] = [];
+let lastPushKey: string | null = null;
+let lastPushAt = 0;
+
+function resetHistory() {
+  undoPast = [];
+  undoFuture = [];
+  lastPushKey = null;
+  lastPushAt = 0;
+}
 
 /** Clips a scan may return when the count is left on auto.
  *
@@ -406,6 +475,8 @@ export const useApp = create<AppState>((set, get) => ({
   mediaInfo: null,
   projectPath: null,
   restoredSession: false,
+  canUndo: false,
+  canRedo: false,
   highlightCount: (() => {
     const v = localStorage.getItem("cc.highlightCount");
     return v == null || v === "auto" ? null : Number(v);
@@ -594,7 +665,8 @@ export const useApp = create<AppState>((set, get) => ({
       // video's session file and wiping the work we're about to restore.
       void flushAutosave(get());
       disarmAutosave();
-      set({ error: null });
+      resetHistory();
+      set({ error: null, canUndo: false, canRedo: false });
       const mediaInfo = await invoke<MediaInfo>("probe_video", { path });
       const previewPath = await invoke<string>("prepare_preview", { path });
       const previewSrc = await fileSrc(previewPath);
@@ -637,8 +709,11 @@ export const useApp = create<AppState>((set, get) => ({
     // be pending, and everything it would save is about to be set to null.
     void flushAutosave(get());
     disarmAutosave();
+    resetHistory();
     set({
       screen: "library",
+      canUndo: false,
+      canRedo: false,
       restoredSession: false,
       videoPath: null,
       previewSrc: null,
@@ -707,6 +782,7 @@ export const useApp = create<AppState>((set, get) => ({
   setCensor: (censor) => set({ censor }),
 
   updateWord: (segId, wordIdx, text) => {
+    get().pushHistory(`text:${segId}:${wordIdx}`);
     set({
       segments: get().segments.map((s) =>
         s.id !== segId
@@ -717,6 +793,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   insertWord: (segId, atIndex) => {
+    get().pushHistory();
     set({
       segments: get().segments.map((s) => {
         if (s.id !== segId) return s;
@@ -736,6 +813,7 @@ export const useApp = create<AppState>((set, get) => ({
 
   /** Removes a word box outright; drops the whole segment row if it was the last one left. */
   removeWord: (segId, wordIdx) => {
+    get().pushHistory();
     set({
       segments: get()
         .segments.map((s) =>
@@ -748,6 +826,7 @@ export const useApp = create<AppState>((set, get) => ({
   /** Manually re-times a word (nudge, or "sync to playhead") so captions can
    * be tuned to match the actual voice when whisper's own timestamp is off. */
   setWordTime: (segId, wordIdx, field, time) => {
+    get().pushHistory(`time:${segId}:${wordIdx}`);
     set({
       segments: get().segments.map((s) => {
         if (s.id !== segId) return s;
@@ -773,7 +852,8 @@ export const useApp = create<AppState>((set, get) => ({
    * whisper-produced segment. Used when whisper missed a stretch of speech
    * entirely (no segment at all covers that time), which `insertWord` can't
    * fix since it only adds a word inside an *existing* segment. */
-  insertSegment: (start, end, text) => {
+  insertSegment: (start, end, text, speaker = null) => {
+    get().pushHistory();
     const id = nextId("useg");
     const s0 = Math.max(0, Math.min(start, end - 0.02));
     const e0 = Math.max(s0 + 0.02, end);
@@ -783,7 +863,7 @@ export const useApp = create<AppState>((set, get) => ({
     // frozen block of text for its whole duration.
     const tokens = text.trim().split(/\s+/).filter(Boolean);
     const words = tokens.length ? distributeWordTimes(tokens, s0, e0) : [{ text: "word", start: s0, end: e0 }];
-    const seg: Segment = { id, words, speaker: null };
+    const seg: Segment = { id, words, speaker };
     const segments = [...get().segments, seg].sort(
       (a, b) => (a.words[0]?.start ?? 0) - (b.words[0]?.start ?? 0)
     );
@@ -873,6 +953,7 @@ export const useApp = create<AppState>((set, get) => ({
   stopEditingHighlight: () => set({ editingRank: null }),
 
   adjustHighlightRange: (rank, start, end) => {
+    get().pushHistory(`range:${rank}`);
     const dur = get().mediaInfo?.durationSec ?? Infinity;
     const s = Math.max(0, Math.min(start, end - 0.5));
     const e = Math.max(s + 0.5, Math.min(end, dur));
@@ -885,6 +966,7 @@ export const useApp = create<AppState>((set, get) => ({
   /** Names a highlight for display and as its export filename. An empty/whitespace
    * name clears the override, falling back to the auto-generated "_highlight_NN". */
   setClipName: (rank, name) => {
+    get().pushHistory(`name:${rank}`);
     const trimmed = name.trim();
     const next = { ...get().clipNames };
     if (trimmed) next[rank] = trimmed;
@@ -1380,6 +1462,7 @@ export const useApp = create<AppState>((set, get) => ({
    * won't find — a quiet line that lands, or something visual with no audio
    * spike at all. */
   addBookmark: (center) => {
+    get().pushHistory();
     const { highlights, mediaInfo } = get();
     const duration = mediaInfo?.durationSec ?? center + BOOKMARK_AFTER;
     const start = Math.max(0, center - BOOKMARK_BEFORE);
@@ -1398,6 +1481,53 @@ export const useApp = create<AppState>((set, get) => ({
   setHighlightCount: (n) => {
     localStorage.setItem("cc.highlightCount", n == null ? "auto" : String(n));
     set({ highlightCount: n });
+  },
+
+  pushHistory: (coalesceKey) => {
+    const now = Date.now();
+    if (coalesceKey && coalesceKey === lastPushKey && now - lastPushAt < COALESCE_MS) {
+      lastPushAt = now; // same gesture still in progress - the snapshot we already have is the one to return to
+      return;
+    }
+    lastPushKey = coalesceKey ?? null;
+    lastPushAt = now;
+    undoPast.push(snapshot(get()));
+    if (undoPast.length > MAX_HISTORY) undoPast.shift();
+    undoFuture = [];
+    set({ canUndo: true, canRedo: false });
+  },
+
+  undo: () => {
+    const prev = undoPast.pop();
+    if (!prev) return;
+    undoFuture.push(snapshot(get()));
+    lastPushKey = null; // don't coalesce across an undo
+    set({
+      ...prev,
+      tuningWord: null, // the selected index may not exist in the restored state
+      canUndo: undoPast.length > 0,
+      canRedo: true,
+    });
+  },
+
+  redo: () => {
+    const next = undoFuture.pop();
+    if (!next) return;
+    undoPast.push(snapshot(get()));
+    lastPushKey = null;
+    set({
+      ...next,
+      tuningWord: null,
+      canUndo: true,
+      canRedo: undoFuture.length > 0,
+    });
+  },
+
+  setSegmentSpeaker: (segId, speaker) => {
+    get().pushHistory();
+    set({
+      segments: get().segments.map((sg) => (sg.id === segId ? { ...sg, speaker } : sg)),
+    });
   },
 
   dismissRestoredNotice: () => set({ restoredSession: false }),

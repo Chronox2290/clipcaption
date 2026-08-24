@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../store";
-import { fmtTime } from "../lib/captions";
+import { fmtTime, resolveSpeakerNames } from "../lib/captions";
 import { speakerColor, speakerLabel, speakerLanes } from "../lib/speakers";
 import type { WordSpan } from "../types";
 
@@ -38,6 +38,9 @@ type Drag =
       segId: string;
       idx: number;
       mode: "move" | "start" | "end";
+      /** Lane the pointer is currently over, for dragging a line into another
+       * speaker's track. */
+      dropLane: number | null;
       startPointerTime: number;
       origStart: number;
       origEnd: number;
@@ -45,6 +48,9 @@ type Drag =
     }
   | {
       kind: "create";
+      /** Lane the drag started in - the new line is filed under that lane's
+       * speaker instead of becoming a nameless extra track. */
+      lane: number | null;
       startPointerTime: number;
       gapStart: number;
       gapEnd: number;
@@ -58,6 +64,7 @@ interface Draft {
   end: number;
   text: string;
   confirming: boolean;
+  lane: number | null;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -81,7 +88,18 @@ export default function MainWaveform({ videoRef }: Props) {
   const setTuningWord = useApp((s) => s.setTuningWord);
   const setWordTime = useApp((s) => s.setWordTime);
   const insertSegment = useApp((s) => s.insertSegment);
+  const removeWord = useApp((s) => s.removeWord);
+  const setSegmentSpeaker = useApp((s) => s.setSegmentSpeaker);
   const style = useApp((s) => s.style);
+  const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
+  const speakerProfiles = useApp((s) => s.speakerProfiles);
+
+  // Same resolution the captions and transcript use, so a named voice reads
+  // as that name everywhere rather than "Speaker B" in this one panel.
+  const speakerNames = useMemo(
+    () => resolveSpeakerNames(speakerEmbeddings, speakerProfiles),
+    [speakerEmbeddings, speakerProfiles]
+  );
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -92,6 +110,7 @@ export default function MainWaveform({ videoRef }: Props) {
   const [zoomOverride, setZoomOverride] = useState<number | null>(null);
   const [playhead, setPlayhead] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [dropLane, setDropLane] = useState<number | null>(null);
 
   // The time range this instance is currently scoped to: the selected
   // highlight if one is active (the literal "whichever part of the clip is
@@ -195,6 +214,27 @@ export default function MainWaveform({ videoRef }: Props) {
     if (draft?.confirming) insertInputRef.current?.focus();
   }, [draft?.confirming]);
 
+  // Delete/Backspace removes the selected word. The timeline is a canvas and
+  // never takes keyboard focus, so this listens at the window and bails out
+  // whenever a text field has focus - otherwise it would eat every Backspace
+  // typed into the transcript or a clip name.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (!tuningWord) return;
+      const el = document.activeElement;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement)?.isContentEditable) {
+        return;
+      }
+      e.preventDefault();
+      removeWord(tuningWord.segId, tuningWord.idx);
+      setTuningWord(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tuningWord, removeWord, setTuningWord]);
+
   // Draw.
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -242,8 +282,18 @@ export default function MainWaveform({ videoRef }: Props) {
 
     // lane beds, so an empty lane still reads as a track rather than a void
     for (let i = 0; i < lanes.length; i++) {
-      ctx.fillStyle = i % 2 === 0 ? "rgba(255,255,255,0.028)" : "rgba(255,255,255,0.014)";
+      const isDrop = i === dropLane;
+      ctx.fillStyle = isDrop
+        ? "rgba(124, 92, 255, 0.20)"
+        : i % 2 === 0
+        ? "rgba(255,255,255,0.028)"
+        : "rgba(255,255,255,0.014)";
       ctx.fillRect(0, laneTop(i), width, LANE_H);
+      if (isDrop) {
+        ctx.strokeStyle = "rgba(124, 92, 255, 0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(0.5, laneTop(i) + 0.5, width - 1, LANE_H - 1);
+      }
     }
 
     const drawHandle = (x: number, top: number, color: string) => {
@@ -316,7 +366,31 @@ export default function MainWaveform({ videoRef }: Props) {
       ctx.stroke();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flat, lanes, HEIGHT, style.speakerColors, tuningWord, waveform, waveformStep, waveformOffset, playhead, width, pxPerSec, range.start, range.end, draft]);
+  }, [flat, lanes, HEIGHT, dropLane, style.speakerColors, tuningWord, waveform, waveformStep, waveformOffset, playhead, width, pxPerSec, range.start, range.end, draft]);
+
+  /** Nearest words in the SAME lane, which is what may actually constrain a
+   * drag. Using flat[i-1]/flat[i+1] instead meant a line in one speaker's
+   * lane was blocked by an unrelated word in another's, purely because it
+   * happened to sit next to it in time. Lanes are independent tracks; they
+   * only collide with themselves. */
+  const laneNeighbours = (flatIdx: number): { prevEnd: number; nextStart: number } => {
+    const lane = flat[flatIdx]?.lane;
+    let prevEnd = 0;
+    for (let i = flatIdx - 1; i >= 0; i--) {
+      if (flat[i].lane === lane) {
+        prevEnd = flat[i].w.end;
+        break;
+      }
+    }
+    let nextStart = Infinity;
+    for (let i = flatIdx + 1; i < flat.length; i++) {
+      if (flat[i].lane === lane) {
+        nextStart = flat[i].w.start;
+        break;
+      }
+    }
+    return { prevEnd, nextStart };
+  };
 
   const hitTest = (x: number, y: number): WordHit | null => {
     const lane = laneAtY(y);
@@ -334,10 +408,15 @@ export default function MainWaveform({ videoRef }: Props) {
     return null;
   };
 
-  const gapAt = (t: number): [number, number] => {
+  /** The empty span around `t` in one lane - where a new line may be drawn.
+   * Scoped to the lane for the same reason as laneNeighbours: another
+   * speaker talking over this moment doesn't occupy this track. */
+  const gapAt = (t: number, lane: number | null): [number, number] => {
     let lo = 0;
     let hi = mediaInfo?.durationSec ?? t + 30;
-    for (const { w } of flat) {
+    for (const entry of flat) {
+      if (lane != null && entry.lane !== lane) continue;
+      const { w } = entry;
       if (w.end <= t && w.end > lo) lo = w.end;
       if (w.start >= t && w.start < hi) hi = w.start;
     }
@@ -371,6 +450,7 @@ export default function MainWaveform({ videoRef }: Props) {
         segId: hit.segId,
         idx: hit.idx,
         mode: hit.mode,
+        dropLane: null,
         startPointerTime: t,
         origStart: flat[hit.flatIdx].w.start,
         origEnd: flat[hit.flatIdx].w.end,
@@ -378,9 +458,11 @@ export default function MainWaveform({ videoRef }: Props) {
       };
       e.currentTarget.style.cursor = hit.mode === "move" ? "grabbing" : "ew-resize";
     } else {
-      const [gapStart, gapEnd] = gapAt(t);
+      const lane = laneAtY(e.clientY - rect.top);
+      const [gapStart, gapEnd] = gapAt(t, lane);
       dragRef.current = {
         kind: "create",
+        lane,
         startPointerTime: t,
         gapStart,
         gapEnd,
@@ -388,7 +470,7 @@ export default function MainWaveform({ videoRef }: Props) {
         curStart: t,
         curEnd: t,
       };
-      setDraft({ start: t, end: t, text: "", confirming: false });
+      setDraft({ start: t, end: t, text: "", confirming: false, lane });
     }
     e.currentTarget.setPointerCapture(e.pointerId);
   };
@@ -407,10 +489,18 @@ export default function MainWaveform({ videoRef }: Props) {
 
     const t = timeAtX(x);
     if (drag.kind === "word") {
+      if (drag.mode === "move") {
+        const over = laneAtY(e.clientY - rect.top);
+        const from = flat[drag.flatIdx]?.lane;
+        const next = over != null && over !== from ? over : null;
+        if (next !== drag.dropLane) {
+          drag.dropLane = next;
+          setDropLane(next); // redraw so the target track highlights
+        }
+      }
       const delta = t - drag.startPointerTime;
       if (Math.abs(delta) > 0.005) drag.moved = true;
-      const prevEnd = drag.flatIdx > 0 ? flat[drag.flatIdx - 1].w.end : 0;
-      const nextStart = drag.flatIdx < flat.length - 1 ? flat[drag.flatIdx + 1].w.start : Infinity;
+      const { prevEnd, nextStart } = laneNeighbours(drag.flatIdx);
 
       if (drag.mode === "start") {
         const newStart = Math.max(prevEnd, Math.min(t, drag.origEnd - MIN_WORD_DUR));
@@ -432,7 +522,7 @@ export default function MainWaveform({ videoRef }: Props) {
       const b = Math.min(drag.gapEnd, Math.max(drag.startPointerTime, t));
       drag.curStart = a;
       drag.curEnd = b;
-      setDraft({ start: a, end: b, text: "", confirming: false });
+      setDraft({ start: a, end: b, text: "", confirming: false, lane: drag.lane });
     }
   };
 
@@ -450,9 +540,16 @@ export default function MainWaveform({ videoRef }: Props) {
         const v = videoRef.current;
         if (v) v.currentTime = Math.max(0, flat[drag.flatIdx]?.w.start ?? drag.startPointerTime);
       }
+      if (drag.dropLane != null) {
+        // Reassigning the whole segment, not the single word: speaker is a
+        // property of the line, and splitting one word onto another person
+        // would mean inventing a segment boundary the user didn't ask for.
+        setSegmentSpeaker(drag.segId, lanes[drag.dropLane] ?? null);
+      }
+      setDropLane(null);
     } else if (drag?.kind === "create") {
       if (drag.moved && drag.curEnd - drag.curStart >= MIN_CREATE_DUR) {
-        setDraft({ start: drag.curStart, end: drag.curEnd, text: "", confirming: true });
+        setDraft({ start: drag.curStart, end: drag.curEnd, text: "", confirming: true, lane: drag.lane });
       } else {
         setDraft(null);
         const v = videoRef.current;
@@ -470,7 +567,8 @@ export default function MainWaveform({ videoRef }: Props) {
     if (!draft || !draft.confirming) return;
     const text = draft.text.trim();
     if (!text) return;
-    const segId = insertSegment(draft.start, draft.end, text);
+    const speaker = draft.lane != null ? lanes[draft.lane] ?? null : null;
+    const segId = insertSegment(draft.start, draft.end, text, speaker);
     setTuningWord({ segId, idx: 0 });
     const v = videoRef.current;
     if (v) v.currentTime = Math.max(0, draft.start + 0.001);
@@ -512,11 +610,11 @@ export default function MainWaveform({ videoRef }: Props) {
               title={
                 sp == null
                   ? "Speech that voice-fingerprint diarization couldn't attribute to a speaker"
-                  : speakerLabel(sp)
+                  : speakerLabel(sp, speakerNames)
               }
             >
               <span className="mw-lane-chip" style={{ background: speakerColor(sp, style.speakerColors).solid }} />
-              <span className="mw-lane-name">{speakerLabel(sp)}</span>
+              <span className="mw-lane-name">{speakerLabel(sp, speakerNames)}</span>
             </div>
           ))}
         </div>

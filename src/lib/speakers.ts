@@ -42,9 +42,21 @@ export function speakerColor(speaker: number | null, palette: string[]): Speaker
   return { solid, soft: withAlpha(solid, 0.2), line: withAlpha(solid, 0.7) };
 }
 
-/** Matches the transcript panel's own speaker naming. */
-export function speakerLabel(speaker: number | null): string {
-  return speaker == null ? "Unknown" : `Speaker ${String.fromCharCode(65 + (speaker % 26))}`;
+/** The name to show for a speaker.
+ *
+ * Prefers the name the user gave that voice (resolved by voice-fingerprint
+ * matching - see resolveSpeakerNames in lib/captions.ts) and falls back to
+ * "Speaker A/B/C", matching what the transcript panel shows. Without the
+ * names map the timeline lanes would keep saying "Speaker B" for someone the
+ * captions already call Luke. */
+export function speakerLabel(
+  speaker: number | null,
+  names?: Record<number, string>
+): string {
+  if (speaker == null) return "Unknown";
+  const named = names?.[speaker];
+  if (named) return named;
+  return `Speaker ${String.fromCharCode(65 + (speaker % 26))}`;
 }
 
 /** The distinct speakers present, in a stable display order: real speakers

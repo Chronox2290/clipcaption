@@ -288,7 +288,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
 
               {isEditing && (
                 <div className="hl-edit">
-                  <div className="hl-nudge-row">
+                  <div className="range-grid">
                     <span className="hl-nudge-label">Start</span>
                     <TimeField
                       value={range.start}
@@ -302,7 +302,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                         title="Set to where the video is paused"
                         onClick={() => setEdgeFromPlayhead(h, "start")}
                       >
-                        📍 here
+                        📍
                       </button>
                     </TimeField>
                     <span className="hl-nudge-label">End</span>
@@ -318,7 +318,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                         title="Set to where the video is paused"
                         onClick={() => setEdgeFromPlayhead(h, "end")}
                       >
-                        📍 here
+                        📍
                       </button>
                     </TimeField>
                   </div>

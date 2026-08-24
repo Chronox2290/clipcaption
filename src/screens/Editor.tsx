@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store";
 import CaptionOverlay from "../components/CaptionOverlay";
 import MainWaveform from "../components/MainWaveform";
+import { useSplitter } from "../lib/useSplitter";
 import TranscriptPanel from "../components/TranscriptPanel";
 import StylePanel from "../components/StylePanel";
 import ExportDrawer from "../components/ExportDrawer";
@@ -22,6 +23,10 @@ export default function Editor() {
     restoredSession,
     dismissRestoredNotice,
     discardSession,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
     activeRange,
     projectPath,
     saveProject,
@@ -31,6 +36,26 @@ export default function Editor() {
   } = useApp();
   const speakerNames = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
   const [savedFlash, setSavedFlash] = useState(false);
+
+  // The timeline is the workspace; the preview is a reference you glance at.
+  // Both dividers are draggable and remembered, so this is a starting point
+  // rather than a decision imposed on every video.
+  const timeline = useSplitter({
+    storageKey: "cc.timelineHeight",
+    initial: 300,
+    min: 140,
+    max: () => Math.max(200, window.innerHeight - 260),
+    axis: "y",
+    invert: true, // the timeline is anchored to the bottom: dragging up grows it
+  });
+  const sidebar = useSplitter({
+    storageKey: "cc.sidebarWidth",
+    initial: 400,
+    min: 300,
+    max: () => Math.max(320, window.innerWidth - 420),
+    axis: "x",
+    invert: true, // anchored right: dragging left grows it
+  });
   const doSave = async () => {
     const ok = await saveProject();
     if (ok) {
@@ -106,6 +131,20 @@ export default function Editor() {
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement)?.isContentEditable) {
         return;
       }
+      // Undo/redo before the transport keys: these are the only shortcuts that
+      // should work whether or not a video element exists yet.
+      if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || e.key === "Y")) {
+        e.preventDefault();
+        redo();
+        return;
+      }
+
       const v = videoRef.current;
       if (!v) return;
       if (e.code === "Space") {
@@ -121,7 +160,7 @@ export default function Editor() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [mediaInfo]);
+  }, [mediaInfo, undo, redo]);
 
   const fileName = videoPath?.split(/[/\\]/).pop() ?? "";
 
@@ -141,6 +180,22 @@ export default function Editor() {
           </span>
         )}
         <span className="ed-header-spacer" />
+        <button
+          className="btn btn-ghost btn-small"
+          onClick={undo}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+        >
+          ↺
+        </button>
+        <button
+          className="btn btn-ghost btn-small"
+          onClick={redo}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          ↻
+        </button>
         {savedFlash && <span className="ed-saved-flash">✔ Saved</span>}
         <button className="btn btn-ghost btn-small" onClick={doSave} title={projectPath ?? "Save the highlights, names, style, and transcript so far"}>
           💾 Save Project
@@ -165,96 +220,113 @@ export default function Editor() {
       )}
 
       <div className="ed-body">
-        <div className="ed-preview">
-          <div className="video-frame" ref={frameRef} onClick={togglePlay}>
-            {previewSrc && (
-              <video
-                ref={videoRef}
-                src={previewSrc}
-                className="video-el"
-                playsInline
-              />
-            )}
-            <div
-              className="stage"
-              style={{ width: stage.w, height: stage.h }}
-            >
-              <CaptionOverlay
-                videoRef={videoRef}
-                segments={segments}
-                style={style}
-                censor={censor}
-                stageHeight={stage.h}
-                speakerNames={speakerNames}
-              />
-            </div>
-            {!playing && <div className="play-badge">▶</div>}
-          </div>
-
-          <div className="transport">
-            <button className="btn btn-ghost" onClick={togglePlay}>
-              {playing ? "❚❚" : "▶"}
-            </button>
-            <div className="seek-wrap">
-              {activeRange && mediaInfo && mediaInfo.durationSec > 0 && (
-                <div
-                  className="seek-range"
-                  style={{
-                    left: `${(activeRange.start / mediaInfo.durationSec) * 100}%`,
-                    width: `${((activeRange.end - activeRange.start) / mediaInfo.durationSec) * 100}%`,
-                  }}
+        <div className="ed-upper">
+          <div className="ed-preview">
+            <div className="video-frame" ref={frameRef} onClick={togglePlay}>
+              {previewSrc && (
+                <video
+                  ref={videoRef}
+                  src={previewSrc}
+                  className="video-el"
+                  playsInline
                 />
               )}
-              <input
-                className="seek"
-                type="range"
-                min={0}
-                max={mediaInfo?.durationSec ?? 0}
-                step={0.05}
-                value={time}
-                onChange={(e) => {
-                  const v = videoRef.current;
-                  if (v) v.currentTime = Number(e.target.value);
-                }}
-              />
+              <div
+                className="stage"
+                style={{ width: stage.w, height: stage.h }}
+              >
+                <CaptionOverlay
+                  videoRef={videoRef}
+                  segments={segments}
+                  style={style}
+                  censor={censor}
+                  stageHeight={stage.h}
+                  speakerNames={speakerNames}
+                />
+              </div>
+              {!playing && <div className="play-badge">▶</div>}
             </div>
-            <span className="time muted">
-              {fmtTime(time)} / {fmtTime(mediaInfo?.durationSec ?? 0)}
-            </span>
-          </div>
-          <p className="muted small kbd-hint">
-            <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> seek 5s
-            <span className="kbd-hint-shift"> (+ Shift for 1s)</span>
-          </p>
 
-          <MainWaveform videoRef={videoRef} />
+            <div className="transport">
+              <button className="btn btn-ghost" onClick={togglePlay}>
+                {playing ? "❚❚" : "▶"}
+              </button>
+              <div className="seek-wrap">
+                {activeRange && mediaInfo && mediaInfo.durationSec > 0 && (
+                  <div
+                    className="seek-range"
+                    style={{
+                      left: `${(activeRange.start / mediaInfo.durationSec) * 100}%`,
+                      width: `${((activeRange.end - activeRange.start) / mediaInfo.durationSec) * 100}%`,
+                    }}
+                  />
+                )}
+                <input
+                  className="seek"
+                  type="range"
+                  min={0}
+                  max={mediaInfo?.durationSec ?? 0}
+                  step={0.05}
+                  value={time}
+                  onChange={(e) => {
+                    const v = videoRef.current;
+                    if (v) v.currentTime = Number(e.target.value);
+                  }}
+                />
+              </div>
+              <span className="time muted">
+                {fmtTime(time)} / {fmtTime(mediaInfo?.durationSec ?? 0)}
+              </span>
+            </div>
+            <p className="muted small kbd-hint">
+              <kbd>Space</kbd> play/pause · <kbd>←</kbd>/<kbd>→</kbd> seek 5s
+              <span className="kbd-hint-shift"> (+ Shift for 1s)</span>
+            </p>
+
+          </div>
+
+          <div
+            className={`ed-split ed-split-v${sidebar.dragging ? " dragging" : ""}`}
+            title="Drag to resize · double-click to snap"
+            {...sidebar.handleProps}
+          />
+
+          <aside className="ed-side" style={{ width: sidebar.size }}>
+            <nav className="tabs">
+              <button className={tab === "transcript" ? "sel" : ""} onClick={() => setTab("transcript")}>
+                Transcript
+              </button>
+              <button
+                className={tab === "highlights" ? "sel" : ""}
+                onClick={() => setTab("highlights")}
+              >
+                Highlights
+              </button>
+              <button className={tab === "style" ? "sel" : ""} onClick={() => setTab("style")}>
+                Style
+              </button>
+              <button className={tab === "export" ? "sel" : ""} onClick={() => setTab("export")}>
+                Export
+              </button>
+            </nav>
+            <div className="tab-body">
+              {tab === "transcript" && <TranscriptPanel videoRef={videoRef} />}
+              {tab === "highlights" && <HighlightsPanel videoRef={videoRef} />}
+              {tab === "style" && <StylePanel />}
+              {tab === "export" && <ExportDrawer />}
+            </div>
+          </aside>
         </div>
 
-        <aside className="ed-side">
-          <nav className="tabs">
-            <button className={tab === "transcript" ? "sel" : ""} onClick={() => setTab("transcript")}>
-              Transcript
-            </button>
-            <button
-              className={tab === "highlights" ? "sel" : ""}
-              onClick={() => setTab("highlights")}
-            >
-              Highlights
-            </button>
-            <button className={tab === "style" ? "sel" : ""} onClick={() => setTab("style")}>
-              Style
-            </button>
-            <button className={tab === "export" ? "sel" : ""} onClick={() => setTab("export")}>
-              Export
-            </button>
-          </nav>
-          <div className="tab-body">
-            {tab === "transcript" && <TranscriptPanel videoRef={videoRef} />}
-            {tab === "highlights" && <HighlightsPanel videoRef={videoRef} />}
-            {tab === "style" && <StylePanel />}
-            {tab === "export" && <ExportDrawer />}
-          </div>
-        </aside>
+        <div
+          className={`ed-split ed-split-h${timeline.dragging ? " dragging" : ""}`}
+          title="Drag to resize · double-click to snap"
+          {...timeline.handleProps}
+        />
+
+        <div className="ed-timeline" style={{ height: timeline.size }}>
+          <MainWaveform videoRef={videoRef} />
+        </div>
       </div>
     </div>
   );
