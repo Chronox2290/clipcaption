@@ -3,6 +3,7 @@
 
 import type { CaptionPage, CaptionStyle } from "../types";
 import { lighten } from "./styles";
+import { captionDynamics } from "./captions";
 
 /** "#RRGGBB" -> ASS "&HAABBGGRR" (AA = alpha, 00 = opaque). */
 function assColor(hex: string, alpha = 0): string {
@@ -75,6 +76,33 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     const words = page.words;
     if (!words.length) continue;
 
+    // The same numbers the live preview uses (see captionDynamics), expressed
+    // as ASS overrides so the burn-in matches the editor.
+    const dyn = captionDynamics(page, style);
+    const prefix: string[] = [];
+    if (style.dynamic) {
+      // an5 + pos anchors the line at its own centre, which is exactly how the
+      // CSS preview positions it (top: positionPct%, translateY -50%) - unlike
+      // the style's default bottom-anchored MarginV, which would drift against
+      // the preview as the caption's size changes.
+      const x = Math.round(opts.playResX * (0.5 + dyn.offsetPct / 100));
+      const y = Math.round(opts.playResY * (style.positionPct / 100));
+      prefix.push(`\\an5\\pos(${x},${y})`);
+      if (dyn.scale !== 1) {
+        // fs (font size) rather than fscx/fscy: the per-word pop/bounce
+        // animations below own those, and their reset to 100 afterwards would
+        // wipe out a page-level scale set the same way.
+        prefix.push(`\\fs${Math.round(fontSize * dyn.scale)}`);
+      }
+      // Skipped when the preset's own animation is "shake" - that already
+      // drives frz per word, and two rotations fighting over one line reads as
+      // a glitch rather than a shout.
+      if (dyn.shake && style.animation !== "shake") {
+        prefix.push("\\t(0,60,\\frz-4)\\t(60,120,\\frz4)\\t(120,180,\\frz-3)\\t(180,240,\\frz3)\\t(240,300,\\frz0)");
+      }
+    }
+    const pre = prefix.length ? `{${prefix.join("")}}` : "";
+
     // A diarized page uses its speaker's color instead of the style's
     // default fill, so alternating speakers read as visually distinct.
     const pagePrimaryHex =
@@ -83,7 +111,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     if (style.animation === "none") {
       const text = words.map((w) => wordText(w.text, style)).join(" ");
-      lines.push(dialogue(page.start, page.end, `{\\fad(40,40)}{\\1c${pagePrimary}}${esc(text)}`));
+      lines.push(dialogue(page.start, page.end, `${pre}{\\fad(40,40)}{\\1c${pagePrimary}}${esc(text)}`));
       continue;
     }
 
@@ -123,7 +151,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         }
       }
       const fade = i === 0 ? "{\\fad(40,0)}" : "";
-      lines.push(dialogue(start, end, fade + parts.join(" ")));
+      lines.push(dialogue(start, end, pre + fade + parts.join(" ")));
     }
   }
 

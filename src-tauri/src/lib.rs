@@ -6,6 +6,7 @@ mod jobs;
 mod media;
 mod models;
 mod sidecar;
+mod spatial;
 mod transcribe;
 
 use jobs::Jobs;
@@ -72,7 +73,12 @@ fn transcribe(
     let (id, handle) = jobs.create("stt");
     let job_id = id.clone();
     std::thread::spawn(move || {
-        transcribe::run(app, job_id, handle, path, model, start, end, prompt);
+        transcribe::run(
+            app,
+            job_id,
+            handle,
+            transcribe::Request { path, model, start, end, prompt },
+        );
     });
     Ok(id)
 }

@@ -126,6 +126,32 @@ export default function StylePanel() {
           onChange={(e) => set({ emojis: e.target.checked })}
         />
       </div>
+      <div className="field">
+        <label title="Captions follow the voice: they slide toward where the speaker is in the stereo field, shrink when someone is far away and quiet, grow when they're close and loud, and shake when someone screams. Needs a transcript made on v0.2.4 or later.">
+          Living captions 🎭
+        </label>
+        <input
+          type="checkbox"
+          checked={style.dynamic ?? false}
+          onChange={(e) => set({ dynamic: e.target.checked })}
+        />
+      </div>
+      {(style.dynamic ?? false) && (
+        <div className="field">
+          <label title="How far the reaction goes. Lower keeps the same behaviour, just subtler.">
+            Reaction
+          </label>
+          <input
+            type="range"
+            min={10}
+            max={100}
+            step={5}
+            value={style.dynamicAmountPct ?? 70}
+            onChange={(e) => set({ dynamicAmountPct: Number(e.target.value) })}
+          />
+          <span className="muted small">{style.dynamicAmountPct ?? 70}%</span>
+        </div>
+      )}
       <div className="field colors">
         <label>Speakers</label>
         {style.speakerColors.map((c, i) => (

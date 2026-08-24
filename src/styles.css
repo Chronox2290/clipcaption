@@ -681,6 +681,22 @@ kbd {
    list: they must not scroll horizontally with it, but must line up with the
    lanes drawn inside it - hence the shared LANE_H/LANE_GAP geometry, applied
    here as inline styles from the component so the two can't drift apart. */
+/* A shouted caption. Deliberately short and non-looping: it punctuates the
+   moment someone screams rather than wobbling for the whole line. Mirrors the
+   rz keyframes the ASS export uses for the same page, so the burn-in reads
+   the same as the preview. */
+@keyframes caption-shake {
+  0% { transform: translate(-50%, -50%) rotate(0deg); }
+  20% { transform: translate(-51%, -50%) rotate(-4deg); }
+  40% { transform: translate(-49%, -50%) rotate(4deg); }
+  60% { transform: translate(-51%, -50%) rotate(-3deg); }
+  80% { transform: translate(-49%, -50%) rotate(3deg); }
+  100% { transform: translate(-50%, -50%) rotate(0deg); }
+}
+.caption-shake {
+  animation: caption-shake 0.34s ease-in-out 1;
+}
+
 .time-field {
   display: inline-flex;
   align-items: center;

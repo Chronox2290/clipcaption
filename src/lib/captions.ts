@@ -1,4 +1,4 @@
-import type { CaptionPage, Segment, WordSpan } from "../types";
+import type { CaptionPage, CaptionStyle, Segment, WordSpan } from "../types";
 
 /** Chunk transcript words into on-screen caption pages. */
 export function paginate(
@@ -31,17 +31,17 @@ export function paginate(
       const prev = current[current.length - 1];
       const gapBreak = prev && w.start - Math.min(prev.end, w.start) > gapThreshold;
       if (current.length >= maxWordsPerPage || gapBreak) {
-        if (current.length) pages.push(toPage(current, seg.speaker));
+        if (current.length) pages.push(toPage(current, seg));
         current = [];
       }
       current.push(w);
     }
-    if (current.length) pages.push(toPage(current, seg.speaker));
+    if (current.length) pages.push(toPage(current, seg));
   }
   return pages;
 }
 
-function toPage(words: WordSpan[], speaker: number | null): CaptionPage {
+function toPage(words: WordSpan[], seg: Segment): CaptionPage {
   const start = words[0].start;
   // Belt-and-braces against a page that can never satisfy pageAt's
   // `t >= start && t <= end`. The backend now guarantees every word ends
@@ -50,7 +50,65 @@ function toPage(words: WordSpan[], speaker: number | null): CaptionPage {
   // caption simply never appears, with the words all present and correct in
   // the transcript panel.
   const end = Math.max(words[words.length - 1].end, start + 0.06);
-  return { start, end, words, speaker };
+  return {
+    start,
+    end,
+    words,
+    speaker: seg.speaker,
+    pan: seg.pan ?? null,
+    intensity: seg.intensity ?? null,
+  };
+}
+
+// ---------------- voice-driven caption dynamics ----------------
+
+/** Furthest a caption may slide from centre, as a % of video width. Past
+ * roughly this the text starts colliding with the frame edge on 16:9 once
+ * it's a few words long. */
+const MAX_OFFSET_PCT = 26;
+/** Size at the quietest and loudest speech in the clip. */
+const MIN_SCALE = 0.72;
+const MAX_SCALE = 1.34;
+/** Intensity at or above which a line is treated as a shout. */
+const SHAKE_AT = 0.88;
+/** Used when a transcript predates the analysis pass: dead centre, normal
+ * size, no shake — i.e. exactly the old behaviour. */
+const NEUTRAL_INTENSITY = 0.5;
+
+export interface CaptionDynamics {
+  /** Horizontal shift from centre, % of video width. */
+  offsetPct: number;
+  /** Multiplier on the caption's font size. */
+  scale: number;
+  /** Whether this line should shake, because someone is shouting. */
+  shake: boolean;
+}
+
+/** How a caption page should be presented, given what the voice was doing.
+ *
+ * Shared deliberately by the live preview (styles.ts) and the burned-in ASS
+ * export (ass.ts): they have to agree exactly, and the only way to guarantee
+ * that is for both to ask the same function rather than each implementing
+ * "slide it a bit left" in their own units. */
+export function captionDynamics(page: CaptionPage, style: CaptionStyle): CaptionDynamics {
+  if (!style.dynamic) return { offsetPct: 0, scale: 1, shake: false };
+
+  const amount = Math.max(0, Math.min(100, style.dynamicAmountPct ?? 100)) / 100;
+  const pan = page.pan ?? 0;
+  const intensity = page.intensity ?? NEUTRAL_INTENSITY;
+
+  // Scale is anchored at the middle of the clip's own loudness range, so a
+  // normal speaking voice stays normal size and only genuinely quiet or
+  // genuinely loud lines move away from it.
+  const spread = intensity - NEUTRAL_INTENSITY;
+  const reach = spread >= 0 ? MAX_SCALE - 1 : 1 - MIN_SCALE;
+  const scale = 1 + spread * 2 * reach * amount;
+
+  return {
+    offsetPct: pan * MAX_OFFSET_PCT * amount,
+    scale,
+    shake: intensity >= SHAKE_AT && amount > 0,
+  };
 }
 
 export function pageAt(pages: CaptionPage[], t: number, linger = 0.25): CaptionPage | null {
@@ -103,9 +161,12 @@ export function isProfane(text: string): boolean {
 /** Shift caption pages onto a clip-relative timeline (e.g. for trimmed exports). */
 export function shiftPages(pages: CaptionPage[], offset: number): CaptionPage[] {
   return pages.map((p) => ({
+    // Spread first: this used to list every field by hand, which quietly
+    // dropped anything added to CaptionPage later (pan/intensity would have
+    // vanished from exactly the trimmed exports this exists for).
+    ...p,
     start: Math.max(0, p.start - offset),
     end: Math.max(0, p.end - offset),
-    speaker: p.speaker,
     words: p.words.map((w) => ({
       ...w,
       start: Math.max(0, w.start - offset),

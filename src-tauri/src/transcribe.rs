@@ -7,6 +7,7 @@ use tauri::{AppHandle, Manager};
 use crate::diarize;
 use crate::jobs::{emit_done, emit_error, emit_progress, JobHandle};
 use crate::models;
+use crate::spatial;
 use crate::sidecar;
 
 #[derive(Serialize)]
@@ -27,6 +28,15 @@ pub struct Segment {
     /// diarization sidecar/models weren't available (never blocks getting a
     /// transcript) or a segment's audio didn't overlap any detected speaker.
     pub speaker: Option<u32>,
+    /// Where this line sits in the stereo field, -1 (hard left) to +1 (hard
+    /// right), for captions that follow the voice across the screen. Null for
+    /// mono sources, silence, or if the analysis pass failed - the caption
+    /// then just sits centred.
+    pub pan: Option<f32>,
+    /// How loud this line is against the rest of the clip, 0 (the quietest
+    /// speech present) to 1 (the loudest) - drives caption size, and the
+    /// shake on a scream. Null on the same conditions as `pan`.
+    pub intensity: Option<f32>,
 }
 
 #[derive(Serialize)]
@@ -82,17 +92,21 @@ fn no_dtw() -> i64 {
     -1
 }
 
-pub fn run(
-    app: AppHandle,
-    job_id: String,
-    handle: Arc<JobHandle>,
-    path: String,
-    model: String,
-    start: Option<f64>,
-    end: Option<f64>,
-    prompt: Option<String>,
-) {
-    let result = run_inner(&app, &job_id, &handle, &path, &model, start, end, prompt);
+/// What to transcribe and how. Grouped into a struct rather than passed as
+/// eight positional arguments, where `start`/`end`/`prompt` in a row are easy
+/// to transpose at a call site and impossible to catch by type.
+pub struct Request {
+    pub path: String,
+    pub model: String,
+    /// Transcribe only this range of the video, in seconds. None = all of it.
+    pub start: Option<f64>,
+    pub end: Option<f64>,
+    /// Names and jargon to bias whisper toward (see build_prompt).
+    pub prompt: Option<String>,
+}
+
+pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: Request) {
+    let result = run_inner(&app, &job_id, &handle, &req);
     match result {
         Ok(json) => emit_done(&app, &job_id, "transcribing", Some(json)),
         Err(e) => {
@@ -109,12 +123,11 @@ fn run_inner(
     app: &AppHandle,
     job_id: &str,
     handle: &Arc<JobHandle>,
-    path: &str,
-    model: &str,
-    start: Option<f64>,
-    end: Option<f64>,
-    prompt: Option<String>,
+    req: &Request,
 ) -> Result<String, String> {
+    let Request { path, model, start, end, prompt } = req;
+    let (path, model) = (path.as_str(), model.as_str());
+    let (start, end) = (*start, *end);
     let model_path = models::model_path(app, model)?;
     if !model_path.exists() {
         return Err(format!(
@@ -332,6 +345,21 @@ fn run_inner(
                 continue;
             };
             seg.speaker = diarize::speaker_for_span(&diarized, first.start, last.end);
+        }
+    }
+
+    // Stereo pan, on the same (possibly range-limited) timeline as the word
+    // times above - so, like diarization, this has to run before the offset
+    // shift below. Silently does nothing on mono sources or if ffmpeg fails.
+    if let Some(pan_track) = spatial::analyze(path, start, end) {
+        for seg in &mut segments {
+            let (Some(first), Some(last)) = (seg.words.first(), seg.words.last()) else {
+                continue;
+            };
+            if let Some(audio) = pan_track.span_for(first.start, last.end) {
+                seg.pan = Some(audio.pan);
+                seg.intensity = Some(audio.intensity);
+            }
         }
     }
 
@@ -571,6 +599,9 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
                 // Filled in afterward by a real diarization pass in
                 // run_inner (see diarize.rs) — not known at this point.
                 speaker: None,
+                // Likewise, from the voice-dynamics pass (see spatial.rs).
+                pan: None,
+                intensity: None,
             });
         }
     }

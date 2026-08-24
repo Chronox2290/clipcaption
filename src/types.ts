@@ -9,6 +9,14 @@ export interface WordSpan {
 export interface Segment {
   id: string;
   words: WordSpan[];
+  /** Where this line sits in the stereo field, -1 (hard left) to +1 (hard
+   * right), measured from the source audio (see src-tauri/src/spatial.rs).
+   * Null for mono sources or transcripts made before this existed. */
+  pan?: number | null;
+  /** How loud this line is relative to the rest of the clip, 0 (quietest
+   * speech present) to 1 (loudest). In a proximity-chat game that reads
+   * directly as how close the speaker is. */
+  intensity?: number | null;
   /** A real speaker index from voice-fingerprint clustering (sherpa-onnx
    * diarization, run automatically — see src-tauri/src/diarize.rs), or null
    * if diarization wasn't available or this segment's audio didn't overlap
@@ -39,6 +47,9 @@ export interface CaptionPage {
   end: number;
   words: WordSpan[];
   speaker: number | null;
+  /** Carried through from the segment — see Segment.pan / Segment.intensity. */
+  pan?: number | null;
+  intensity?: number | null;
 }
 
 export interface MediaInfo {
@@ -111,6 +122,15 @@ export interface CaptionStyle {
   /** Auto-insert a relevant emoji after the key trigger word in each caption
    * line (one per line, see lib/emojis.ts). Off by default. */
   emojis: boolean;
+  /** Captions react to the voice instead of sitting still in the middle: they
+   * slide toward wherever the speaker is in the stereo field, shrink when
+   * someone is far away and quiet, grow when they're close and loud, and
+   * shake when someone screams. Needs the timing data from a transcribe run
+   * on this version or later; older transcripts just render centred. */
+  dynamic: boolean;
+  /** How far the reaction goes, 0-100. 100 is the full range; lower values
+   * keep the same behaviour but more subtly. */
+  dynamicAmountPct: number;
 }
 
 export interface ExportPreset {

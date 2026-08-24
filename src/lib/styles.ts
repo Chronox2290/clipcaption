@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import type { CaptionDynamics } from "./captions";
 import type { CaptionStyle } from "../types";
 
 // Fonts chosen because they ship with Windows, so the ffmpeg/libass burn-in
@@ -23,6 +24,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     maxWordsPerPage: 4,
     speakerColors: ["#FFFFFF", "#B9AFFF", "#FFD166", "#5EE6D0"],
     emojis: true,
+    dynamic: true,
+    dynamicAmountPct: 70,
   },
   {
     id: "neon",
@@ -45,6 +48,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     maxWordsPerPage: 5,
     speakerColors: ["#EDFDFF", "#FF6FD8", "#7CFFB2", "#FFD166"],
     emojis: true,
+    dynamic: true,
+    dynamicAmountPct: 70,
   },
   {
     id: "clean",
@@ -64,6 +69,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     maxWordsPerPage: 6,
     speakerColors: ["#FFFFFF", "#FFD866", "#7EC8FF", "#FF8A65"],
     emojis: true,
+    dynamic: true,
+    dynamicAmountPct: 70,
   },
   {
     id: "retro",
@@ -85,6 +92,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     maxWordsPerPage: 3,
     speakerColors: ["#FFF200", "#00E5FF", "#FF5C00", "#B9FF66"],
     emojis: true,
+    dynamic: true,
+    dynamicAmountPct: 70,
   },
   {
     id: "hype",
@@ -104,6 +113,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     maxWordsPerPage: 4,
     speakerColors: ["#FFE8D6", "#7CFFB2", "#FF6FD8", "#7EC8FF"],
     emojis: true,
+    dynamic: true,
+    dynamicAmountPct: 70,
   },
   {
     id: "comic",
@@ -123,6 +134,8 @@ export const STYLE_PRESETS: CaptionStyle[] = [
     maxWordsPerPage: 5,
     speakerColors: ["#FFFFFF", "#7EC8FF", "#FFD166", "#FF8A80"],
     emojis: true,
+    dynamic: true,
+    dynamicAmountPct: 70,
   },
 ];
 
@@ -130,20 +143,29 @@ export function getPreset(id: string): CaptionStyle {
   return STYLE_PRESETS.find((s) => s.id === id) ?? STYLE_PRESETS[0];
 }
 
-/** CSS for the caption container, sized against the rendered video height. */
-export function containerCss(style: CaptionStyle, videoHeightPx: number): CSSProperties {
+/** CSS for the caption container, sized against the rendered video height.
+ *
+ * `dyn` comes from captionDynamics() — the same values the ASS export uses, so
+ * the preview and the burned-in file place and size the caption identically. */
+export function containerCss(
+  style: CaptionStyle,
+  videoHeightPx: number,
+  dyn: CaptionDynamics = { offsetPct: 0, scale: 1, shake: false }
+): CSSProperties {
   return {
     position: "absolute",
-    left: "50%",
+    left: `${50 + dyn.offsetPct}%`,
     top: `${style.positionPct}%`,
     transform: "translate(-50%, -50%)",
     display: "flex",
     gap: "0.28em",
     flexWrap: "wrap",
     justifyContent: "center",
-    maxWidth: "92%",
+    // Narrower once captions can move sideways: a full-width line has nowhere
+    // left to slide, and would just clip against the frame edge.
+    maxWidth: dyn.offsetPct === 0 ? "92%" : "62%",
     fontFamily: `"${style.font}", sans-serif`,
-    fontSize: `${(style.fontSizePct / 100) * videoHeightPx}px`,
+    fontSize: `${(style.fontSizePct / 100) * videoHeightPx * dyn.scale}px`,
     fontWeight: style.fontWeight ?? 900,
     lineHeight: 1.15,
     textTransform: style.uppercase ? "uppercase" : "none",

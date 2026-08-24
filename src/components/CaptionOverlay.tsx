@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { CaptionStyle, Segment } from "../types";
-import { paginate, pageAt, activeWordIndex, applyCensor } from "../lib/captions";
+import { paginate, pageAt, activeWordIndex, applyCensor, captionDynamics } from "../lib/captions";
 import { addEmojis } from "../lib/emojis";
 import { containerCss, wordCss } from "../lib/styles";
 
@@ -37,9 +37,16 @@ export default function CaptionOverlay({ videoRef, segments, style, censor, stag
   const page = pageAt(pages, time);
   if (!page || stageHeight <= 0) return null;
   const active = activeWordIndex(page, time);
+  const dyn = captionDynamics(page, style);
 
   return (
-    <div style={containerCss(style, stageHeight)}>
+    <div
+      // Keyed by page so the shake animation restarts on each new shouted
+      // line instead of running once and sitting still for the rest of them.
+      key={`${page.start}`}
+      className={dyn.shake ? "caption-shake" : undefined}
+      style={containerCss(style, stageHeight, dyn)}
+    >
       {page.words.map((w, i) => (
         <span
           key={`${page.start}-${i}`}
