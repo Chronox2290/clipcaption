@@ -9,7 +9,6 @@ import ExportDrawer from "../components/ExportDrawer";
 import HighlightsPanel from "../components/HighlightsPanel";
 import { fmtTime, resolveSpeakerNames } from "../lib/captions";
 
-type Tab = "transcript" | "highlights" | "style" | "export";
 
 export default function Editor() {
   const {
@@ -65,7 +64,10 @@ export default function Editor() {
   };
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const [tab, setTab] = useState<Tab>("transcript");
+  // Tab lives in the store so other panels can navigate here (see the Export
+  // tab pointing at Highlights for clip export).
+  const tab = useApp((s) => s.editorTab);
+  const setTab = useApp((s) => s.setEditorTab);
   const [stage, setStage] = useState({ w: 0, h: 0 });
   const [time, setTime] = useState(0);
   const [playing, setPlaying] = useState(false);

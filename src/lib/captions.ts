@@ -132,24 +132,29 @@ export function pagesAt(pages: CaptionPage[], t: number, linger = CAPTION_LINGER
 /** Assigns each page a row so simultaneous captions stack instead of drawing
  * on top of each other.
  *
- * Greedy interval colouring: a page takes the lowest row no overlapping page
- * is already using. Rows are computed once over the whole set rather than per
- * frame, so a caption never jumps between rows while it's on screen - which
- * it would if the row depended on who happened to be talking at that instant.
- * Row 0 sits at the style's own position; higher rows stack upward. */
+ * A page's row is how many *later-starting* captions overlap it, so the newest
+ * line always sits at the style's own position and older ones are lifted above
+ * it. Reading top to bottom then follows the order things were said. The
+ * obvious alternative - give each caption the lowest free row - does exactly
+ * the opposite: the second speaker lands above the first, so a reply appears
+ * over the line it answers and the screen reads backwards.
+ *
+ * Rows are fixed per page rather than recomputed per frame, so a caption never
+ * jumps rows mid-display. The cost is that a caption about to be joined sits
+ * lifted slightly early, with its slot empty beneath it. */
 export function layoutRows(pages: CaptionPage[], linger = CAPTION_LINGER): CaptionPage[] {
-  const ordered = [...pages].sort((a, b) => a.start - b.start);
-  // rowEnds[i] = when the caption currently occupying row i frees it up
-  const rowEnds: number[] = [];
+  const sorted = [...pages].sort((a, b) => a.start - b.start);
   const rowOf = new Map<CaptionPage, number>();
 
-  for (const page of ordered) {
-    let row = rowEnds.findIndex((end) => end <= page.start);
-    if (row === -1) {
-      row = rowEnds.length;
+  for (let i = 0; i < sorted.length; i++) {
+    const page = sorted[i];
+    let later = 0;
+    // Sorted by start, so once a page begins after this one's display window
+    // there are no further overlaps to count.
+    for (let j = i + 1; j < sorted.length && sorted[j].start <= page.end + linger; j++) {
+      later++;
     }
-    rowEnds[row] = page.end + linger;
-    rowOf.set(page, row);
+    rowOf.set(page, later);
   }
 
   return pages.map((p) => ({ ...p, row: rowOf.get(p) ?? 0 }));

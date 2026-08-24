@@ -62,9 +62,17 @@ export function speakerLabel(
 /** The distinct speakers present, in a stable display order: real speakers
  * ascending, then the unknown lane last if anything needs it. Callers use the
  * position in this array as the lane index. */
-export function speakerLanes(speakers: (number | null)[]): (number | null)[] {
-  const real = [...new Set(speakers.filter((s): s is number => s != null))].sort((a, b) => a - b);
-  const lanes: (number | null)[] = [...real];
+export function speakerLanes(
+  speakers: (number | null)[],
+  /** Show at least this many speaker lanes even when nobody has been
+   * attributed to them yet. You can't drag a line onto a track that isn't
+   * drawn, so when the user has said there are three people, three lanes
+   * exist - including the empty one they're about to move someone into. */
+  minLanes = 0
+): (number | null)[] {
+  const real = new Set(speakers.filter((s): s is number => s != null));
+  for (let i = 0; i < minLanes; i++) real.add(i);
+  const lanes: (number | null)[] = [...real].sort((a, b) => a - b);
   if (speakers.some((s) => s == null)) lanes.push(null);
   return lanes.length ? lanes : [null];
 }

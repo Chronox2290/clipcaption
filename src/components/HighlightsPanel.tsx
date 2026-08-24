@@ -383,6 +383,17 @@ export default function HighlightsPanel({ videoRef }: Props) {
         </div>
       )}
 
+      {/* Says what the ticked clips will actually become. The toggle below
+          already read "Separate files / One combined file", but it sits under
+          a scrolling clip list, so people reasonably concluded that stitching
+          clips together wasn't possible at all. */}
+      <p className="muted small hl-mode-hint">
+        {selectedRanks.length === 0
+          ? "Tick some clips to export them."
+          : mode === "compile"
+          ? `${selectedRanks.length} ticked clip${selectedRanks.length === 1 ? "" : "s"} → one video, joined in recording order.`
+          : `${selectedRanks.length} ticked clip${selectedRanks.length === 1 ? "" : "s"} → ${selectedRanks.length} separate file${selectedRanks.length === 1 ? "" : "s"}.`}
+      </p>
       <div className="hl-mode-toggle">
         <button
           className={`btn btn-small ${mode === "separate" ? "btn-primary" : "btn-ghost"}`}

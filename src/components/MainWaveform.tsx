@@ -25,7 +25,11 @@ const MIN_CREATE_DUR = 0.1; // shorter than this on pointerup is treated as a pl
 const HANDLE_VISUAL_PX = 6;
 const HANDLE_HIT_PX = 9;
 const MIN_PXSEC = 10;
-const MAX_PXSEC = 500;
+// Deliberately far past what the "+" button reaches in a few taps: a run of
+// hurried words ("go, go, go, go") can be 60ms each, which is under a pixel
+// at fit-to-clip zoom and physically impossible to grab. Zoom to word (below)
+// jumps straight here when you need it.
+const MAX_PXSEC = 4000;
 const AUTO_PXSEC_CAP = 160; // don't auto-zoom in more than this just because a clip is short
 const MAX_CANVAS_W = 30000; // stay well under browser canvas dimension limits
 const NICE_INTERVALS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1200];
@@ -38,9 +42,11 @@ type Drag =
       segId: string;
       idx: number;
       mode: "move" | "start" | "end";
-      /** Lane the pointer is currently over, for dragging a line into another
+      /** Lane the pointer is currently over, for dragging into another
        * speaker's track. */
       dropLane: number | null;
+      /** Shift at drag start means "move the whole line", not just this word. */
+      wholeLine: boolean;
       startPointerTime: number;
       origStart: number;
       origEnd: number;
@@ -90,6 +96,7 @@ export default function MainWaveform({ videoRef }: Props) {
   const insertSegment = useApp((s) => s.insertSegment);
   const removeWord = useApp((s) => s.removeWord);
   const setSegmentSpeaker = useApp((s) => s.setSegmentSpeaker);
+  const moveWordToSpeaker = useApp((s) => s.moveWordToSpeaker);
   const style = useApp((s) => s.style);
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);
@@ -134,7 +141,11 @@ export default function MainWaveform({ videoRef }: Props) {
 
   const totalDur = Math.max(0.5, range.end - range.start);
 
-  const lanes = useMemo(() => speakerLanes(segments.map((s) => s.speaker)), [segments]);
+  const speakerCount = useApp((s) => s.speakerCount);
+  const lanes = useMemo(
+    () => speakerLanes(segments.map((s) => s.speaker), speakerCount ?? 0),
+    [segments, speakerCount]
+  );
 
   const flat = useMemo(() => {
     const laneOf = new Map(lanes.map((sp, i) => [sp ?? "?", i] as const));
@@ -187,6 +198,24 @@ export default function MainWaveform({ videoRef }: Props) {
   const zoom = (factor: number) =>
     setZoomOverride(clamp((zoomOverride ?? pxPerSec) * factor, MIN_PXSEC, MAX_PXSEC));
 
+  /** Zooms and scrolls until the selected word is comfortably draggable.
+   * Aims for it to fill about a quarter of the visible strip, which leaves
+   * its neighbours (and its handles) in view to drag against. */
+  const zoomToWord = () => {
+    const w = tuningWord && segments.find((sg) => sg.id === tuningWord.segId)?.words[tuningWord.idx];
+    if (!w) return;
+    const dur = Math.max(0.02, w.end - w.start);
+    const target = clamp((viewW * 0.25) / dur, MIN_PXSEC, MAX_PXSEC);
+    setZoomOverride(target);
+    // Centre it once the new width has been laid out.
+    requestAnimationFrame(() => {
+      const wrap = wrapRef.current;
+      if (!wrap) return;
+      const mid = (w.start + w.end) / 2 - range.start;
+      wrap.scrollLeft = Math.max(0, mid * target - wrap.clientWidth / 2);
+    });
+  };
+
   // Live playhead, synced while the video plays.
   useEffect(() => {
     let raf = 0;
@@ -220,14 +249,19 @@ export default function MainWaveform({ videoRef }: Props) {
   // typed into the transcript or a clip name.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (e.key !== "Delete" && e.key !== "Backspace" && e.key !== "z" && e.key !== "Z") return;
       if (!tuningWord) return;
+      if (e.ctrlKey || e.metaKey) return; // leave Ctrl+Z to undo
       const el = document.activeElement;
       const tag = el?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement)?.isContentEditable) {
         return;
       }
       e.preventDefault();
+      if (e.key === "z" || e.key === "Z") {
+        zoomToWord();
+        return;
+      }
       removeWord(tuningWord.segId, tuningWord.idx);
       setTuningWord(null);
     };
@@ -451,6 +485,7 @@ export default function MainWaveform({ videoRef }: Props) {
         idx: hit.idx,
         mode: hit.mode,
         dropLane: null,
+        wholeLine: e.shiftKey,
         startPointerTime: t,
         origStart: flat[hit.flatIdx].w.start,
         origEnd: flat[hit.flatIdx].w.end,
@@ -541,10 +576,13 @@ export default function MainWaveform({ videoRef }: Props) {
         if (v) v.currentTime = Math.max(0, flat[drag.flatIdx]?.w.start ?? drag.startPointerTime);
       }
       if (drag.dropLane != null) {
-        // Reassigning the whole segment, not the single word: speaker is a
-        // property of the line, and splitting one word onto another person
-        // would mean inventing a segment boundary the user didn't ask for.
-        setSegmentSpeaker(drag.segId, lanes[drag.dropLane] ?? null);
+        const speaker = lanes[drag.dropLane] ?? null;
+        // Just this word by default. Diarization gets a word or two wrong at
+        // a turn boundary far more often than it misattributes a whole line,
+        // and taking the entire line along made it impossible to peel one
+        // word onto a third speaker's track. Shift takes the whole line.
+        if (drag.wholeLine) setSegmentSpeaker(drag.segId, speaker);
+        else moveWordToSpeaker(drag.segId, drag.idx, speaker);
       }
       setDropLane(null);
     } else if (drag?.kind === "create") {
@@ -597,6 +635,14 @@ export default function MainWaveform({ videoRef }: Props) {
           </button>
           <button className="btn btn-ghost btn-small" onClick={() => setZoomOverride(null)}>
             Fit
+          </button>
+          <button
+            className="btn btn-ghost btn-small"
+            onClick={zoomToWord}
+            disabled={!tuningWord}
+            title="Zoom in on the selected word until it's big enough to drag (Z)"
+          >
+            ⤢ Word
           </button>
         </span>
       </div>

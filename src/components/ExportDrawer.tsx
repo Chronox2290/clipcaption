@@ -15,6 +15,8 @@ export default function ExportDrawer() {
     style,
     censor,
     activeRange,
+    selectedRanks,
+    setEditorTab,
     exportJob,
     exportDone,
     startExport,
@@ -74,6 +76,23 @@ export default function ExportDrawer() {
 
   return (
     <div className="export-panel">
+      {/* This tab exports one thing: the whole video, or the selected range.
+          Anyone with clips ticked comes here expecting to export THOSE - it's
+          the obvious place - and finds no mention of them, because that lives
+          at the bottom of the Highlights tab. Point at it rather than leaving
+          people to conclude the feature doesn't exist. */}
+      {selectedRanks.length > 0 && (
+        <div className="export-redirect">
+          <span>
+            {selectedRanks.length} clip{selectedRanks.length === 1 ? " is" : "s are"} ticked.
+            Export {selectedRanks.length === 1 ? "it" : "them"} as separate files, or joined into
+            one video, from the Highlights tab.
+          </span>
+          <button className="btn btn-small btn-primary" onClick={() => setEditorTab("highlights")}>
+            Go to Highlights
+          </button>
+        </div>
+      )}
       <h4>Destination preset</h4>
       <div className="preset-list">
         {PRESETS.map((p) => (

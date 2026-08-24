@@ -261,12 +261,21 @@ interface AppState {
   /** True when reopening this video restored autosaved work, until dismissed.
    * Purely so the UI can say so — the restore itself is unconditional. */
   restoredSession: boolean;
+  /** Which side-panel tab is showing. In the store rather than Editor-local
+   * state so a panel can send you to another one - the Export tab needs to
+   * point at Highlights, where clip export actually lives. */
+  editorTab: "transcript" | "highlights" | "style" | "export";
+  setEditorTab: (t: AppState["editorTab"]) => void;
   /** Adds a hand-marked clip centred on `center` seconds; returns its rank. */
   addBookmark: (center: number) => number;
   /** Reassigns a whole segment to a speaker (or null for unattributed) - the
    * timeline's drag-a-line-into-another-lane gesture, and the fastest way to
    * correct diarization when it puts someone in the wrong lane. */
   setSegmentSpeaker: (segId: string, speaker: number | null) => void;
+  /** Moves a single word to another speaker, splitting its line if needed.
+   * Correcting diarization is usually a word or two at a boundary, not a
+   * whole line, so this is what dragging one word vertically does. */
+  moveWordToSpeaker: (segId: string, wordIdx: number, speaker: number | null) => void;
   canUndo: boolean;
   canRedo: boolean;
   /** Snapshots the current edit state so the next mutation can be undone.
@@ -481,6 +490,7 @@ export const useApp = create<AppState>((set, get) => ({
   mediaInfo: null,
   projectPath: null,
   restoredSession: false,
+  editorTab: "transcript",
   canUndo: false,
   canRedo: false,
   highlightCount: (() => {
@@ -1558,12 +1568,40 @@ export const useApp = create<AppState>((set, get) => ({
     });
   },
 
+  moveWordToSpeaker: (segId, wordIdx, speaker) => {
+    const source = get().segments.find((sg) => sg.id === segId);
+    const word = source?.words[wordIdx];
+    if (!source || !word) return;
+    // Whole line already belongs to one word - nothing to split.
+    if (source.words.length === 1) {
+      get().setSegmentSpeaker(segId, speaker);
+      return;
+    }
+    get().pushHistory();
+    const remaining = source.words.filter((_, i) => i !== wordIdx);
+    const moved: Segment = {
+      id: nextId("useg"),
+      words: [word],
+      speaker,
+      pan: source.pan,
+      intensity: source.intensity,
+    };
+    const segments = get()
+      .segments.map((sg) => (sg.id === segId ? { ...sg, words: remaining } : sg))
+      .filter((sg) => sg.words.length > 0)
+      .concat(moved)
+      .sort((a, b) => (a.words[0]?.start ?? 0) - (b.words[0]?.start ?? 0));
+    set({ segments, tuningWord: null });
+  },
+
   setSegmentSpeaker: (segId, speaker) => {
     get().pushHistory();
     set({
       segments: get().segments.map((sg) => (sg.id === segId ? { ...sg, speaker } : sg)),
     });
   },
+
+  setEditorTab: (t) => set({ editorTab: t }),
 
   dismissRestoredNotice: () => set({ restoredSession: false }),
 
