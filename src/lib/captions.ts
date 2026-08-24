@@ -111,11 +111,48 @@ export function captionDynamics(page: CaptionPage, style: CaptionStyle): Caption
   };
 }
 
-export function pageAt(pages: CaptionPage[], t: number, linger = 0.25): CaptionPage | null {
+export const CAPTION_LINGER = 0.25;
+
+export function pageAt(pages: CaptionPage[], t: number, linger = CAPTION_LINGER): CaptionPage | null {
   for (const p of pages) {
     if (t >= p.start && t <= p.end + linger) return p;
   }
   return null;
+}
+
+/** Every caption live at `t`, not just the first.
+ *
+ * In a proximity-chat game people talk over each other constantly, so
+ * returning one page meant the other speaker's line simply never appeared -
+ * and whichever page happened to come first in the array won. */
+export function pagesAt(pages: CaptionPage[], t: number, linger = CAPTION_LINGER): CaptionPage[] {
+  return pages.filter((p) => t >= p.start && t <= p.end + linger);
+}
+
+/** Assigns each page a row so simultaneous captions stack instead of drawing
+ * on top of each other.
+ *
+ * Greedy interval colouring: a page takes the lowest row no overlapping page
+ * is already using. Rows are computed once over the whole set rather than per
+ * frame, so a caption never jumps between rows while it's on screen - which
+ * it would if the row depended on who happened to be talking at that instant.
+ * Row 0 sits at the style's own position; higher rows stack upward. */
+export function layoutRows(pages: CaptionPage[], linger = CAPTION_LINGER): CaptionPage[] {
+  const ordered = [...pages].sort((a, b) => a.start - b.start);
+  // rowEnds[i] = when the caption currently occupying row i frees it up
+  const rowEnds: number[] = [];
+  const rowOf = new Map<CaptionPage, number>();
+
+  for (const page of ordered) {
+    let row = rowEnds.findIndex((end) => end <= page.start);
+    if (row === -1) {
+      row = rowEnds.length;
+    }
+    rowEnds[row] = page.end + linger;
+    rowOf.set(page, row);
+  }
+
+  return pages.map((p) => ({ ...p, row: rowOf.get(p) ?? 0 }));
 }
 
 export function activeWordIndex(page: CaptionPage, t: number): number {

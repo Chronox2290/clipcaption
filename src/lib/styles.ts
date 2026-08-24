@@ -156,12 +156,16 @@ export function getPreset(id: string): CaptionStyle {
 export function containerCss(
   style: CaptionStyle,
   videoHeightPx: number,
-  dyn: CaptionDynamics = { offsetPct: 0, scale: 1, shake: false }
+  dyn: CaptionDynamics = { offsetPct: 0, scale: 1, shake: false },
+  row = 0
 ): CSSProperties {
+  // Each stacked row lifts the caption by a little over one line height, so
+  // two people talking at once read as two lines rather than one pile.
+  const rowLift = (row ?? 0) * style.fontSizePct * 1.45;
   return {
     position: "absolute",
     left: `${50 + dyn.offsetPct}%`,
-    top: `${style.positionPct}%`,
+    top: `${Math.max(6, style.positionPct - rowLift)}%`,
     transform: "translate(-50%, -50%)",
     display: "flex",
     gap: "0.28em",

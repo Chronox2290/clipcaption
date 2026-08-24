@@ -33,14 +33,21 @@ const EMBEDDING_MODEL: &str = "sherpa-embedding.onnx";
 /// the sidecar binary or either model file isn't present, or if the process
 /// fails for any reason: diarization is a bonus layered on top of the
 /// transcript, never something that should be able to break getting one.
-pub fn run(wav_path: &Path) -> Option<Vec<SpeakerSegment>> {
+/// Runs diarization. `speaker_count` pins the number of voices when the user
+/// knows it (they usually do - it's their own squad), which is markedly more
+/// reliable than clustering by threshold: measured on a real 45s three-player
+/// proximity-chat clip, auto-thresholding produced SIX clusters for three
+/// people, splitting single voices across several "speakers", while asking
+/// for three produced a clean 6/6/2 split of turns.
+pub fn run(wav_path: &Path, speaker_count: Option<u32>) -> Option<Vec<SpeakerSegment>> {
     let seg_model = sidecar::resolve_data(SEGMENTATION_MODEL);
     let embed_model = sidecar::resolve_data(EMBEDDING_MODEL);
     if !seg_model.exists() || !embed_model.exists() {
         return None;
     }
 
-    let output = sidecar::command("sherpa-onnx-offline-speaker-diarization")
+    let mut cmd = sidecar::command("sherpa-onnx-offline-speaker-diarization");
+    let output = cmd
         .arg(format!(
             "--segmentation.pyannote-model={}",
             seg_model.display()
@@ -55,7 +62,12 @@ pub fn run(wav_path: &Path) -> Option<Vec<SpeakerSegment>> {
         // the --clustering.num-clusters=4 result exactly (including
         // correctly re-identifying the same speaker at three separate
         // points in the clip).
-        .arg("--clustering.cluster-threshold=0.90")
+        .args(match speaker_count {
+            // Given a count, sherpa clusters to exactly that many and the
+            // threshold is ignored entirely.
+            Some(n) if n >= 1 => vec![format!("--clustering.num-clusters={n}")],
+            _ => vec!["--clustering.cluster-threshold=0.90".to_string()],
+        })
         .arg(wav_path)
         .output()
         .ok()?;

@@ -10,14 +10,14 @@ use crate::models;
 use crate::spatial;
 use crate::sidecar;
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct WordSpan {
     pub text: String,
     pub start: f64,
     pub end: f64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Segment {
     pub id: String,
     pub words: Vec<WordSpan>,
@@ -104,6 +104,8 @@ fn no_dtw() -> i64 {
 /// What to transcribe and how. Grouped into a struct rather than passed as
 /// eight positional arguments, where `start`/`end`/`prompt` in a row are easy
 /// to transpose at a call site and impossible to catch by type.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Request {
     pub path: String,
     pub model: String,
@@ -112,6 +114,9 @@ pub struct Request {
     pub end: Option<f64>,
     /// Names and jargon to bias whisper toward (see build_prompt).
     pub prompt: Option<String>,
+    /// How many people are talking, when the user knows. None lets
+    /// diarization guess (see diarize::run for why that is worse).
+    pub speaker_count: Option<u32>,
 }
 
 pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: Request) {
@@ -134,7 +139,7 @@ fn run_inner(
     handle: &Arc<JobHandle>,
     req: &Request,
 ) -> Result<String, String> {
-    let Request { path, model, start, end, prompt } = req;
+    let Request { path, model, start, end, prompt, speaker_count } = req;
     let (path, model) = (path.as_str(), model.as_str());
     let (start, end) = (*start, *end);
     let model_path = models::model_path(app, model)?;
@@ -349,13 +354,8 @@ fn run_inner(
     // does nothing if the sidecar/models aren't present rather than ever
     // blocking the transcript itself on it.
     let mut speaker_embeddings = std::collections::HashMap::new();
-    if let Some(diarized) = diarize::run(&wav) {
-        for seg in &mut segments {
-            let (Some(first), Some(last)) = (seg.words.first(), seg.words.last()) else {
-                continue;
-            };
-            seg.speaker = diarize::speaker_for_span(&diarized, first.start, last.end);
-        }
+    if let Some(diarized) = diarize::run(&wav, *speaker_count) {
+        segments = split_by_speaker(segments, &diarized);
         // Extracted from the same still-on-disk WAV, before it's deleted
         // below — one embedding per distinct speaker id, for the frontend to
         // match against the user's named speaker profiles.
@@ -507,6 +507,90 @@ fn build_prompt(raw: Option<&str>, max_chars: usize) -> String {
     wrapped.chars().take(max_chars).collect()
 }
 
+/// Re-cuts segments so each one belongs to a single speaker.
+///
+/// Whisper draws segment boundaries from pauses in the audio, with no idea
+/// who is talking; in a game with proximity chat, two or three people talk
+/// over each other constantly and land in one segment. Assigning that segment
+/// a single speaker by majority overlap - which is what this replaced - threw
+/// away the fact that the line has two authors, so their words rendered as
+/// one run-on caption in one person's colour, and the timeline could only
+/// show it in one lane.
+///
+/// Each word is attributed on its own, then consecutive words sharing a
+/// speaker become a segment. Splitting per word rather than smoothing first
+/// is deliberate: a word is already the smallest unit the rest of the
+/// pipeline times and draws, so no new boundary is being invented.
+fn split_by_speaker(segments: Vec<Segment>, diarized: &[diarize::SpeakerSegment]) -> Vec<Segment> {
+    let mut out: Vec<Segment> = Vec::with_capacity(segments.len());
+
+    for seg in segments {
+        // Attribute every word first, so a lone unattributed word inside a
+        // run can be absorbed below rather than splitting the line in three.
+        let mut speakers: Vec<Option<u32>> = seg
+            .words
+            .iter()
+            .map(|w| diarize::speaker_for_span(diarized, w.start, w.end))
+            .collect();
+
+        // A word whose own span didn't overlap any speaker turn (a gap, a
+        // breath, a short word straddling a boundary) inherits the run it
+        // sits in, rather than becoming a one-word "Unknown" fragment.
+        for i in 0..speakers.len() {
+            if speakers[i].is_none() {
+                let before = speakers[..i].iter().rev().find_map(|s| *s);
+                let after = speakers[i + 1..].iter().find_map(|s| *s);
+                speakers[i] = match (before, after) {
+                    (Some(b), Some(a)) if b == a => Some(b),
+                    (Some(b), None) => Some(b),
+                    (None, Some(a)) => Some(a),
+                    _ => None,
+                };
+            }
+        }
+
+        let mut start = 0usize;
+        let mut part = 0usize;
+        for i in 1..=seg.words.len() {
+            let boundary = i == seg.words.len() || speakers[i] != speakers[start];
+            if !boundary {
+                continue;
+            }
+            let words: Vec<WordSpan> = seg.words[start..i]
+                .iter()
+                .map(|w| WordSpan {
+                    text: w.text.clone(),
+                    start: w.start,
+                    end: w.end,
+                })
+                .collect();
+            if !words.is_empty() {
+                out.push(Segment {
+                    // Suffixed only when a segment actually split, so ids stay
+                    // stable (and recognisable) for the common single-speaker case.
+                    id: if part == 0 && i == seg.words.len() {
+                        seg.id.clone()
+                    } else {
+                        format!("{}_{}", seg.id, part)
+                    },
+                    words,
+                    speaker: speakers[start],
+                    pan: seg.pan,
+                    intensity: seg.intensity,
+                });
+                part += 1;
+            }
+            start = i;
+        }
+    }
+
+    out.sort_by(|a, b| {
+        let (x, y) = (a.words.first().map(|w| w.start), b.words.first().map(|w| w.start));
+        x.partial_cmp(&y).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    out
+}
+
 /// Turns whisper's JSON into word-level segments.
 fn build_segments(out: WhisperOut) -> Vec<Segment> {
     let mut segments = Vec::new();
@@ -622,6 +706,87 @@ fn build_segments(out: WhisperOut) -> Vec<Segment> {
     }
 
     segments
+}
+
+#[cfg(test)]
+mod speaker_split_tests {
+    use super::*;
+    use crate::diarize::SpeakerSegment;
+
+    fn seg(words: &[(&str, f64, f64)]) -> Segment {
+        Segment {
+            id: "seg_0".into(),
+            words: words
+                .iter()
+                .map(|(t, s, e)| WordSpan { text: (*t).into(), start: *s, end: *e })
+                .collect(),
+            speaker: None,
+            pan: None,
+            intensity: None,
+        }
+    }
+
+    fn turns(t: &[(f64, f64, u32)]) -> Vec<SpeakerSegment> {
+        t.iter().map(|(s, e, sp)| SpeakerSegment { start: *s, end: *e, speaker: *sp }).collect()
+    }
+
+    /// The proximity-chat case: whisper hears one continuous stretch of speech
+    /// and makes it one segment, but two people are talking. Attributing the
+    /// whole thing to whoever spoke most is what made two voices render as one
+    /// run-on caption in one colour.
+    #[test]
+    fn one_segment_with_two_voices_splits_in_two() {
+        let out = split_by_speaker(
+            vec![seg(&[("Wait", 1.0, 1.4), ("Christian", 1.4, 2.0), ("no", 3.0, 3.4), ("stop", 3.4, 3.9)])],
+            &turns(&[(0.5, 2.5, 0), (2.8, 4.5, 1)]),
+        );
+        assert_eq!(out.len(), 2, "expected one segment per speaker, got {out:?}");
+        assert_eq!(out[0].speaker, Some(0));
+        assert_eq!(out[0].words.len(), 2);
+        assert_eq!(out[1].speaker, Some(1));
+        assert_eq!(out[1].words.len(), 2);
+    }
+
+    /// A single speaker's segment must come through untouched - same id, same
+    /// words, no gratuitous re-cutting of the common case.
+    #[test]
+    fn a_single_speaker_segment_is_left_alone() {
+        let out = split_by_speaker(
+            vec![seg(&[("all", 1.0, 1.3), ("mine", 1.3, 1.8)])],
+            &turns(&[(0.0, 5.0, 2)]),
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].id, "seg_0");
+        assert_eq!(out[0].speaker, Some(2));
+    }
+
+    /// A word landing in a gap between turns shouldn't become its own
+    /// one-word "Unknown" fragment when the words either side agree.
+    #[test]
+    fn an_unattributed_word_between_two_of_the_same_speaker_is_absorbed() {
+        let out = split_by_speaker(
+            vec![seg(&[("I", 1.0, 1.2), ("uh", 2.6, 2.7), ("guess", 4.0, 4.4)])],
+            &turns(&[(0.9, 1.5, 0), (3.8, 4.6, 0)]),
+        );
+        assert_eq!(out.len(), 1, "should stay one line: {out:?}");
+        assert_eq!(out[0].words.len(), 3);
+        assert_eq!(out[0].speaker, Some(0));
+    }
+
+    /// Split parts stay in chronological order, since pagination and the
+    /// timeline both assume segments are sorted by start time.
+    #[test]
+    fn output_is_sorted_by_time() {
+        let out = split_by_speaker(
+            vec![
+                seg(&[("b", 5.0, 5.3)]),
+                Segment { id: "seg_1".into(), ..seg(&[("a", 1.0, 1.3)]) },
+            ],
+            &turns(&[(0.0, 10.0, 0)]),
+        );
+        assert_eq!(out[0].words[0].text, "a");
+        assert_eq!(out[1].words[0].text, "b");
+    }
 }
 
 #[cfg(test)]

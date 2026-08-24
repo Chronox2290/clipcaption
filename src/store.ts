@@ -30,6 +30,7 @@ import {
   nextId,
   paginate,
   resolveSpeakerNames,
+  layoutRows,
   shiftPages,
 } from "./lib/captions";
 import { addEmojis } from "./lib/emojis";
@@ -151,6 +152,10 @@ interface AppState {
   /** Names, jargon and spellings fed to whisper as its initial prompt, to
    * bias transcription of proper nouns and strongly-accented speech. */
   vocabulary: string;
+  /** How many people are talking in this recording, or null to let
+   * diarization work it out. Pinning it is markedly more reliable - see
+   * diarize::run - and you usually know: it's your own squad. */
+  speakerCount: number | null;
 
   // encoding options
   encoder: string; // "auto" | "x264" | "nvenc" | "amf" | "qsv"
@@ -203,6 +208,7 @@ interface AppState {
   ) => string;
   setSelectedModel: (m: string) => void;
   setVocabulary: (v: string) => void;
+  setSpeakerCount: (n: number | null) => void;
   setEncoder: (e: string) => void;
   setFpsOverride: (fps: number | null) => void;
   downloadModel: (name: string) => Promise<void>;
@@ -508,6 +514,10 @@ export const useApp = create<AppState>((set, get) => ({
   models: [],
   selectedModel: localStorage.getItem("cc.model") ?? "large-v3-turbo",
   vocabulary: localStorage.getItem("cc.vocabulary") ?? "",
+  speakerCount: (() => {
+    const v = localStorage.getItem("cc.speakerCount");
+    return v == null || v === "auto" ? null : Number(v);
+  })(),
   encoder: localStorage.getItem("cc.encoder") ?? "auto",
   availableEncoders: ["x264"],
   fpsOverride: (() => {
@@ -758,11 +768,14 @@ export const useApp = create<AppState>((set, get) => ({
         tuningWord: null,
       });
       const id = await invoke<string>("transcribe", {
-        path: videoPath,
-        model: selectedModel,
-        prompt: get().vocabulary || null,
-        start: activeRange?.start ?? null,
-        end: activeRange?.end ?? null,
+        req: {
+          path: videoPath,
+          model: selectedModel,
+          prompt: get().vocabulary || null,
+          speakerCount: get().speakerCount,
+          start: activeRange?.start ?? null,
+          end: activeRange?.end ?? null,
+        },
       });
       set({ transcribeJob: { id, stage: "starting", progress: -1 } });
     } catch (e) {
@@ -881,6 +894,11 @@ export const useApp = create<AppState>((set, get) => ({
     set({ vocabulary: v });
   },
 
+  setSpeakerCount: (n) => {
+    localStorage.setItem("cc.speakerCount", n == null ? "auto" : String(n));
+    set({ speakerCount: n });
+  },
+
   setEncoder: (encoder) => {
     localStorage.setItem("cc.encoder", encoder);
     set({ encoder });
@@ -967,9 +985,13 @@ export const useApp = create<AppState>((set, get) => ({
    * name clears the override, falling back to the auto-generated "_highlight_NN". */
   setClipName: (rank, name) => {
     get().pushHistory(`name:${rank}`);
-    const trimmed = name.trim();
     const next = { ...get().clipNames };
-    if (trimmed) next[rank] = trimmed;
+    // Stored verbatim. Trimming here ran on every keystroke of a controlled
+    // input, so typing a space deleted it before the next letter arrived and
+    // "You have to go" came out "Youhavetogo". Whitespace only decides
+    // whether the name counts as set; making it safe for the filesystem is
+    // sanitizeFilename's job at export, which is the only place it matters.
+    if (name.trim()) next[rank] = name;
     else delete next[rank];
     set({ clipNames: next });
   },
@@ -1058,11 +1080,14 @@ export const useApp = create<AppState>((set, get) => ({
           batch: { current: i + 1, total, stage: "transcribing", outputDir },
         });
         const tid = await invoke<string>("transcribe", {
-          path: videoPath,
-          model: selectedModel,
-          prompt: get().vocabulary || null,
-          start: range.start,
-          end: range.end,
+          req: {
+            path: videoPath,
+            model: selectedModel,
+            prompt: get().vocabulary || null,
+            speakerCount: get().speakerCount,
+            start: range.start,
+            end: range.end,
+          },
         });
         const result = await waitForJob(tid);
         const { segments, speakerEmbeddings } = result
@@ -1076,7 +1101,7 @@ export const useApp = create<AppState>((set, get) => ({
         const speakerNames = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
         let segs = censor ? applyCensor(segments) : segments;
         if (style.emojis) segs = addEmojis(segs);
-        const pages = shiftPages(paginate(segs, style.maxWordsPerPage), range.start);
+        const pages = layoutRows(shiftPages(paginate(segs, style.maxWordsPerPage), range.start));
         const ass =
           pages.length > 0
             ? buildAss(pages, style, { playResX: outW, playResY: outH, speakerNames })
@@ -1183,11 +1208,14 @@ export const useApp = create<AppState>((set, get) => ({
         set({ batch: { current: i + 1, total, stage: "transcribing", outputDir: outputPath } });
 
         const tid = await invoke<string>("transcribe", {
-          path: videoPath,
-          model: selectedModel,
-          prompt: get().vocabulary || null,
-          start: range.start,
-          end: range.end,
+          req: {
+            path: videoPath,
+            model: selectedModel,
+            prompt: get().vocabulary || null,
+            speakerCount: get().speakerCount,
+            start: range.start,
+            end: range.end,
+          },
         });
         const result = await waitForJob(tid);
         const { segments: rawSegments, speakerEmbeddings } = result
@@ -1218,7 +1246,7 @@ export const useApp = create<AppState>((set, get) => ({
 
         let segs = censor ? applyCensor(segments) : segments;
         if (style.emojis) segs = addEmojis(segs);
-        const pages = paginate(segs, style.maxWordsPerPage);
+        const pages = layoutRows(paginate(segs, style.maxWordsPerPage));
         // source time t -> (t - range.start) + cumulative on the compiled timeline
         mergedPages = mergedPages.concat(shiftPages(pages, range.start - cumulative));
         cutRanges.push([range.start, range.end]);
@@ -1231,7 +1259,11 @@ export const useApp = create<AppState>((set, get) => ({
       const outH = targetH ?? mediaInfo.height;
       const ass =
         mergedPages.length > 0
-          ? buildAss(mergedPages, style, { playResX: outW, playResY: outH, speakerNames: globalSpeakerNames })
+          ? buildAss(layoutRows(mergedPages), style, {
+              playResX: outW,
+              playResY: outH,
+              speakerNames: globalSpeakerNames,
+            })
           : "";
 
       const eid = await invoke<string>("export_video", {
@@ -1324,11 +1356,14 @@ export const useApp = create<AppState>((set, get) => ({
         const info = await invoke<MediaInfo>("probe_video", { path: item.path });
 
         const tid = await invoke<string>("transcribe", {
-          path: item.path,
-          model: selectedModel,
-          prompt: get().vocabulary || null,
-          start: null,
-          end: null,
+          req: {
+            path: item.path,
+            model: selectedModel,
+            prompt: get().vocabulary || null,
+            speakerCount: get().speakerCount,
+            start: null,
+            end: null,
+          },
         });
         currentBatchJobId = tid;
         const result = await waitForJob(tid, (p) =>
@@ -1347,7 +1382,7 @@ export const useApp = create<AppState>((set, get) => ({
         const speakerNames = resolveSpeakerNames(speakerEmbeddings, get().speakerProfiles);
         let segs = censor ? applyCensor(segments) : segments;
         if (style.emojis) segs = addEmojis(segs);
-        const pages = paginate(segs, style.maxWordsPerPage);
+        const pages = layoutRows(paginate(segs, style.maxWordsPerPage));
         const outW = targetW ?? info.width;
         const outH = targetH ?? info.height;
         const ass =

@@ -823,6 +823,22 @@ kbd {
    plus their buttons came to roughly 420px of controls in a 380px panel, so
    the second one was clipped at the edge; stacked, each gets a full row and
    the labels align, which is what makes a small form scannable. */
+.speaker-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+}
+.speaker-count select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--bg0);
+  color: inherit;
+  font-size: 12px;
+  font-family: inherit;
+}
+
 .range-grid {
   display: grid;
   grid-template-columns: auto 1fr auto;

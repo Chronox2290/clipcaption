@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { CaptionStyle, Segment } from "../types";
-import { paginate, pageAt, activeWordIndex, applyCensor, captionDynamics } from "../lib/captions";
+import { paginate, pagesAt, layoutRows, activeWordIndex, applyCensor, captionDynamics } from "../lib/captions";
 import { addEmojis } from "../lib/emojis";
 import { containerCss, speakerNameCss, wordCss } from "../lib/styles";
 
@@ -42,33 +42,42 @@ export default function CaptionOverlay({
   const pages = useMemo(() => {
     let segs = censor ? applyCensor(segments) : segments;
     if (style.emojis) segs = addEmojis(segs);
-    return paginate(segs, style.maxWordsPerPage);
+    return layoutRows(paginate(segs, style.maxWordsPerPage));
   }, [segments, style.maxWordsPerPage, censor, style.emojis]);
 
-  const page = pageAt(pages, time);
-  if (!page || stageHeight <= 0) return null;
-  const active = activeWordIndex(page, time);
-  const dyn = captionDynamics(page, style);
-  const speakerName =
-    style.showSpeakerNames && page.speaker != null ? speakerNames[page.speaker] : undefined;
+  const live = pagesAt(pages, time);
+  if (!live.length || stageHeight <= 0) return null;
 
   return (
-    <div
-      // Keyed by page so the shake animation restarts on each new shouted
-      // line instead of running once and sitting still for the rest of them.
-      key={`${page.start}`}
-      className={dyn.shake ? "caption-shake" : undefined}
-      style={containerCss(style, stageHeight, dyn)}
-    >
-      {speakerName && <div style={speakerNameCss(style, stageHeight, page.speaker!)}>{speakerName}</div>}
-      {page.words.map((w, i) => (
-        <span
-          key={`${page.start}-${i}`}
-          style={wordCss(style, i === active, stageHeight, page.speaker)}
-        >
-          {style.uppercase ? w.text.toUpperCase() : w.text}
-        </span>
-      ))}
-    </div>
+    <>
+      {live.map((page) => {
+        const active = activeWordIndex(page, time);
+        const dyn = captionDynamics(page, style);
+        const speakerName =
+          style.showSpeakerNames && page.speaker != null ? speakerNames[page.speaker] : undefined;
+        return (
+          <div
+            // Keyed by page so the shake animation restarts on each new
+            // shouted line instead of running once and sitting still for the
+            // rest of them.
+            key={`${page.start}-${page.speaker ?? "x"}`}
+            className={dyn.shake ? "caption-shake" : undefined}
+            style={containerCss(style, stageHeight, dyn, page.row ?? 0)}
+          >
+            {speakerName && (
+              <div style={speakerNameCss(style, stageHeight, page.speaker!)}>{speakerName}</div>
+            )}
+            {page.words.map((w, i) => (
+              <span
+                key={`${page.start}-${i}`}
+                style={wordCss(style, i === active, stageHeight, page.speaker)}
+              >
+                {style.uppercase ? w.text.toUpperCase() : w.text}
+              </span>
+            ))}
+          </div>
+        );
+      })}
+    </>
   );
 }

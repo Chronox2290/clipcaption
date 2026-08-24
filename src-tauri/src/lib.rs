@@ -64,21 +64,12 @@ fn ensure_model(app: AppHandle, jobs: State<Jobs>, name: String) -> Result<Strin
 fn transcribe(
     app: AppHandle,
     jobs: State<Jobs>,
-    path: String,
-    model: String,
-    start: Option<f64>,
-    end: Option<f64>,
-    prompt: Option<String>,
+    req: transcribe::Request,
 ) -> Result<String, String> {
     let (id, handle) = jobs.create("stt");
     let job_id = id.clone();
     std::thread::spawn(move || {
-        transcribe::run(
-            app,
-            job_id,
-            handle,
-            transcribe::Request { path, model, start, end, prompt },
-        );
+        transcribe::run(app, job_id, handle, req);
     });
     Ok(id)
 }

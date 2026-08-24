@@ -26,6 +26,8 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const style = useApp((s) => s.style);
   const tuning = useApp((s) => s.tuningWord);
   const setTuning = useApp((s) => s.setTuningWord);
+  const speakerCount = useApp((s) => s.speakerCount);
+  const setSpeakerCount = useApp((s) => s.setSpeakerCount);
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);
   const setSpeakerName = useApp((s) => s.setSpeakerName);
@@ -130,6 +132,25 @@ export default function TranscriptPanel({ videoRef }: Props) {
           )}
         </div>
       )}
+      <div className="speakers-panel">
+        <label className="speaker-count">
+          <span className="muted small">People talking in this recording</span>
+          <select
+            value={speakerCount == null ? "auto" : String(speakerCount)}
+            onChange={(e) =>
+              setSpeakerCount(e.target.value === "auto" ? null : Number(e.target.value))
+            }
+            title="Telling it how many voices there are beats letting it guess. On a real three-player clip, guessing produced six speakers - one person split across several - while asking for three got it right. Applies next time you transcribe."
+          >
+            <option value="auto">Work it out</option>
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+              <option key={n} value={n}>
+                {n} {n === 1 ? "person" : "people"}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
       {distinctSpeakers.length > 0 && (
         <div className="speakers-panel">
           <p className="muted small" style={{ marginBottom: 4 }}>

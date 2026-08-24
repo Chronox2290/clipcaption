@@ -72,6 +72,10 @@ export interface CaptionPage {
   /** Carried through from the segment — see Segment.pan / Segment.intensity. */
   pan?: number | null;
   intensity?: number | null;
+  /** Which stacked row this caption occupies when several are on screen at
+   * once (0 = the style's own position, higher rows stack upward). Assigned
+   * by layoutRows over the whole set, so it stays put while on screen. */
+  row?: number;
 }
 
 export interface MediaInfo {

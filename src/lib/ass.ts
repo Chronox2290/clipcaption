@@ -89,14 +89,24 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     // The same numbers the live preview uses (see captionDynamics), expressed
     // as ASS overrides so the burn-in matches the editor.
     const dyn = captionDynamics(page, style);
+    const row = page.row ?? 0;
     const prefix: string[] = [];
-    if (style.dynamic) {
+    // Absolute positioning is also required for a stacked row, not just for
+    // living captions: without it two people talking at once both render at
+    // the style's own MarginV, one on top of the other.
+    if (style.dynamic || row > 0) {
       // an5 + pos anchors the line at its own centre, which is exactly how the
       // CSS preview positions it (top: positionPct%, translateY -50%) - unlike
       // the style's default bottom-anchored MarginV, which would drift against
       // the preview as the caption's size changes.
       const x = Math.round(opts.playResX * (0.5 + dyn.offsetPct / 100));
-      const y = Math.round(opts.playResY * (style.positionPct / 100));
+      // Matches the preview's row lift (containerCss): a little over one line
+      // height per stacked row, clamped so a fourth simultaneous speaker
+      // can't be pushed off the top of the frame.
+      const rowLift = row * fontSize * 1.45;
+      const y = Math.round(
+        Math.max(fontSize, opts.playResY * (style.positionPct / 100) - rowLift)
+      );
       prefix.push(`\\an5\\pos(${x},${y})`);
       if (dyn.scale !== 1) {
         // fs (font size) rather than fscx/fscy: the per-word pop/bounce
