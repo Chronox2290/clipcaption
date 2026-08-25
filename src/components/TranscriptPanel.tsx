@@ -17,6 +17,16 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const censor = useApp((s) => s.censor);
   const setCensor = useApp((s) => s.setCensor);
   const transcribeJob = useApp((s) => s.transcribeJob);
+  const polishJob = useApp((s) => s.polishJob);
+  const polishAvailable = useApp((s) => s.polishAvailable);
+  const polishModelJob = useApp((s) => s.polishModelJob);
+  const downloadPolishModel = useApp((s) => s.downloadPolishModel);
+  const polishSuggestions = useApp((s) => s.polishSuggestions);
+  const reviewTranscript = useApp((s) => s.reviewTranscript);
+  const acceptPolishSuggestion = useApp((s) => s.acceptPolishSuggestion);
+  const rejectPolishSuggestion = useApp((s) => s.rejectPolishSuggestion);
+  const acceptAllPolishSuggestions = useApp((s) => s.acceptAllPolishSuggestions);
+  const dismissAllPolishSuggestions = useApp((s) => s.dismissAllPolishSuggestions);
   const transcribe = useApp((s) => s.transcribe);
   const models = useApp((s) => s.models);
   const selectedModel = useApp((s) => s.selectedModel);
@@ -335,9 +345,66 @@ export default function TranscriptPanel({ videoRef }: Props) {
           </div>
         ))}
       </div>
-      <button className="btn btn-ghost" onClick={() => transcribe()}>
-        ↻ Re-transcribe
-      </button>
+      <div className="transcript-actions">
+        <button className="btn btn-ghost" onClick={() => transcribe()}>
+          ↻ Re-transcribe
+        </button>
+        {polishAvailable ? (
+          <button
+            className="btn btn-ghost"
+            onClick={() => void reviewTranscript()}
+            disabled={!!polishJob || segments.length === 0}
+            title="Checks every word whisper wasn't confident about against an offline AI model - names, mishearings. Nothing is changed until you review and accept each fix."
+          >
+            {polishJob
+              ? `✨ Checking… ${Math.round((polishJob.progress ?? 0) * 100)}%`
+              : "✨ Clean up transcript"}
+          </button>
+        ) : (
+          <button
+            className="btn btn-ghost"
+            onClick={() => void downloadPolishModel()}
+            disabled={!!polishModelJob}
+            title="Downloads a small offline AI model (~2GB, one-time) that reviews the words whisper wasn't confident about - misheard names and similar. Everything else in the app works without it."
+          >
+            {polishModelJob
+              ? `⬇ Downloading cleanup model… ${Math.round((polishModelJob.progress ?? 0) * 100)}%`
+              : "⬇ Get AI cleanup (~2GB)"}
+          </button>
+        )}
+      </div>
+
+      {polishSuggestions.length > 0 && (
+        <div className="polish-review">
+          <div className="polish-review-head">
+            <span className="muted small">
+              {polishSuggestions.length} possible fix{polishSuggestions.length === 1 ? "" : "es"} -
+              nothing has been changed yet.
+            </span>
+            <button className="btn btn-small btn-primary" onClick={acceptAllPolishSuggestions}>
+              Accept all
+            </button>
+            <button className="btn btn-small btn-ghost" onClick={dismissAllPolishSuggestions}>
+              Dismiss all
+            </button>
+          </div>
+          {polishSuggestions.map((s, i) => (
+            <div className="polish-item" key={`${s.segId}-${s.wordIdx}-${i}`}>
+              <span className="polish-diff">
+                <span className="polish-old">{s.original}</span>
+                <span className="polish-arrow">→</span>
+                <span className="polish-new">{s.suggested}</span>
+              </span>
+              <button className="btn btn-small btn-primary" onClick={() => acceptPolishSuggestion(i)}>
+                Accept
+              </button>
+              <button className="btn btn-small btn-ghost" onClick={() => rejectPolishSuggestion(i)}>
+                Skip
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

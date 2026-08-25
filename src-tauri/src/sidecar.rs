@@ -58,6 +58,88 @@ pub fn resolve(name: &str) -> PathBuf {
     PathBuf::from(format!("{name}{EXE_SUFFIX}"))
 }
 
+/// Resolve a sidecar binary that lives in its own subdirectory of
+/// `binaries/`, rather than alongside ffmpeg/whisper-cli/sherpa at the top
+/// level.
+///
+/// llama-server needs this: it and whisper-cli are both built on the ggml
+/// tensor library, and both ship `ggml.dll`, `ggml-cpu-*.dll` and friends -
+/// same filenames, different builds, no ABI guarantee between them. Windows
+/// resolves a launched exe's DLLs from the directory *that exe lives in*
+/// first, so giving llama-server its own subdirectory with its own copies of
+/// those DLLs means each tool loads its own, and neither can silently
+/// overwrite or shadow the other's at the filesystem level.
+pub fn resolve_in(subdir: &str, name: &str) -> PathBuf {
+    let env_key = format!(
+        "CLIPCAPTION_{}_{}",
+        subdir.to_uppercase(),
+        name.replace('-', "_").to_uppercase()
+    );
+    if let Ok(p) = std::env::var(&env_key) {
+        return PathBuf::from(p);
+    }
+
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(subdir)
+        .join(format!("{name}-{TARGET_TRIPLE}{EXE_SUFFIX}"));
+    if cfg!(debug_assertions) && dev.exists() {
+        return dev;
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join(subdir).join(format!("{name}{EXE_SUFFIX}"));
+            if p.exists() {
+                return p;
+            }
+        }
+    }
+
+    if dev.exists() {
+        return dev;
+    }
+
+    PathBuf::from(format!("{name}{EXE_SUFFIX}"))
+}
+
+/// `resolve_data` for a file that lives in a sidecar's own subdirectory
+/// (see `resolve_in`) - e.g. the .gguf model next to llama-server.
+pub fn resolve_data_in(subdir: &str, filename: &str) -> PathBuf {
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("binaries")
+        .join(subdir)
+        .join(filename);
+    if cfg!(debug_assertions) && dev.exists() {
+        return dev;
+    }
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p = dir.join(subdir).join(filename);
+            if p.exists() {
+                return p;
+            }
+        }
+    }
+
+    dev
+}
+
+/// `command()` for a sidecar resolved via `resolve_in`.
+pub fn command_in(subdir: &str, name: &str) -> Command {
+    let cmd = Command::new(resolve_in(subdir, name));
+    #[cfg(windows)]
+    let cmd = {
+        use std::os::windows::process::CommandExt;
+        let mut c = cmd;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+        c
+    };
+    cmd
+}
+
 /// Resolve a bundled data file (not an executable — e.g. the .onnx model
 /// files the speaker-diarization sidecar needs). Same search order as
 /// `resolve()` minus the exe-suffix/target-triple handling, since these

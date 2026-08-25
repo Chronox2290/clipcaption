@@ -7,6 +7,7 @@ mod media;
 mod models;
 mod sidecar;
 mod spatial;
+mod polish;
 mod transcribe;
 
 use jobs::Jobs;
@@ -70,6 +71,35 @@ fn transcribe(
     let job_id = id.clone();
     std::thread::spawn(move || {
         transcribe::run(app, job_id, handle, req);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+fn polish_available(app: AppHandle) -> bool {
+    polish::available(&app)
+}
+
+#[tauri::command]
+fn download_polish_model(app: AppHandle, jobs: State<Jobs>) -> Result<String, String> {
+    let (id, handle) = jobs.create("polish-model");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        polish::download(app, job_id, handle);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+fn polish_transcript(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    req: polish::ReviewRequest,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("polish");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        polish::run(app, job_id, handle, req);
     });
     Ok(id)
 }
@@ -183,7 +213,10 @@ pub fn run() {
             cancel_job,
             write_text_file,
             read_text_file,
-            session_file
+            session_file,
+            polish_available,
+            download_polish_model,
+            polish_transcript
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipCaption");

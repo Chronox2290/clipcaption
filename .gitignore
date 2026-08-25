@@ -4,6 +4,7 @@ src-tauri/target/
 src-tauri/binaries/*.exe
 src-tauri/binaries/*.dll
 src-tauri/binaries/*.onnx
+src-tauri/binaries/llama/
 src-tauri/gen/
 *.log
 .DS_Store

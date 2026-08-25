@@ -13,6 +13,7 @@ import type {
   SpeakerProfile,
   TranscribeResult,
   ProjectFile,
+  PolishSuggestion,
 } from "./types";
 import {
   invoke,
@@ -32,6 +33,7 @@ import {
   resolveSpeakerNames,
   layoutRows,
   shiftPages,
+  UNSURE_BELOW,
 } from "./lib/captions";
 import { addEmojis } from "./lib/emojis";
 import { getExportPreset, resolveResolution } from "./lib/exportPresets";
@@ -123,6 +125,18 @@ interface AppState {
   // highlights
   highlights: Highlight[];
   analyzeJob: JobState | null;
+  polishJob: JobState | null;
+  /** Downloading the (large, optional) cleanup model - a separate slot from
+   * polishJob so it cannot collide with a review pass, and separate from
+   * modelJob so it cannot collide with a whisper model download either. */
+  polishModelJob: JobState | null;
+  /** Whether the local cleanup model is installed - checked once at
+   * startup so the UI can hide the action entirely rather than let someone
+   * press it and hit an error about a 2GB download they did not expect. */
+  polishAvailable: boolean;
+  /** Proposed fixes awaiting review. Nothing here has been applied - see
+   * acceptPolishSuggestion / rejectPolishSuggestion. */
+  polishSuggestions: PolishSuggestion[];
   /** Active working range (a highlight the user selected) — transcribe/export apply to it */
   activeRange: { start: number; end: number } | null;
   /** Ranks of highlights checked for "export selected" */
@@ -268,6 +282,18 @@ interface AppState {
   setEditorTab: (t: AppState["editorTab"]) => void;
   /** Adds a hand-marked clip centred on `center` seconds; returns its rank. */
   addBookmark: (center: number) => number;
+  /** Starts a review pass: sends every word below the confidence threshold
+   * to the local model and populates polishSuggestions with what it
+   * proposes. A no-op (clears any stale suggestions) if the model is not
+   * installed - callers should check polishAvailable first. */
+  downloadPolishModel: () => Promise<void>;
+  reviewTranscript: () => Promise<void>;
+  /** Applies one suggestion (through updateWord, so it is a normal,
+   * undoable edit) and removes it from the pending list. */
+  acceptPolishSuggestion: (index: number) => void;
+  rejectPolishSuggestion: (index: number) => void;
+  acceptAllPolishSuggestions: () => void;
+  dismissAllPolishSuggestions: () => void;
   /** Reassigns a whole segment to a speaker (or null for unattributed) - the
    * timeline's drag-a-line-into-another-lane gesture, and the fastest way to
    * correct diarization when it puts someone in the wrong lane. */
@@ -509,6 +535,10 @@ export const useApp = create<AppState>((set, get) => ({
   style: getPreset("beast"),
   highlights: [],
   analyzeJob: null,
+  polishJob: null,
+  polishModelJob: null,
+  polishAvailable: false,
+  polishSuggestions: [],
   activeRange: null,
   selectedRanks: [],
   clipOverrides: {},
@@ -585,10 +615,10 @@ export const useApp = create<AppState>((set, get) => ({
       }
 
       // 2) jobs tracked in UI state
-      const { transcribeJob, exportJob, modelJob, analyzeJob } = get();
+      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob } = get();
       const patch = (
         job: JobState | null,
-        key: "transcribeJob" | "exportJob" | "modelJob" | "analyzeJob"
+        key: "transcribeJob" | "exportJob" | "modelJob" | "analyzeJob" | "polishJob" | "polishModelJob"
       ) => {
         if (!job || job.id !== p.id) return false;
         if (p.error) {
@@ -612,6 +642,15 @@ export const useApp = create<AppState>((set, get) => ({
             }
           } else if (key === "exportJob") {
             set({ exportJob: null, exportDone: p.result ?? null });
+          } else if (key === "polishModelJob") {
+            set({ polishModelJob: null, polishAvailable: true });
+          } else if (key === "polishJob" && p.result) {
+            try {
+              const suggestions = JSON.parse(p.result) as PolishSuggestion[];
+              set({ polishJob: null, polishSuggestions: suggestions });
+            } catch {
+              set({ polishJob: null, error: "Failed to parse cleanup suggestions" });
+            }
           } else if (key === "analyzeJob" && p.result) {
             try {
               const found = JSON.parse(p.result) as Highlight[];
@@ -656,9 +695,17 @@ export const useApp = create<AppState>((set, get) => ({
       patch(transcribeJob, "transcribeJob") ||
         patch(exportJob, "exportJob") ||
         patch(analyzeJob, "analyzeJob") ||
+        patch(polishJob, "polishJob") ||
+        patch(polishModelJob, "polishModelJob") ||
         patch(modelJob, "modelJob");
     });
     await get().refreshModels();
+    try {
+      const polishAvailable = await invoke<boolean>("polish_available");
+      set({ polishAvailable });
+    } catch {
+      /* stays false - the cleanup action just won't offer itself */
+    }
     try {
       const availableEncoders = await invoke<string[]>("detect_encoders");
       set({ availableEncoders });
@@ -757,6 +804,8 @@ export const useApp = create<AppState>((set, get) => ({
       transcribeJob: null,
       exportJob: null,
       analyzeJob: null,
+      polishJob: null,
+      polishSuggestions: [],
       exportDone: null,
     });
   },
@@ -1527,6 +1576,60 @@ export const useApp = create<AppState>((set, get) => ({
     localStorage.setItem("cc.highlightCount", n == null ? "auto" : String(n));
     set({ highlightCount: n });
   },
+
+  downloadPolishModel: async () => {
+    try {
+      set({ error: null });
+      const id = await invoke<string>("download_polish_model");
+      set({ polishModelJob: { id, stage: "downloading", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  reviewTranscript: async () => {
+    const { segments, speakerProfiles } = get();
+    try {
+      set({ error: null, polishSuggestions: [] });
+      const id = await invoke<string>("polish_transcript", {
+        req: {
+          segments: segments.map((s) => ({
+            id: s.id,
+            words: s.words.map((w) => ({ text: w.text, confidence: w.confidence ?? 1 })),
+          })),
+          players: speakerProfiles.map((p) => p.name),
+          threshold: UNSURE_BELOW,
+        },
+      });
+      set({ polishJob: { id, stage: "polishing", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  acceptPolishSuggestion: (index) => {
+    const s = get().polishSuggestions[index];
+    if (!s) return;
+    get().updateWord(s.segId, s.wordIdx, s.suggested);
+    set({ polishSuggestions: get().polishSuggestions.filter((_, i) => i !== index) });
+  },
+
+  rejectPolishSuggestion: (index) => {
+    set({ polishSuggestions: get().polishSuggestions.filter((_, i) => i !== index) });
+  },
+
+  acceptAllPolishSuggestions: () => {
+    // Applied oldest-first so an earlier word's index in its segment can't
+    // shift under a later suggestion for the same segment mid-loop -
+    // updateWord replaces text in place rather than the word count, so this
+    // is precautionary rather than a known bug, but cheap to get right.
+    for (const s of get().polishSuggestions) {
+      get().updateWord(s.segId, s.wordIdx, s.suggested);
+    }
+    set({ polishSuggestions: [] });
+  },
+
+  dismissAllPolishSuggestions: () => set({ polishSuggestions: [] }),
 
   pushHistory: (coalesceKey) => {
     const now = Date.now();

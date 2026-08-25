@@ -170,6 +170,63 @@ if ((Done "sherpa-onnx-offline-speaker-diarization") -and
     Write-Host "Embedding model installed."
 }
 
+# ---------------- local transcript-cleanup model (llama.cpp + Qwen2.5-3B) ----------------
+# Optional: an offline pass that catches misheard names/words whisper's own
+# confidence already flagged (see src-tauri/src/polish.rs for the full design
+# and why it never edits a whole transcript in one shot). ~2GB, entirely
+# skippable - polish::available() reports false without it and the rest of
+# the app is unaffected.
+#
+# Kept in its OWN subdirectory (binaries/llama/), not mixed in with the rest
+# of binaries/: llama.cpp and whisper.cpp both build on the ggml tensor
+# library and both ship ggml.dll/ggml-cpu-*.dll under those exact names, with
+# no ABI guarantee between the two projects' builds. Windows resolves a
+# launched exe's DLLs from the directory *that exe lives in* first, so giving
+# llama-server its own subdirectory - with its own copies of those DLLs -
+# means each tool loads its own and neither can silently overwrite or shadow
+# the other's on disk.
+$llamaDir = Join-Path $binDir "llama"
+$llamaExe = Join-Path $llamaDir "llama-server-$triple.exe"
+
+# The model itself is NOT fetched here, deliberately: a real local production
+# build with the ~2GB .gguf placed in binaries/llama/ for bundling failed
+# makensis with "Internal compiler error #12345: error mmapping file ... out
+# of range" - a real, confirmed NSIS limitation packaging one very large
+# file, not a hypothetical. The model is downloaded at RUNTIME by the app
+# itself instead (polish::download, into app_data_dir/models), exactly like
+# whisper's own large-v3 model (3.1GB) already works. Only llama-server.exe
+# and its ~17MB of DLLs - small enough to bundle normally - are fetched here.
+if (Test-Path $llamaExe) {
+    Write-Host "llama-server already present, skipping."
+} else {
+    New-Item -ItemType Directory -Force -Path $llamaDir | Out-Null
+    Write-Host "Finding latest llama.cpp Windows CPU build..."
+    $lrel = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases" -Headers @{ "User-Agent" = "clipcaption-setup" } |
+        Where-Object { $_.assets | Where-Object { $_.name -match "^llama-.*-bin-win-cpu-x64\.zip$" } } |
+        Select-Object -First 1
+    if (-not $lrel) {
+        Write-Error "Could not find a llama.cpp release with a win-cpu-x64 build. Download one manually from https://github.com/ggml-org/llama.cpp/releases and place llama-server.exe + its DLLs in src-tauri/binaries/llama/ (exe renamed to llama-server-$triple.exe)."
+    }
+    $lasset = $lrel.assets | Where-Object { $_.name -match "^llama-.*-bin-win-cpu-x64\.zip$" } | Select-Object -First 1
+    $lZip = Join-Path $tmp "llama.zip"
+    Invoke-WebRequest -Uri $lasset.browser_download_url -OutFile $lZip
+    $lExtract = Join-Path $tmp "llama-extract"
+    if (Test-Path $lExtract) { Remove-Item -Recurse -Force $lExtract }
+    Expand-Archive -Path $lZip -DestinationPath $lExtract
+    $serverExe = Get-ChildItem -Path $lExtract -Recurse -Filter "llama-server.exe" | Select-Object -First 1
+    if (-not $serverExe) {
+        Write-Error "llama-server.exe not found in the llama.cpp release archive ($($lasset.name))."
+    }
+    Copy-Item $serverExe.FullName $llamaExe -Force
+    # Every DLL next to it, not a hand-picked subset - same reasoning as
+    # embed-tool's CMakeLists linking every .lib in its release: cheap,
+    # and safe against a transitive dependency this list didn't guess.
+    Get-ChildItem -Path $serverExe.Directory -Filter "*.dll" | ForEach-Object {
+        Copy-Item $_.FullName (Join-Path $llamaDir $_.Name) -Force
+    }
+    Write-Host "llama-server installed."
+}
+
 Write-Host ""
 Write-Host "All sidecars ready in src-tauri\binaries:"
 Get-ChildItem $binDir | ForEach-Object { Write-Host "  $($_.Name)" }

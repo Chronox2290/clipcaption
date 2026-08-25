@@ -2,7 +2,9 @@
   "bundle": {
     "resources": {
       "binaries/*.dll": "./",
-      "binaries/*.onnx": "./"
+      "binaries/*.onnx": "./",
+      "binaries/llama/*.dll": "binaries/llama/",
+      "binaries/llama/llama-server-x86_64-pc-windows-msvc.exe": "binaries/llama/llama-server.exe"
     }
   }
 }

@@ -869,6 +869,59 @@ kbd {
   font-family: inherit;
 }
 
+.transcript-actions {
+  display: flex;
+  gap: 8px;
+}
+.transcript-actions .btn {
+  flex: 1;
+}
+
+.polish-review {
+  margin-top: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(124, 92, 255, 0.08);
+  border: 1px solid rgba(124, 92, 255, 0.28);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.polish-review-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.polish-review-head span {
+  flex: 1;
+}
+.polish-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--bg1);
+}
+.polish-diff {
+  flex: 1;
+  font-size: 13px;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+.polish-old {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+.polish-arrow {
+  color: var(--dim, var(--muted));
+  margin: 0 5px;
+}
+.polish-new {
+  color: var(--ok);
+  font-weight: 600;
+}
+
 .range-grid {
   display: grid;
   /* Two columns, not three: TimeField renders its own pin button inside

@@ -11,6 +11,16 @@ export interface WordSpan {
   confidence?: number;
 }
 
+/** One proposed fix from the local-LLM cleanup pass (see
+ * src-tauri/src/polish.rs). Advisory only - nothing is applied until the
+ * user accepts it in the review list. */
+export interface PolishSuggestion {
+  segId: string;
+  wordIdx: number;
+  original: string;
+  suggested: string;
+}
+
 export interface Segment {
   id: string;
   words: WordSpan[];
