@@ -100,10 +100,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
       // the style's default bottom-anchored MarginV, which would drift against
       // the preview as the caption's size changes.
       const x = Math.round(opts.playResX * (0.5 + dyn.offsetPct / 100));
-      // Matches the preview's row lift (containerCss): a little over one line
-      // height per stacked row, clamped so a fourth simultaneous speaker
-      // can't be pushed off the top of the frame.
-      const rowLift = row * fontSize * 1.45;
+      // `row` is the number of LINES stacked below this caption (see
+      // layoutRows), not a count of captions - a wrapped caption occupies
+      // more than one. Clamped below so a fourth simultaneous speaker can't
+      // be pushed off the top of the frame.
+      const rowLift = row * fontSize * 1.25;
       const y = Math.round(
         Math.max(fontSize, opts.playResY * (style.positionPct / 100) - rowLift)
       );

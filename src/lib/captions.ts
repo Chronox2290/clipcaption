@@ -35,10 +35,36 @@ export function paginate(
         current = [];
       }
       current.push(w);
+
+      // Break AFTER a sentence ends, rather than only when the word budget
+      // runs out. Counting words alone cuts sentences at arbitrary points and
+      // then strands their tail with the start of the next one, which is what
+      // made captions read as a stream of fragments rather than lines someone
+      // said. A one-word "Yeah." is left to join what follows instead of
+      // flashing on its own.
+      if (current.length >= MIN_WORDS_TO_END_A_PAGE && endsSentence(w.text)) {
+        pages.push(toPage(current, seg));
+        current = [];
+      }
     }
     if (current.length) pages.push(toPage(current, seg));
   }
   return pages;
+}
+
+/** Below this, a "sentence" is too short to deserve its own caption - a lone
+ * "Yeah." or "No." reads better carried into the next line than flashed up
+ * and cleared. */
+const MIN_WORDS_TO_END_A_PAGE = 3;
+
+function endsSentence(text: string): boolean {
+  // Trailing quotes and brackets come after the punctuation that ends the
+  // sentence: ...great!" still ends it.
+  const t = text.trim();
+  // A single capital letter before the dot is an initial ("J."), not the end
+  // of a sentence. Anything longer ending in a dot is.
+  if (/(^|\s)[A-Z]\.$/.test(t)) return false;
+  return /[.!?]["')\]]*$/.test(t);
 }
 
 function toPage(words: WordSpan[], seg: Segment): CaptionPage {
@@ -142,19 +168,35 @@ export function pagesAt(pages: CaptionPage[], t: number, linger = CAPTION_LINGER
  * Rows are fixed per page rather than recomputed per frame, so a caption never
  * jumps rows mid-display. The cost is that a caption about to be joined sits
  * lifted slightly early, with its slot empty beneath it. */
+/** Roughly how many lines a caption will wrap to.
+ *
+ * Only the burned-in export needs this - the preview measures itself. The
+ * budget is deliberately conservative (assume the narrow, spatial-caption
+ * width), because guessing too few lines makes captions overlap, while
+ * guessing too many only leaves a little extra air between them. */
+const CHARS_PER_LINE = 24;
+
+function estimateLines(page: CaptionPage): number {
+  const chars = page.words.reduce((n, w) => n + w.text.length + 1, 0);
+  return Math.max(1, Math.ceil(chars / CHARS_PER_LINE));
+}
+
 export function layoutRows(pages: CaptionPage[], linger = CAPTION_LINGER): CaptionPage[] {
   const sorted = [...pages].sort((a, b) => a.start - b.start);
   const rowOf = new Map<CaptionPage, number>();
 
   for (let i = 0; i < sorted.length; i++) {
     const page = sorted[i];
-    let later = 0;
+    let lines = 0;
     // Sorted by start, so once a page begins after this one's display window
-    // there are no further overlaps to count.
+    // there are no further overlaps to count. Summing the LINES of the
+    // captions below rather than counting them is what stops a wrapped
+    // caption growing into the one above it - the preview gets this for free
+    // from flexbox, the burned-in export has to be told.
     for (let j = i + 1; j < sorted.length && sorted[j].start <= page.end + linger; j++) {
-      later++;
+      lines += estimateLines(sorted[j]);
     }
-    rowOf.set(page, later);
+    rowOf.set(page, lines);
   }
 
   return pages.map((p) => ({ ...p, row: rowOf.get(p) ?? 0 }));

@@ -871,10 +871,15 @@ kbd {
 
 .range-grid {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  /* Two columns, not three: TimeField renders its own pin button inside
+     itself, so each row contributes a label and ONE field cell. With three
+     columns the second row wrapped into the first row's leftover cell and
+     the panel read "Start | 40:07.2 | End" with the other field orphaned
+     underneath. */
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
-  gap: 6px 8px;
-  margin-bottom: 8px;
+  gap: 8px 10px;
+  margin-bottom: 10px;
 }
 .range-grid .hl-nudge-label {
   font-size: 11px;

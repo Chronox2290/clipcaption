@@ -3,7 +3,7 @@ import type { RefObject } from "react";
 import type { CaptionStyle, Segment } from "../types";
 import { paginate, pagesAt, layoutRows, activeWordIndex, applyCensor, captionDynamics } from "../lib/captions";
 import { addEmojis } from "../lib/emojis";
-import { containerCss, speakerNameCss, wordCss } from "../lib/styles";
+import { containerCss, speakerNameCss, wordCss, captionStackCss } from "../lib/styles";
 
 interface Props {
   videoRef: RefObject<HTMLVideoElement | null>;
@@ -48,9 +48,13 @@ export default function CaptionOverlay({
   const live = pagesAt(pages, time);
   if (!live.length || stageHeight <= 0) return null;
 
+  // Oldest first: the stack grows downward, so reading top to bottom follows
+  // the order things were said.
+  const ordered = [...live].sort((a, b) => a.start - b.start);
+
   return (
-    <>
-      {live.map((page) => {
+    <div style={captionStackCss(style, stageHeight)}>
+      {ordered.map((page) => {
         const active = activeWordIndex(page, time);
         const dyn = captionDynamics(page, style);
         const speakerName =
@@ -62,7 +66,7 @@ export default function CaptionOverlay({
             // rest of them.
             key={`${page.start}-${page.speaker ?? "x"}`}
             className={dyn.shake ? "caption-shake" : undefined}
-            style={containerCss(style, stageHeight, dyn, page.row ?? 0)}
+            style={containerCss(style, stageHeight, dyn)}
           >
             {speakerName && (
               <div style={speakerNameCss(style, stageHeight, page.speaker!)}>{speakerName}</div>
@@ -78,6 +82,6 @@ export default function CaptionOverlay({
           </div>
         );
       })}
-    </>
+    </div>
   );
 }

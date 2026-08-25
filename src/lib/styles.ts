@@ -149,24 +149,40 @@ export function getPreset(id: string): CaptionStyle {
   return STYLE_PRESETS.find((s) => s.id === id) ?? STYLE_PRESETS[0];
 }
 
-/** CSS for the caption container, sized against the rendered video height.
+/** The container holding every caption live at this moment.
  *
- * `dyn` comes from captionDynamics() — the same values the ASS export uses, so
- * the preview and the burned-in file place and size the caption identically. */
+ * Simultaneous captions are laid out by flexbox rather than positioned by
+ * arithmetic. Computing each one's offset from a row index assumed every
+ * caption was exactly one line tall; a caption that wrapped - which happens
+ * constantly once living captions scale the text up - grew into the row above
+ * and the two drew on top of each other. Letting the browser stack them means
+ * lines can never touch, whatever they contain.
+ *
+ * Order is oldest at the top, so reading downward follows the order things
+ * were said. */
+export function captionStackCss(style: CaptionStyle, videoHeightPx: number): CSSProperties {
+  return {
+    position: "absolute",
+    left: "50%",
+    top: `${style.positionPct}%`,
+    transform: "translate(-50%, -50%)",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "0.22em",
+    width: "100%",
+    fontSize: `${(style.fontSizePct / 100) * videoHeightPx}px`,
+    pointerEvents: "none",
+  };
+}
+
+/** CSS for one caption line within the stack. */
 export function containerCss(
   style: CaptionStyle,
   videoHeightPx: number,
-  dyn: CaptionDynamics = { offsetPct: 0, scale: 1, shake: false },
-  row = 0
+  dyn: CaptionDynamics = { offsetPct: 0, scale: 1, shake: false }
 ): CSSProperties {
-  // Each stacked row lifts the caption by a little over one line height, so
-  // two people talking at once read as two lines rather than one pile.
-  const rowLift = (row ?? 0) * style.fontSizePct * 1.45;
   return {
-    position: "absolute",
-    left: `${50 + dyn.offsetPct}%`,
-    top: `${Math.max(6, style.positionPct - rowLift)}%`,
-    transform: "translate(-50%, -50%)",
     display: "flex",
     gap: "0.28em",
     flexWrap: "wrap",
@@ -174,12 +190,13 @@ export function containerCss(
     // Narrower once captions can move sideways: a full-width line has nowhere
     // left to slide, and would just clip against the frame edge.
     maxWidth: dyn.offsetPct === 0 ? "92%" : "62%",
+    // The stack owns vertical placement; a caption only shifts sideways.
+    transform: `translateX(${dyn.offsetPct}%)`,
     fontFamily: `"${style.font}", sans-serif`,
     fontSize: `${(style.fontSizePct / 100) * videoHeightPx * dyn.scale}px`,
     fontWeight: style.fontWeight ?? 900,
     lineHeight: 1.15,
     textTransform: style.uppercase ? "uppercase" : "none",
-    pointerEvents: "none",
     textAlign: "center",
   };
 }
