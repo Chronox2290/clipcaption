@@ -1,9 +1,3 @@
-// Not wired to a Tauri command yet - model download (models.rs) and the
-// command/UI trigger are the next layer, not abandoned. Silencing dead_code
-// here rather than on each item so the warning comes back the moment a real
-// caller exists and this allow becomes stale.
-#![allow(dead_code)]
-
 //! Word-level forced alignment: given audio and text ClipCaption already
 //! believes is correct (freshly transcribed or user-edited), finds precise
 //! per-word timestamps with a wav2vec2 CTC acoustic model + a forced-align
@@ -30,7 +24,15 @@
 
 use ort::session::Session;
 use ort::value::TensorRef;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::process::Stdio;
+use std::sync::Arc;
+use tauri::{AppHandle, Manager};
+
+use crate::jobs::{emit_done, emit_error, emit_progress, JobHandle};
+use crate::models;
+use crate::sidecar;
 
 const BLANK: i64 = 0;
 const WORD_SEP: i64 = 4;
@@ -246,6 +248,253 @@ impl Aligner {
             .into_iter()
             .map(|r| r.map(|(lo, hi)| (lo as f64 * FRAME_SEC, (hi + 1) as f64 * FRAME_SEC)))
             .collect())
+    }
+}
+
+/// A speaker turn is never handed the whole recording to search (see module
+/// docs) - consecutive words/segments from the same speaker with a gap
+/// under this many seconds count as one turn; anything wider gets its own
+/// turn, each with its own small search window.
+const TURN_GAP_SEC: f64 = 1.2;
+/// Padding added on each side of a turn's own true extent before extracting
+/// its search window - the value this was validated against.
+const WINDOW_PAD_SEC: f64 = 0.4;
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AlignWord {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f32>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AlignSegment {
+    pub id: String,
+    pub words: Vec<AlignWord>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pan: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intensity: Option<f32>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AlignRequest {
+    pub video_path: String,
+    pub segments: Vec<AlignSegment>,
+}
+
+/// One contiguous same-speaker stretch to align as a unit, with the search
+/// window (already padded, not yet clamped to the clip's real bounds)
+/// computed from its own words' current timing.
+struct Turn {
+    seg_indices: Vec<usize>,
+    window_lo: f64,
+    window_hi: f64,
+}
+
+fn group_turns(segments: &[AlignSegment]) -> Vec<Turn> {
+    let mut order: Vec<usize> = (0..segments.len())
+        .filter(|&i| !segments[i].words.is_empty())
+        .collect();
+    order.sort_by(|&a, &b| {
+        segments[a].words[0]
+            .start
+            .partial_cmp(&segments[b].words[0].start)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut turns: Vec<Turn> = Vec::new();
+    for i in order {
+        let seg = &segments[i];
+        let seg_start = seg.words[0].start;
+        let seg_end = seg.words[seg.words.len() - 1].end;
+
+        let joins_prev = seg.speaker.is_some()
+            && turns.last().is_some_and(|t| {
+                let prev = &segments[*t.seg_indices.last().unwrap()];
+                prev.speaker == seg.speaker && seg_start - t.window_hi + WINDOW_PAD_SEC < TURN_GAP_SEC
+            });
+
+        if joins_prev {
+            let t = turns.last_mut().unwrap();
+            t.seg_indices.push(i);
+            t.window_hi = seg_end + WINDOW_PAD_SEC;
+        } else {
+            turns.push(Turn {
+                seg_indices: vec![i],
+                window_lo: (seg_start - WINDOW_PAD_SEC).max(0.0),
+                window_hi: seg_end + WINDOW_PAD_SEC,
+            });
+        }
+    }
+    turns
+}
+
+/// Reads a ffmpeg-produced PCM16 mono WAV as normalized f32 samples,
+/// tolerating extra chunks (e.g. a LIST/INFO metadata chunk) before or after
+/// `data` rather than assuming a fixed 44-byte header - ffmpeg's own output
+/// isn't always exactly canonical (see transcribe.rs's read_wav_peaks, which
+/// hit the same thing).
+fn read_wav_f32(path: &std::path::Path) -> Result<Vec<f32>, String> {
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err("Not a WAV file".into());
+    }
+    let mut pos = 12usize;
+    let mut data: Option<&[u8]> = None;
+    while pos + 8 <= bytes.len() {
+        let chunk_id = &bytes[pos..pos + 4];
+        let chunk_size = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+        let body_start = pos + 8;
+        let body_end = (body_start + chunk_size).min(bytes.len());
+        if chunk_id == b"data" {
+            data = Some(&bytes[body_start..body_end]);
+        }
+        pos = body_start + chunk_size + (chunk_size % 2);
+    }
+    let data = data.ok_or("WAV has no data chunk")?;
+    Ok(data
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
+        .collect())
+}
+
+fn extract_wav(
+    video_path: &str,
+    out_path: &std::path::Path,
+    offset: f64,
+    duration: f64,
+) -> Result<(), String> {
+    let out = sidecar::command("ffmpeg")
+        .args(["-y", "-ss", &format!("{offset:.3}"), "-i", video_path])
+        .args(["-t", &format!("{duration:.3}")])
+        .args([
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            // Same filter chain transcribe.rs extracts with (see its own
+            // comment for why) - the alignment model was validated against
+            // audio processed exactly this way, not raw audio.
+            "-af",
+            "highpass=f=80,dynaudnorm=f=150:g=15:p=0.9",
+            "-c:a",
+            "pcm_s16le",
+        ])
+        .arg(out_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|e| format!("Could not run ffmpeg: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "Audio extraction failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        ));
+    }
+    Ok(())
+}
+
+fn run_inner(
+    app: &AppHandle,
+    job_id: &str,
+    handle: &Arc<JobHandle>,
+    req: &AlignRequest,
+) -> Result<String, String> {
+    let stage = "aligning";
+    let model_path = models::model_path(app, "wav2vec2-base-960h")?;
+    if !model_path.exists() {
+        return Err("Alignment model isn't downloaded yet.".into());
+    }
+
+    let turns = group_turns(&req.segments);
+    if turns.is_empty() {
+        return serde_json::to_string(&req.segments).map_err(|e| e.to_string());
+    }
+
+    let global_lo = turns.iter().map(|t| t.window_lo).fold(f64::MAX, f64::min);
+    let global_hi = turns.iter().map(|t| t.window_hi).fold(f64::MIN, f64::max);
+
+    emit_progress(app, job_id, stage, 0.0, Some("extracting audio".into()));
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("align");
+    std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+    let wav_path = cache.join(format!("{job_id}.wav"));
+    extract_wav(&req.video_path, &wav_path, global_lo, global_hi - global_lo)?;
+    let samples = read_wav_f32(&wav_path)?;
+    let _ = std::fs::remove_file(&wav_path);
+
+    let mut aligner = Aligner::load(&model_path).map_err(|e| e.to_string())?;
+    let mut segments = req.segments.clone();
+    let n_turns = turns.len();
+
+    for (ti, turn) in turns.iter().enumerate() {
+        if handle.is_cancelled() {
+            return Err("Cancelled".into());
+        }
+        emit_progress(
+            app,
+            job_id,
+            stage,
+            (ti as f32) / (n_turns as f32),
+            Some(format!("{}/{}", ti + 1, n_turns)),
+        );
+
+        let lo_i = ((turn.window_lo - global_lo) * 16000.0).round().max(0.0) as usize;
+        let hi_i = (((turn.window_hi - global_lo) * 16000.0).round() as usize).min(samples.len());
+        if lo_i >= hi_i {
+            continue;
+        }
+        let window = &samples[lo_i..hi_i];
+
+        let words: Vec<String> = turn
+            .seg_indices
+            .iter()
+            .flat_map(|&i| segments[i].words.iter().map(|w| w.text.clone()))
+            .collect();
+
+        let aligned = match aligner.align(window, &words) {
+            Ok(a) => a,
+            Err(_) => continue, // leave this turn's words at their existing timing
+        };
+
+        let mut wi = 0usize;
+        for &si in &turn.seg_indices {
+            for w in segments[si].words.iter_mut() {
+                if let Some(Some((s, e))) = aligned.get(wi) {
+                    w.start = turn.window_lo + s;
+                    w.end = turn.window_lo + e;
+                }
+                wi += 1;
+            }
+        }
+    }
+
+    serde_json::to_string(&segments).map_err(|e| e.to_string())
+}
+
+pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: AlignRequest) {
+    let stage = "aligning";
+    match run_inner(&app, &job_id, &handle, &req) {
+        Ok(json) => emit_done(&app, &job_id, stage, Some(json)),
+        Err(e) => {
+            if handle.is_cancelled() {
+                emit_error(&app, &job_id, stage, "Cancelled".into());
+            } else {
+                emit_error(&app, &job_id, stage, e);
+            }
+        }
     }
 }
 

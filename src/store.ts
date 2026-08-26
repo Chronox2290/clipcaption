@@ -174,6 +174,7 @@ interface AppState {
   exportJob: JobState | null;
   exportDone: string | null;
   modelJob: JobState | null;
+  alignJob: JobState | null;
 
   // models
   models: ModelInfo[];
@@ -319,6 +320,13 @@ interface AppState {
    * installed - callers should check polishAvailable first. */
   downloadPolishModel: () => Promise<void>;
   reviewTranscript: () => Promise<void>;
+  /** Re-times every word against the audio via forced alignment (align.rs),
+   * using the transcript's own text as ground truth rather than re-guessing
+   * content - snaps every word to where it actually is, including ones
+   * whisper mistimed or never confidently placed. Needs the alignment model
+   * downloaded first (see `models`, name "wav2vec2-base-960h") and a saved
+   * video path; undoable like any other transcript edit. */
+  alignTranscript: () => Promise<void>;
   /** Applies one suggestion (through updateWord, so it is a normal,
    * undoable edit) and removes it from the pending list. */
   acceptPolishSuggestion: (index: number) => void;
@@ -551,7 +559,7 @@ async function restoreSession(
 export const useApp = create<AppState>((set, get) => ({
   theme: (() => {
     const v = localStorage.getItem("cc.theme");
-    return v === "warm" || v === "gamer" ? v : "precision";
+    return v === "warm" || v === "precision" ? v : "gamer";
   })(),
   setTheme: (t) => {
     localStorage.setItem("cc.theme", t);
@@ -600,6 +608,7 @@ export const useApp = create<AppState>((set, get) => ({
   exportJob: null,
   exportDone: null,
   modelJob: null,
+  alignJob: null,
   models: [],
   selectedModel: localStorage.getItem("cc.model") ?? "large-v3-turbo",
   vocabulary: localStorage.getItem("cc.vocabulary") ?? "",
@@ -664,10 +673,17 @@ export const useApp = create<AppState>((set, get) => ({
       }
 
       // 2) jobs tracked in UI state
-      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob } = get();
+      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob } = get();
       const patch = (
         job: JobState | null,
-        key: "transcribeJob" | "exportJob" | "modelJob" | "analyzeJob" | "polishJob" | "polishModelJob"
+        key:
+          | "transcribeJob"
+          | "exportJob"
+          | "modelJob"
+          | "analyzeJob"
+          | "polishJob"
+          | "polishModelJob"
+          | "alignJob"
       ) => {
         if (!job || job.id !== p.id) return false;
         if (p.error) {
@@ -693,6 +709,13 @@ export const useApp = create<AppState>((set, get) => ({
             set({ exportJob: null, exportDone: p.result ?? null });
           } else if (key === "polishModelJob") {
             set({ polishModelJob: null, polishAvailable: true });
+          } else if (key === "alignJob" && p.result) {
+            try {
+              const segments = JSON.parse(p.result) as Segment[];
+              set({ segments, alignJob: null });
+            } catch {
+              set({ alignJob: null, error: "Failed to parse aligned transcript" });
+            }
           } else if (key === "polishJob" && p.result) {
             try {
               const suggestions = JSON.parse(p.result) as PolishSuggestion[];
@@ -762,6 +785,7 @@ export const useApp = create<AppState>((set, get) => ({
         patch(analyzeJob, "analyzeJob") ||
         patch(polishJob, "polishJob") ||
         patch(polishModelJob, "polishModelJob") ||
+        patch(alignJob, "alignJob") ||
         patch(modelJob, "modelJob");
     });
     await get().refreshModels();
@@ -1688,6 +1712,35 @@ export const useApp = create<AppState>((set, get) => ({
         },
       });
       set({ polishJob: { id, stage: "polishing", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  alignTranscript: async () => {
+    const { segments, videoPath } = get();
+    if (!videoPath) return;
+    get().pushHistory();
+    try {
+      set({ error: null });
+      const id = await invoke<string>("align_transcript", {
+        req: {
+          videoPath,
+          segments: segments.map((s) => ({
+            id: s.id,
+            speaker: s.speaker ?? undefined,
+            pan: s.pan ?? undefined,
+            intensity: s.intensity ?? undefined,
+            words: s.words.map((w) => ({
+              text: w.text,
+              start: w.start,
+              end: w.end,
+              confidence: w.confidence,
+            })),
+          })),
+        },
+      });
+      set({ alignJob: { id, stage: "aligning", progress: 0 } });
     } catch (e) {
       set({ error: String(e) });
     }

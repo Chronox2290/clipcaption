@@ -24,7 +24,7 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # fetches ONNX Runtime's own prebuilt dylib at build time, matching how the
 # other native deps here (whisper.cpp, sherpa-onnx) are obtained rather than
 # vendored - no separate sidecar needed since ort loads it directly.
-ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "api-27", "download-binaries", "tls-rustls"] }
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "api-27", "download-binaries", "copy-dylibs", "tls-rustls"] }
 
 [profile.release]
 codegen-units = 1

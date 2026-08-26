@@ -22,6 +22,11 @@ pub struct ModelSpec {
     /// HF repo the file is hosted in ("owner/name"). Every model here lives
     /// in ggerganov/whisper.cpp.
     pub hf_repo: &'static str,
+    /// Path to the file *within* `hf_repo`, when it differs from
+    /// `file_name` (e.g. the alignment model lives at `onnx/model.onnx` in
+    /// its repo but is saved locally as a flatter, more identifiable name).
+    /// `None` means "same as file_name", true for every whisper.cpp model.
+    pub hf_path: Option<&'static str>,
     /// True for a model that exists to unlock a capability rather than being
     /// a normal accuracy choice — the UI keeps these out of the main "Speech
     /// model" picker. Unused today (speaker diarization no longer needs a
@@ -39,6 +44,7 @@ pub const MODELS: &[ModelSpec] = &[
         description: "Fastest, rough accuracy — quick drafts",
         dtw_preset: "tiny.en",
         hf_repo: "ggerganov/whisper.cpp",
+        hf_path: None,
         capability_only: false,
     },
     ModelSpec {
@@ -49,6 +55,7 @@ pub const MODELS: &[ModelSpec] = &[
         description: "Fast, decent accuracy",
         dtw_preset: "base.en",
         hf_repo: "ggerganov/whisper.cpp",
+        hf_path: None,
         capability_only: false,
     },
     ModelSpec {
@@ -59,6 +66,7 @@ pub const MODELS: &[ModelSpec] = &[
         description: "Good speed/accuracy balance for game audio",
         dtw_preset: "small.en",
         hf_repo: "ggerganov/whisper.cpp",
+        hf_path: None,
         capability_only: false,
     },
     ModelSpec {
@@ -69,6 +77,7 @@ pub const MODELS: &[ModelSpec] = &[
         description: "More accurate than small, noticeably slower",
         dtw_preset: "medium.en",
         hf_repo: "ggerganov/whisper.cpp",
+        hf_path: None,
         capability_only: false,
     },
     ModelSpec {
@@ -84,6 +93,7 @@ pub const MODELS: &[ModelSpec] = &[
         description: "Best accuracy for English, near large-v3 quality at a fraction of the cost — recommended",
         dtw_preset: "large.v3.turbo",
         hf_repo: "ggerganov/whisper.cpp",
+        hf_path: None,
         capability_only: false,
     },
     ModelSpec {
@@ -94,7 +104,23 @@ pub const MODELS: &[ModelSpec] = &[
         description: "Maximum possible accuracy — largest and slowest, for the hardest audio",
         dtw_preset: "large.v3",
         hf_repo: "ggerganov/whisper.cpp",
+        hf_path: None,
         capability_only: false,
+    },
+    ModelSpec {
+        // Powers forced alignment (align.rs), not transcription - kept out
+        // of the "Speech model" picker via capability_only. dtw_preset is
+        // meaningless for this model (that field is whisper.cpp-specific)
+        // and never looked up for it.
+        name: "wav2vec2-base-960h",
+        file_name: "wav2vec2-base-960h.onnx",
+        size_mb: 361,
+        recommended: false,
+        description: "Forced-alignment acoustic model - refines word timing once the text is known",
+        dtw_preset: "",
+        hf_repo: "Xenova/wav2vec2-base-960h",
+        hf_path: Some("onnx/model.onnx"),
+        capability_only: true,
     },
 ];
 
@@ -180,7 +206,8 @@ pub fn download(app: AppHandle, job_id: String, handle: Arc<JobHandle>, name: St
 
     let url = format!(
         "https://huggingface.co/{}/resolve/main/{}",
-        spec.hf_repo, spec.file_name
+        spec.hf_repo,
+        spec.hf_path.unwrap_or(spec.file_name)
     );
 
     let result = (|| -> Result<(), String> {

@@ -77,6 +77,20 @@ fn transcribe(
 }
 
 #[tauri::command]
+fn align_transcript(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    req: align::AlignRequest,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("align");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        align::run(app, job_id, handle, req);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
 fn polish_available(app: AppHandle) -> bool {
     polish::available(&app)
 }
@@ -217,7 +231,8 @@ pub fn run() {
             session_file,
             polish_available,
             download_polish_model,
-            polish_transcript
+            polish_transcript,
+            align_transcript
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClipCaption");

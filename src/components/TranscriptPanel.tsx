@@ -24,6 +24,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const polishSuggestions = useApp((s) => s.polishSuggestions);
   const polishLastRun = useApp((s) => s.polishLastRun);
   const reviewTranscript = useApp((s) => s.reviewTranscript);
+  const alignJob = useApp((s) => s.alignJob);
+  const alignTranscript = useApp((s) => s.alignTranscript);
+  const downloadModel = useApp((s) => s.downloadModel);
+  const modelJob = useApp((s) => s.modelJob);
   const acceptPolishSuggestion = useApp((s) => s.acceptPolishSuggestion);
   const rejectPolishSuggestion = useApp((s) => s.rejectPolishSuggestion);
   const acceptAllPolishSuggestions = useApp((s) => s.acceptAllPolishSuggestions);
@@ -371,6 +375,29 @@ export default function TranscriptPanel({ videoRef }: Props) {
             {polishModelJob
               ? `⬇ Downloading cleanup model… ${Math.round((polishModelJob.progress ?? 0) * 100)}%`
               : "⬇ Get AI cleanup (~2GB)"}
+          </button>
+        )}
+        {models.find((m) => m.name === "wav2vec2-base-960h")?.downloaded ? (
+          <button
+            className="btn btn-ghost"
+            onClick={() => void alignTranscript()}
+            disabled={!!alignJob || segments.length === 0}
+            title="Re-times every word against the actual audio using the transcript's own text, instead of trusting whisper's original guess - fixes mistimed and missed-entirely words. Undoable."
+          >
+            {alignJob
+              ? `⏱ Aligning… ${Math.round((alignJob.progress ?? 0) * 100)}%`
+              : "⏱ Align timing"}
+          </button>
+        ) : (
+          <button
+            className="btn btn-ghost"
+            onClick={() => void downloadModel("wav2vec2-base-960h")}
+            disabled={!!modelJob}
+            title="Downloads a small offline model (~360MB, one-time) that re-times words against the actual audio using the transcript's own text - measurably more accurate than whisper's own timing, especially on overlapping speech."
+          >
+            {modelJob
+              ? `⬇ Downloading alignment model… ${Math.round((modelJob.progress ?? 0) * 100)}%`
+              : "⬇ Get timing alignment (~360MB)"}
           </button>
         )}
       </div>
