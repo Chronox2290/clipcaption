@@ -103,29 +103,6 @@ pub fn resolve_in(subdir: &str, name: &str) -> PathBuf {
     PathBuf::from(format!("{name}{EXE_SUFFIX}"))
 }
 
-/// `resolve_data` for a file that lives in a sidecar's own subdirectory
-/// (see `resolve_in`) - e.g. the .gguf model next to llama-server.
-pub fn resolve_data_in(subdir: &str, filename: &str) -> PathBuf {
-    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("binaries")
-        .join(subdir)
-        .join(filename);
-    if cfg!(debug_assertions) && dev.exists() {
-        return dev;
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let p = dir.join(subdir).join(filename);
-            if p.exists() {
-                return p;
-            }
-        }
-    }
-
-    dev
-}
-
 /// `command()` for a sidecar resolved via `resolve_in`.
 pub fn command_in(subdir: &str, name: &str) -> Command {
     let cmd = Command::new(resolve_in(subdir, name));

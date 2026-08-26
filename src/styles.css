@@ -921,6 +921,15 @@ kbd {
   color: var(--ok);
   font-weight: 600;
 }
+.polish-conf {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.polish-summary {
+  margin: 2px 0 0;
+}
 
 .range-grid {
   display: grid;

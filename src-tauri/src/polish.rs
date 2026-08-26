@@ -77,12 +77,44 @@ pub struct Candidate {
     pub original: String,
 }
 
+/// Below this, a proposed fix is confident enough to apply without asking -
+/// above every genuinely-correct answer measured, comfortably below every
+/// wrong one. Measured against 9 real cases on this exact prompt (see
+/// 05-build-log.md): every reasonable answer (a correct name fix, a
+/// correct SAME refusal, even an out-of-distribution name the model
+/// sensibly left alone) scored 91-100%; every wrong or garbled answer
+/// scored 25-35%. The gap between those two clusters is wide enough that
+/// the exact threshold isn't sensitive - 80% sits with real margin on both
+/// sides rather than splitting the difference.
+///
+/// A word is only as trustworthy as its LEAST confident token, same
+/// reasoning as WordSpan::confidence in transcribe.rs: averaging would let
+/// a confident first guess ("Chris") hide a low-confidence, actually-wrong
+/// continuation (" and" instead of "tian").
+///
+/// Not read anywhere in this crate: the actual tiering DECISION and the
+/// edit itself both happen in the frontend (src/store.ts's own copy of this
+/// same constant, kept in sync by hand and cross-referenced from
+/// Suggestion::confidence's doc comment below), since Rust never touches
+/// segments directly. Kept here anyway as the canonical, measured value -
+/// deleting it would leave that doc comment pointing at nothing.
+#[allow(dead_code)]
+pub const AUTO_APPLY_CONFIDENCE: f32 = 0.80;
+
 #[derive(Serialize, Clone)]
 pub struct Suggestion {
     pub seg_id: String,
     pub word_idx: usize,
     pub original: String,
     pub suggested: String,
+    /// The model's own confidence in `suggested`, 0..1 - the minimum
+    /// per-token probability across its answer. The frontend applies
+    /// anything at or above AUTO_APPLY_CONFIDENCE immediately; everything
+    /// else goes to the review list. Rust reports the number; the actual
+    /// tiering decision and the edit itself both happen in the store, same
+    /// as every other transcript mutation - this module never touches
+    /// segments directly.
+    pub confidence: f32,
 }
 
 pub struct Server {
@@ -387,7 +419,7 @@ impl Server {
     /// actually proposes something different - never a "correction" back to
     /// the exact text it started with.
     pub fn correct(&self, candidate: &Candidate, players: &[String]) -> Option<Suggestion> {
-        let answer = self.ask(&candidate.marked_sentence, players)?;
+        let (answer, confidence) = self.ask(&candidate.marked_sentence, players)?;
         if is_no_op(&answer, &candidate.original) {
             return None;
         }
@@ -396,10 +428,17 @@ impl Server {
             word_idx: candidate.word_idx,
             original: candidate.original.clone(),
             suggested: answer,
+            confidence,
         })
     }
 
-    fn ask(&self, marked_sentence: &str, players: &[String]) -> Option<String> {
+    /// Returns the answer text plus how confident the model was in it - the
+    /// minimum per-token probability across the answer (not the average;
+    /// see AUTO_APPLY_CONFIDENCE for why). The end-of-turn token is dropped
+    /// before taking that minimum: it is always near-certain once the model
+    /// has decided what to say, so including it would just dilute the
+    /// number the answer's own tokens actually carry.
+    fn ask(&self, marked_sentence: &str, players: &[String]) -> Option<(String, f32)> {
         let player_line = if players.is_empty() {
             String::new()
         } else {
@@ -410,6 +449,8 @@ impl Server {
             temperature: 0.0,
             max_tokens: 24,
             cache_prompt: true,
+            logprobs: true,
+            top_logprobs: 1,
         };
         let resp: ChatResponse = self
             .client
@@ -422,12 +463,32 @@ impl Server {
             .ok()?
             .json()
             .ok()?;
-        let text = resp.choices.into_iter().next()?.message.content;
-        Some(
-            text.trim()
-                .trim_matches(['"', '\u{201c}', '\u{201d}'])
-                .to_string(),
-        )
+        let choice = resp.choices.into_iter().next()?;
+        let text = choice
+            .message
+            .content
+            .trim()
+            .trim_matches(['"', '\u{201c}', '\u{201d}'])
+            .to_string();
+
+        // Missing logprobs (an older/different server build, say) default to
+        // 0.0 - genuinely uncertain - not 1.0. Defaulting to "certain" would
+        // mean every suggestion silently auto-applies the moment this signal
+        // isn't available, which is a worse failure mode than just falling
+        // back to manual review for everything.
+        let confidence = choice
+            .logprobs
+            .map(|lp| {
+                lp.content
+                    .iter()
+                    .filter(|t| !t.token.is_empty())
+                    .map(|t| t.logprob.exp())
+                    .fold(f32::INFINITY, f32::min)
+            })
+            .filter(|c| c.is_finite())
+            .unwrap_or(0.0);
+
+        Some((text, confidence))
     }
 }
 
@@ -478,6 +539,12 @@ struct ChatRequest {
     temperature: f32,
     max_tokens: u32,
     cache_prompt: bool,
+    /// llama-server's OpenAI-compatible endpoint returns per-token
+    /// probabilities when asked - confirmed against the real server, not
+    /// assumed from the OpenAI spec it mimics. This is the actual signal
+    /// AUTO_APPLY_CONFIDENCE is built on.
+    logprobs: bool,
+    top_logprobs: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -515,6 +582,19 @@ struct ChatResponse {
 #[derive(Deserialize)]
 struct ChatChoice {
     message: ChatMessage,
+    #[serde(default)]
+    logprobs: Option<ChatLogprobs>,
+}
+
+#[derive(Deserialize)]
+struct ChatLogprobs {
+    content: Vec<ChatTokenLogprob>,
+}
+
+#[derive(Deserialize)]
+struct ChatTokenLogprob {
+    token: String,
+    logprob: f32,
 }
 
 /// True if something is listening on 127.0.0.1:port - only used by tests,
@@ -553,6 +633,48 @@ mod tests {
     fn a_genuine_correction_is_not_a_no_op() {
         assert!(!is_no_op("Christian", "Chris and"));
         assert!(!is_no_op("that way", "that wat"));
+    }
+
+    /// A real response captured from llama-server (b10621) with
+    /// logprobs+top_logprobs requested, to confirm the wire format assumed
+    /// by ChatResponse/ChatChoice/ChatLogprobs is actually what the server
+    /// sends - not reasoned from the OpenAI spec it mimics. Trimmed to the
+    /// fields that matter; the real response also carries id/bytes/
+    /// top_logprobs per token, which the unknown-fields-ignored default
+    /// deserialization here correctly drops.
+    #[test]
+    fn deserializes_a_real_captured_logprobs_response() {
+        let raw = r#"{
+          "choices": [{
+            "finish_reason": "stop",
+            "index": 0,
+            "message": { "role": "assistant", "content": "Christian" },
+            "logprobs": {
+              "content": [
+                {"id": 30574, "token": "Christ", "bytes": [67,104,114,105,115,116], "logprob": -0.045, "top_logprobs": []},
+                {"id": 1103,  "token": "ian",    "bytes": [105,97,110],             "logprob": -0.002, "top_logprobs": []},
+                {"id": 151645,"token": "",       "bytes": [],                       "logprob": -0.0005,"top_logprobs": []}
+              ]
+            }
+          }],
+          "created": 1787720327,
+          "model": "qwen2.5-3b-instruct-q4_k_m.gguf"
+        }"#;
+        let resp: ChatResponse = serde_json::from_str(raw).expect("should deserialize");
+        let choice = resp.choices.into_iter().next().unwrap();
+        assert_eq!(choice.message.content, "Christian");
+        let lp = choice.logprobs.expect("logprobs should be present");
+        assert_eq!(lp.content.len(), 3);
+        let min_conf = lp
+            .content
+            .iter()
+            .filter(|t| !t.token.is_empty())
+            .map(|t| t.logprob.exp())
+            .fold(f32::INFINITY, f32::min);
+        // exp(-0.045) ~= 0.956 is the lower of the two real answer tokens;
+        // the empty end-of-turn token must be excluded or this would read
+        // exp(-0.0005) ~= 0.9995 instead, hiding the real minimum.
+        assert!((min_conf - 0.956).abs() < 0.01, "got {min_conf}");
     }
 
     #[test]

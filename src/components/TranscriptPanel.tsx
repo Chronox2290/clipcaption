@@ -22,6 +22,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const polishModelJob = useApp((s) => s.polishModelJob);
   const downloadPolishModel = useApp((s) => s.downloadPolishModel);
   const polishSuggestions = useApp((s) => s.polishSuggestions);
+  const polishLastRun = useApp((s) => s.polishLastRun);
   const reviewTranscript = useApp((s) => s.reviewTranscript);
   const acceptPolishSuggestion = useApp((s) => s.acceptPolishSuggestion);
   const rejectPolishSuggestion = useApp((s) => s.rejectPolishSuggestion);
@@ -374,12 +375,24 @@ export default function TranscriptPanel({ videoRef }: Props) {
         )}
       </div>
 
+      {polishLastRun && (
+        <p className="muted small polish-summary">
+          {polishLastRun.autoApplied > 0
+            ? `✓ ${polishLastRun.autoApplied} fix${polishLastRun.autoApplied === 1 ? "" : "es"} applied automatically (the model was very sure).`
+            : null}
+          {polishLastRun.autoApplied > 0 && polishLastRun.forReview > 0 ? " " : null}
+          {polishLastRun.forReview === 0 && polishLastRun.autoApplied === 0
+            ? "No fixes needed - whisper had nothing to flag, or the model agreed with all of it."
+            : null}
+        </p>
+      )}
+
       {polishSuggestions.length > 0 && (
         <div className="polish-review">
           <div className="polish-review-head">
             <span className="muted small">
-              {polishSuggestions.length} possible fix{polishSuggestions.length === 1 ? "" : "es"} -
-              nothing has been changed yet.
+              {polishSuggestions.length} fix{polishSuggestions.length === 1 ? "" : "es"} the model
+              wasn't confident enough to apply on its own - nothing has been changed yet.
             </span>
             <button className="btn btn-small btn-primary" onClick={acceptAllPolishSuggestions}>
               Accept all
@@ -394,6 +407,9 @@ export default function TranscriptPanel({ videoRef }: Props) {
                 <span className="polish-old">{s.original}</span>
                 <span className="polish-arrow">→</span>
                 <span className="polish-new">{s.suggested}</span>
+                <span className="polish-conf" title="How sure the model was - below this it asks rather than applies itself">
+                  {Math.round(s.confidence * 100)}%
+                </span>
               </span>
               <button className="btn btn-small btn-primary" onClick={() => acceptPolishSuggestion(i)}>
                 Accept

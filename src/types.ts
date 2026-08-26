@@ -19,6 +19,9 @@ export interface PolishSuggestion {
   wordIdx: number;
   original: string;
   suggested: string;
+  /** The model's own confidence in `suggested`, 0..1 - see
+   * AUTO_APPLY_CONFIDENCE in store.ts for how this gets used. */
+  confidence: number;
 }
 
 export interface Segment {

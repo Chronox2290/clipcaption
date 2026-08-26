@@ -138,6 +138,10 @@ interface AppState {
   /** Proposed fixes awaiting review. Nothing here has been applied - see
    * acceptPolishSuggestion / rejectPolishSuggestion. */
   polishSuggestions: PolishSuggestion[];
+  /** Summary of the most recent review pass, for the "N applied
+   * automatically, M need your review" line - cleared on the next run, not
+   * persisted. */
+  polishLastRun: { autoApplied: number; forReview: number } | null;
   /** Active working range (a highlight the user selected) — transcribe/export apply to it */
   activeRange: { start: number; end: number } | null;
   /** Ranks of highlights checked for "export selected" */
@@ -421,6 +425,15 @@ export function autoHighlightCount(configured: number | null, durationSec?: numb
 const BOOKMARK_BEFORE = 12;
 const BOOKMARK_AFTER = 4;
 
+/** A cleanup-pass suggestion at or above this confidence applies itself
+ * automatically; below it, the suggestion goes to the review list instead.
+ * Mirrors AUTO_APPLY_CONFIDENCE in src-tauri/src/polish.rs, where the value
+ * is chosen and the reasoning/measurements are recorded - kept here too
+ * since Rust reports the number but this is where the tiering DECISION and
+ * the actual edit both happen (polish.rs never touches segments directly).
+ * If you change one, change both. */
+const AUTO_APPLY_CONFIDENCE = 0.8;
+
 // ---------------- autosaved working state ----------------
 //
 // Opening a video resets the editor, and going back to the library used to
@@ -556,6 +569,7 @@ export const useApp = create<AppState>((set, get) => ({
   polishModelJob: null,
   polishAvailable: false,
   polishSuggestions: [],
+  polishLastRun: null,
   activeRange: null,
   selectedRanks: [],
   clipOverrides: {},
@@ -664,7 +678,23 @@ export const useApp = create<AppState>((set, get) => ({
           } else if (key === "polishJob" && p.result) {
             try {
               const suggestions = JSON.parse(p.result) as PolishSuggestion[];
-              set({ polishJob: null, polishSuggestions: suggestions });
+              // Tiered: the model reports its own confidence, but the
+              // DECISION and the actual edit both happen here, not in Rust -
+              // polish.rs never touches segments directly, same as every
+              // other transcript mutation in this app.
+              const autoApplied: PolishSuggestion[] = [];
+              const forReview: PolishSuggestion[] = [];
+              for (const s of suggestions) {
+                (s.confidence >= AUTO_APPLY_CONFIDENCE ? autoApplied : forReview).push(s);
+              }
+              for (const s of autoApplied) {
+                get().updateWord(s.segId, s.wordIdx, s.suggested);
+              }
+              set({
+                polishJob: null,
+                polishSuggestions: forReview,
+                polishLastRun: { autoApplied: autoApplied.length, forReview: forReview.length },
+              });
             } catch {
               set({ polishJob: null, error: "Failed to parse cleanup suggestions" });
             }
@@ -823,6 +853,7 @@ export const useApp = create<AppState>((set, get) => ({
       analyzeJob: null,
       polishJob: null,
       polishSuggestions: [],
+      polishLastRun: null,
       exportDone: null,
     });
   },
