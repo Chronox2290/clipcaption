@@ -8,15 +8,23 @@
 //! 124 words whisper's free decode could plausibly have produced at all,
 //! free-decode got the word right only 81.5% of the time (median timing
 //! error 122ms on the words it did get right). Forced-aligning the same
-//! known-correct words against a ~0.4s-padded window around each speaker's
-//! rough turn got 100% coverage - every word gets a timestamp, since it's
-//! never guessing content - at a median timing error of 53ms. The ~0.4s
-//! window matters: forced-aligning blind across a whole multi-speaker clip
-//! lets short/common words snap onto a phonetically-similar moment from a
-//! different simultaneous speaker, then drag every later word's forced
-//! monotonic ordering out with it. Callers MUST window to a rough prior
-//! position (whisper's own segment timing is normally close enough) rather
-//! than handing this a whole recording.
+//! known-correct words against a WINDOW_PAD_SEC-padded window around each
+//! speaker's rough turn got 100% coverage - every word gets a timestamp,
+//! since it's never guessing content - at a median timing error of 58ms.
+//! The window matters, and not just in the "too wide" direction: forced-
+//! aligning blind across a whole multi-speaker clip lets short/common
+//! words snap onto a phonetically-similar moment from a different
+//! simultaneous speaker, dragging every later word's forced monotonic
+//! ordering out with it - callers MUST window to a rough prior position
+//! (whisper's own segment timing is normally close enough) rather than
+//! handing this a whole recording. But a real user bug report after
+//! shipping (re-running alignment on an already-aligned turn drifted it
+//! measurably worse, especially toward the end) showed the same failure
+//! mode at smaller scale: a turn re-windowed from its own prior output
+//! tends to come out *wider* than the true content (per-word error pushes
+//! start/end outward on both sides), and that extra slack gives the DP
+//! room to drift rather than helping it - see WINDOW_PAD_SEC's own comment
+//! for the sweep that found this.
 //!
 //! Model: Xenova/wav2vec2-base-960h (ONNX export of facebook/wav2vec2-base-960h).
 //! Its 32-token char vocab below is fixed to that exact model - swapping
@@ -257,8 +265,17 @@ impl Aligner {
 /// turn, each with its own small search window.
 const TURN_GAP_SEC: f64 = 1.2;
 /// Padding added on each side of a turn's own true extent before extracting
-/// its search window - the value this was validated against.
-const WINDOW_PAD_SEC: f64 = 0.4;
+/// its search window. A real regression found after shipping: wider padding
+/// measurably hurts, not just wastes search space - sweeping 0.2-0.5s
+/// against the same 152-word ground truth this module was validated
+/// against, 0.3s beat 0.4s on every metric (isolated-word mean error
+/// 126ms vs 147ms; overlapped-word within-250ms 72% vs 55%), and 0.4s
+/// visibly compounds when a turn is re-aligned from its own prior output
+/// (a turn's window naturally grows wider each pass since per-word errors
+/// tend to push start/end outward, and a wider window gives the DP more
+/// room to drift, not less). 0.2s goes too far the other way - it can
+/// shrink a turn's window below the frames its own text needs.
+const WINDOW_PAD_SEC: f64 = 0.3;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -639,5 +656,149 @@ mod tests {
             eprintln!("word {i} ({}): got {start:.3}-{end:.3}, expected start {:.3}, err {err:.3}", words[i], expect_start[i]);
         }
         assert!(max_err < 0.35, "worst-case error {max_err:.3}s exceeds tolerance");
+    }
+
+    /// Not run in CI - reproduces the user's reported "Okay" mistiming bug
+    /// directly against the real model on the real clip: turn 9 from
+    /// dumps_real_turn_grouping_for_clip11, window [2415.68,2418.46]
+    /// (2407.2 clip offset -> relative [8.48,11.26]), words "You're like,
+    /// \"Okay, this feels" - true starts (clip-relative) 8.884, 9.087,
+    /// 9.415, 10.486, 10.678.
+    #[test]
+    #[ignore]
+    fn reproduces_okay_mistiming_on_real_turn9() {
+        let dir = std::env::var("CLIPCAPTION_ALIGN_TEST_DIR").expect("set CLIPCAPTION_ALIGN_TEST_DIR");
+        let model_path = std::path::Path::new(&dir).join("model.onnx");
+        let wav_path = std::path::Path::new(&dir).join("clip11.wav");
+        let bytes = std::fs::read(&wav_path).unwrap();
+        let data = &bytes[44..];
+        let samples: Vec<f32> = data
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
+            .collect();
+
+        const CLIP_OFFSET: f64 = 2407.200;
+        let window_lo = 2415.68 - CLIP_OFFSET;
+        let window_hi = 2418.46 - CLIP_OFFSET;
+        let lo_i = (window_lo * 16000.0) as usize;
+        let hi_i = (window_hi * 16000.0) as usize;
+        let window = &samples[lo_i..hi_i];
+
+        let words: Vec<String> = vec!["You're", "like,", "\"Okay,", "this", "feels"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let expect_start = [8.884, 9.087, 9.415, 10.486, 10.678];
+
+        let mut aligner = Aligner::load(&model_path).unwrap();
+        let result = aligner.align(window, &words).unwrap();
+        for (i, r) in result.iter().enumerate() {
+            match r {
+                Some((s, e)) => eprintln!(
+                    "word {i} ({}): got {s:.3}-{e:.3} (abs {:.3}), expected start {:.3} (abs {:.3}), err {:.3}",
+                    words[i], window_lo + s, expect_start[i], window_lo + expect_start[i], (s - expect_start[i]).abs()
+                ),
+                None => eprintln!("word {i} ({}): FAILED TO ALIGN", words[i]),
+            }
+        }
+    }
+
+    /// Not run in CI - simulates clicking "Align timing" twice in a row on
+    /// turn 9, exactly as the UI does: pass 2's window/words are re-derived
+    /// from pass 1's OWN output, not from the original whisper times. Tests
+    /// whether repeat runs compound error, per the user's report that a
+    /// second pass made things "a little bit worse".
+    #[test]
+    #[ignore]
+    fn double_pass_alignment_on_real_turn9() {
+        let dir = std::env::var("CLIPCAPTION_ALIGN_TEST_DIR").expect("set CLIPCAPTION_ALIGN_TEST_DIR");
+        let model_path = std::path::Path::new(&dir).join("model.onnx");
+        let wav_path = std::path::Path::new(&dir).join("clip11.wav");
+        let bytes = std::fs::read(&wav_path).unwrap();
+        let data = &bytes[44..];
+        let samples: Vec<f32> = data
+            .chunks_exact(2)
+            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
+            .collect();
+
+        const CLIP_OFFSET: f64 = 2407.200;
+        let words: Vec<String> = vec!["You're", "like,", "\"Okay,", "this", "feels"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let expect_start = [8.884, 9.087, 9.415, 10.486, 10.678];
+        let expect_end = [9.084, 9.407, 9.548, 10.666, 10.858];
+
+        let mut aligner = Aligner::load(&model_path).unwrap();
+
+        // Pass 1: original whisper window, exactly like the isolated repro test.
+        let mut window_lo = 2415.68 - CLIP_OFFSET;
+        let window_hi = 2418.46 - CLIP_OFFSET;
+        let lo_i = (window_lo * 16000.0) as usize;
+        let hi_i = (window_hi * 16000.0) as usize;
+        let pass1 = aligner.align(&samples[lo_i..hi_i], &words).unwrap();
+        let pass1_abs: Vec<(f64, f64)> = pass1.iter().map(|r| {
+            let (s, e) = r.unwrap();
+            (window_lo + s, window_lo + e)
+        }).collect();
+        eprintln!("--- pass 1 ---");
+        for (i, (s, e)) in pass1_abs.iter().enumerate() {
+            eprintln!("{} {s:.3}-{e:.3} (true {:.3}-{:.3}, err {:.3})", words[i], expect_start[i], expect_end[i], (s - expect_start[i]).abs());
+        }
+
+        // Pass 2: re-derive the window from pass 1's OWN output, exactly
+        // like group_turns() would on a second Align-timing click.
+        window_lo = (pass1_abs[0].0 - WINDOW_PAD_SEC).max(0.0);
+        let window_hi2 = pass1_abs[pass1_abs.len() - 1].1 + WINDOW_PAD_SEC;
+        let lo_i2 = (window_lo * 16000.0) as usize;
+        let hi_i2 = (window_hi2 * 16000.0) as usize;
+        let pass2 = aligner.align(&samples[lo_i2..hi_i2], &words).unwrap();
+        eprintln!("--- pass 2 (window [{window_lo:.3},{window_hi2:.3}], derived from pass 1) ---");
+        for (i, r) in pass2.iter().enumerate() {
+            match r {
+                Some((s, e)) => {
+                    let abs_s = window_lo + s;
+                    let abs_e = window_lo + e;
+                    eprintln!("{} {abs_s:.3}-{abs_e:.3} (true {:.3}-{:.3}, err {:.3})", words[i], expect_start[i], expect_end[i], (abs_s - expect_start[i]).abs());
+                }
+                None => eprintln!("{} FAILED TO ALIGN", words[i]),
+            }
+        }
+    }
+
+    /// Not run in CI - diagnostic dump of group_turns() against a real,
+    /// full-clip segment export (all 118 segments' worth for Clip #11,
+    /// speaker-labelled, exactly as the live app had them) to see precisely
+    /// which turns get merged and how wide their windows end up, rather than
+    /// guessing from a user bug report. Point CLIPCAPTION_ALIGN_TEST_DIR at
+    /// a directory containing clip11_segments.json (see chat history for how
+    /// it was exported from the app's own autosave).
+    #[test]
+    #[ignore]
+    fn dumps_real_turn_grouping_for_clip11() {
+        let dir = std::env::var("CLIPCAPTION_ALIGN_TEST_DIR").expect("set CLIPCAPTION_ALIGN_TEST_DIR");
+        let json = std::fs::read_to_string(std::path::Path::new(&dir).join("clip11_segments.json")).unwrap();
+        let segments: Vec<AlignSegment> = serde_json::from_str(&json).unwrap();
+        eprintln!("{} segments, {} words total", segments.len(), segments.iter().map(|s| s.words.len()).sum::<usize>());
+
+        let turns = group_turns(&segments);
+        eprintln!("{} turns", turns.len());
+        for (ti, t) in turns.iter().enumerate() {
+            let words: Vec<&str> = t
+                .seg_indices
+                .iter()
+                .flat_map(|&i| segments[i].words.iter().map(|w| w.text.as_str()))
+                .collect();
+            let speakers: Vec<Option<u32>> = t.seg_indices.iter().map(|&i| segments[i].speaker).collect();
+            eprintln!(
+                "turn {ti}: window [{:.2},{:.2}] ({:.2}s) {} segs, speakers {:?}, words: {}",
+                t.window_lo,
+                t.window_hi,
+                t.window_hi - t.window_lo,
+                t.seg_indices.len(),
+                speakers,
+                words.join(" ")
+            );
+        }
     }
 }

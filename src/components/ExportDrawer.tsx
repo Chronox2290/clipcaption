@@ -25,7 +25,13 @@ export default function ExportDrawer() {
     encoder,
   } = useApp();
   const [presetId, setPresetId] = useState("original");
-  const [customMb, setCustomMb] = useState(25);
+  // Independent of which preset is picked - previously only the "custom"
+  // preset (no forced resolution at all) could target a file size, so a
+  // 9:16 crop for TikTok had no way to also fit Facebook's 25MB limit or a
+  // Discord upload cap. Any preset's resolution/crop/fps now combines freely
+  // with a size limit.
+  const [sizeLimitEnabled, setSizeLimitEnabled] = useState(false);
+  const [sizeLimitMb, setSizeLimitMb] = useState(25);
   const [burn, setBurn] = useState(true);
   const [resolutionId, setResolutionId] = useState("source");
   const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
@@ -61,7 +67,7 @@ export default function ExportDrawer() {
       assContent: ass,
       targetW,
       targetH,
-      targetSizeMb: preset.id === "custom" ? customMb : preset.targetSizeMB,
+      targetSizeMb: sizeLimitEnabled ? sizeLimitMb : null,
       crf: preset.crf,
       fps: fpsOverride ?? preset.fps,
       audioKbps: preset.audioKbps,
@@ -102,25 +108,43 @@ export default function ExportDrawer() {
               type="radio"
               name="epreset"
               checked={presetId === p.id}
-              onChange={() => setPresetId(p.id)}
+              onChange={() => {
+                setPresetId(p.id);
+                // Discord presets carry a known platform limit - prefill it
+                // as a convenience. Doesn't touch the checkbox for a preset
+                // with no inherent size (original/vertical/etc), so it never
+                // fights a limit the user already turned on by hand.
+                if (p.targetSizeMB != null) {
+                  setSizeLimitEnabled(true);
+                  setSizeLimitMb(p.targetSizeMB);
+                }
+              }}
             />
             <span>{p.name}</span>
           </label>
         ))}
       </div>
 
-      {presetId === "custom" && (
-        <div className="field">
-          <label>Target size (MB)</label>
+      <div className="field">
+        <label title="Works with any preset above - e.g. TikTok's 9:16 crop capped to fit Facebook's 25MB upload limit, not just the Discord presets.">
+          Limit file size
+        </label>
+        <input
+          type="checkbox"
+          checked={sizeLimitEnabled}
+          onChange={(e) => setSizeLimitEnabled(e.target.checked)}
+        />
+        {sizeLimitEnabled && (
           <input
             type="number"
             min={1}
             max={2000}
-            value={customMb}
-            onChange={(e) => setCustomMb(Number(e.target.value))}
+            value={sizeLimitMb}
+            onChange={(e) => setSizeLimitMb(Number(e.target.value))}
           />
-        </div>
-      )}
+        )}
+        {sizeLimitEnabled && <span className="field-val">MB</span>}
+      </div>
 
       <div className="field">
         <label>Resolution</label>

@@ -146,13 +146,42 @@ export function pageAt(pages: CaptionPage[], t: number, linger = CAPTION_LINGER)
   return null;
 }
 
+/** How much timing slack to allow when deciding whether two DIFFERENT
+ * speakers' captions are genuinely simultaneous — separate from
+ * CAPTION_LINGER, which controls how long a caption's own display lingers
+ * after it ends for a smooth fade, not whether it overlaps another one.
+ * Using the (much larger) linger value for both used to mean a caption
+ * still fading out could make an unrelated, purely sequential caption that
+ * started right after it look like overlapping speech — harmless when
+ * pages were few and long, but with many short, closely-packed pages (fast
+ * back-and-forth dialogue, or one word per page) it meant several
+ * unrelated lines stacking up on screen at once. */
+const OVERLAP_TOLERANCE_SEC = 0.08;
+
+/** True only for genuinely concurrent speech: different speakers whose own
+ * [start, end] windows actually overlap (small slack for timing jitter) —
+ * never two pages from the same speaker, who can't talk over themselves,
+ * and never just because one is lingering into the other's start. */
+function trueOverlap(a: CaptionPage, b: CaptionPage): boolean {
+  if (a.speaker !== null && b.speaker !== null && a.speaker === b.speaker) return false;
+  return a.start <= b.end + OVERLAP_TOLERANCE_SEC && b.start <= a.end + OVERLAP_TOLERANCE_SEC;
+}
+
 /** Every caption live at `t`, not just the first.
  *
  * In a proximity-chat game people talk over each other constantly, so
  * returning one page meant the other speaker's line simply never appeared -
  * and whichever page happened to come first in the array won. */
 export function pagesAt(pages: CaptionPage[], t: number, linger = CAPTION_LINGER): CaptionPage[] {
-  return pages.filter((p) => t >= p.start && t <= p.end + linger);
+  const active = pages.filter((p) => t >= p.start && t <= p.end + linger);
+  if (active.length <= 1) return active;
+  // A page in its own trailing linger (t is already past its true end) only
+  // stays on screen alongside another page if the two are genuinely
+  // concurrent - never just because the newer one happened to start during
+  // the old one's fade-out grace period.
+  return active.filter(
+    (p) => t <= p.end || !active.some((o) => o !== p && t <= o.end && trueOverlap(p, o))
+  );
 }
 
 /** Assigns each page a row so simultaneous captions stack instead of drawing
@@ -181,7 +210,7 @@ function estimateLines(page: CaptionPage): number {
   return Math.max(1, Math.ceil(chars / CHARS_PER_LINE));
 }
 
-export function layoutRows(pages: CaptionPage[], linger = CAPTION_LINGER): CaptionPage[] {
+export function layoutRows(pages: CaptionPage[]): CaptionPage[] {
   const sorted = [...pages].sort((a, b) => a.start - b.start);
   const rowOf = new Map<CaptionPage, number>();
 
@@ -189,12 +218,19 @@ export function layoutRows(pages: CaptionPage[], linger = CAPTION_LINGER): Capti
     const page = sorted[i];
     let lines = 0;
     // Sorted by start, so once a page begins after this one's display window
-    // there are no further overlaps to count. Summing the LINES of the
-    // captions below rather than counting them is what stops a wrapped
-    // caption growing into the one above it - the preview gets this for free
-    // from flexbox, the burned-in export has to be told.
-    for (let j = i + 1; j < sorted.length && sorted[j].start <= page.end + linger; j++) {
-      lines += estimateLines(sorted[j]);
+    // there are no further overlaps to count. Bounded by OVERLAP_TOLERANCE_SEC
+    // rather than the (larger) display linger - see trueOverlap's comment;
+    // a page merely starting during the previous one's fade-out isn't stacked
+    // under it. Summing the LINES of the captions below rather than counting
+    // them is what stops a wrapped caption growing into the one above it -
+    // the preview gets this for free from flexbox, the burned-in export has
+    // to be told.
+    for (
+      let j = i + 1;
+      j < sorted.length && sorted[j].start <= page.end + OVERLAP_TOLERANCE_SEC;
+      j++
+    ) {
+      if (trueOverlap(page, sorted[j])) lines += estimateLines(sorted[j]);
     }
     rowOf.set(page, lines);
   }

@@ -108,7 +108,7 @@ pub fn run(wav_path: &Path, speaker_count: Option<u32>) -> Option<Vec<SpeakerSeg
 }
 
 /// For each distinct speaker id `run()` found, extracts one voice-fingerprint
-/// embedding from that speaker's single longest continuous span (via the
+/// embedding from that speaker's spans, concatenated (via the
 /// extract-embedding sidecar — see src-tauri/embed-tool/extract_embedding.cpp
 /// for what it does and why it exists), keyed by that speaker's *local*
 /// index for this run only.
@@ -131,28 +131,37 @@ pub fn extract_speaker_embeddings(
         return HashMap::new();
     }
 
-    // Longest single continuous span per speaker — a cleaner, more reliable
-    // fingerprint than concatenating fragments (which the embedding model
-    // was never asked to handle) or than the first span (which can be a
-    // throwaway one-word reaction).
-    let mut longest: HashMap<u32, (f64, f64)> = HashMap::new();
+    // Every span for each speaker, concatenated (extract-embedding's
+    // --range is repeatable) rather than just their single longest span.
+    // Fast back-and-forth dialogue routinely has no individual span long
+    // enough on its own to clear the embedding model's minimum-length
+    // requirement, even though a speaker's TOTAL time across the clip is
+    // plenty — measured on a real 45s three-way-overlapping clip, every
+    // single speaker failed to get a name under the longest-span approach
+    // for exactly this reason. Capped so one very long recording can't
+    // balloon this into a slow, unnecessary amount of audio.
+    const MAX_TOTAL_SEC: f64 = 20.0;
+    let mut spans: HashMap<u32, Vec<(f64, f64)>> = HashMap::new();
     for s in segments {
-        let dur = s.end - s.start;
-        let better = longest
-            .get(&s.speaker)
-            .map(|(a, b)| dur > (b - a))
-            .unwrap_or(true);
-        if better {
-            longest.insert(s.speaker, (s.start, s.end));
-        }
+        spans.entry(s.speaker).or_default().push((s.start, s.end));
     }
 
     let mut out = HashMap::new();
-    for (speaker, (start, end)) in longest {
+    for (speaker, mut ranges) in spans {
+        ranges.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let mut total = 0.0;
+        let mut args: Vec<String> = Vec::new();
+        for (start, end) in ranges {
+            if total >= MAX_TOTAL_SEC {
+                break;
+            }
+            total += end - start;
+            args.push(format!("--range={start:.3}:{end:.3}"));
+        }
+
         let output = sidecar::command("extract-embedding")
             .arg(format!("--model={}", embed_model.display()))
-            .arg(format!("--start={start:.3}"))
-            .arg(format!("--end={end:.3}"))
+            .args(&args)
             .arg(wav_path)
             .output();
         let Ok(output) = output else { continue };

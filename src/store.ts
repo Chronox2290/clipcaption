@@ -221,6 +221,12 @@ interface AppState {
   insertWord: (segId: string, atIndex: number) => void;
   removeWord: (segId: string, wordIdx: number) => void;
   setWordTime: (segId: string, wordIdx: number, field: "start" | "end", time: number) => void;
+  /** Re-times several words in one atomic update — used for dragging a
+   * multi-selected group of caption boxes together on the timeline, so the
+   * whole group's move is a single undo step (Ctrl+Z) rather than one step
+   * per word, and so the intermediate frames of one drag gesture never
+   * apply to only some of the selected words. */
+  setWordTimesBatch: (updates: { segId: string; idx: number; start: number; end: number }[]) => void;
   setTuningWord: (w: { segId: string; idx: number } | null) => void;
   /** Creates a brand-new caption from scratch at an absolute-timeline range
    * that whisper produced nothing for at all (not just a mistimed word) —
@@ -478,6 +484,13 @@ function sessionSlice(s: AppState) {
     activeRange: s.activeRange,
     style: s.style,
     censor: s.censor,
+    // Without this, restoring a session (as opposed to a fresh transcribe or
+    // loading a .ccproj, both of which already carry it) silently drops
+    // every speaker's voice-fingerprint embedding even though their
+    // `speaker` indices on segments are still there - every speaker then
+    // reads as "too short to identify" in the Speakers panel regardless of
+    // whether diarization actually found enough audio to name them.
+    speakerEmbeddings: s.speakerEmbeddings,
   };
 }
 
@@ -549,6 +562,7 @@ async function restoreSession(
       activeRange: saved.activeRange ?? null,
       style: saved.style ?? get().style,
       censor: saved.censor ?? get().censor,
+      speakerEmbeddings: saved.speakerEmbeddings ?? {},
       restoredSession: true,
     });
   } catch {
@@ -1000,6 +1014,31 @@ export const useApp = create<AppState>((set, get) => ({
             return field === "start"
               ? { ...w, start: Math.min(t, w.end - 0.02) }
               : { ...w, end: Math.max(t, w.start + 0.02) };
+          }),
+        };
+      }),
+    });
+  },
+
+  setWordTimesBatch: (updates) => {
+    if (updates.length === 0) return;
+    get().pushHistory("group-move");
+    const bySeg = new Map<string, Map<number, { start: number; end: number }>>();
+    for (const u of updates) {
+      if (!bySeg.has(u.segId)) bySeg.set(u.segId, new Map());
+      bySeg.get(u.segId)!.set(u.idx, { start: u.start, end: u.end });
+    }
+    set({
+      segments: get().segments.map((s) => {
+        const m = bySeg.get(s.id);
+        if (!m) return s;
+        return {
+          ...s,
+          words: s.words.map((w, i) => {
+            const u = m.get(i);
+            if (!u) return w;
+            const start = Math.max(0, u.start);
+            return { ...w, start, end: Math.max(start + 0.02, u.end) };
           }),
         };
       }),

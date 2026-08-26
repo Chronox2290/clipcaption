@@ -53,6 +53,22 @@ type Drag =
       moved: boolean;
     }
   | {
+      kind: "group";
+      /** Every selected word's own baseline, captured once at drag start so
+       * each pointermove computes from a fixed origin rather than the
+       * previous frame's (already-moved) position - keeps the group's
+       * relative spacing exact no matter how many frames the drag runs for. */
+      words: { segId: string; idx: number; origStart: number; origEnd: number }[];
+      startPointerTime: number;
+      moved: boolean;
+      /** How far the whole group may shift in either direction before some
+       * member would cross its nearest UNselected same-lane neighbour -
+       * computed once at drag start from words not in the selection, so the
+       * group can't collide with anything outside itself. */
+      minDelta: number;
+      maxDelta: number;
+    }
+  | {
       kind: "create";
       /** Lane the drag started in - the new line is filed under that lane's
        * speaker instead of becoming a nameless extra track. */
@@ -93,6 +109,7 @@ export default function MainWaveform({ videoRef }: Props) {
   const tuningWord = useApp((s) => s.tuningWord);
   const setTuningWord = useApp((s) => s.setTuningWord);
   const setWordTime = useApp((s) => s.setWordTime);
+  const setWordTimesBatch = useApp((s) => s.setWordTimesBatch);
   const insertSegment = useApp((s) => s.insertSegment);
   const removeWord = useApp((s) => s.removeWord);
   const setSegmentSpeaker = useApp((s) => s.setSegmentSpeaker);
@@ -118,6 +135,12 @@ export default function MainWaveform({ videoRef }: Props) {
   const [playhead, setPlayhead] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [dropLane, setDropLane] = useState<number | null>(null);
+  // Ctrl/Cmd+click builds this up across separate caption boxes (any lane,
+  // any segment) so they can be dragged together as one group while keeping
+  // their relative spacing - a plain click-drag on any word not in this set
+  // still moves just that one word, same as before this existed.
+  const [selectedWords, setSelectedWords] = useState<Set<string>>(new Set());
+  const wordKey = (segId: string, idx: number) => `${segId}:${idx}`;
 
   // The time range this instance is currently scoped to: the selected
   // highlight if one is active (the literal "whichever part of the clip is
@@ -187,7 +210,19 @@ export default function MainWaveform({ videoRef }: Props) {
   // new video, transcript replaced) so it doesn't stay absurdly zoomed in/out.
   useEffect(() => {
     setZoomOverride(null);
+    setSelectedWords(new Set());
   }, [range.start, range.end]);
+
+  // Escape clears a multi-selection - deliberately its own small handler
+  // rather than folded into the tuningWord-gated one below, which returns
+  // early with nothing selected for tuning.
+  useEffect(() => {
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedWords(new Set());
+    };
+    window.addEventListener("keydown", onEscape);
+    return () => window.removeEventListener("keydown", onEscape);
+  }, []);
 
   let pxPerSec = clamp(zoomOverride ?? clamp(viewW / totalDur, MIN_PXSEC, AUTO_PXSEC_CAP), MIN_PXSEC, MAX_PXSEC);
   if (pxPerSec * totalDur > MAX_CANVAS_W) pxPerSec = MAX_CANVAS_W / totalDur;
@@ -428,6 +463,7 @@ export default function MainWaveform({ videoRef }: Props) {
       const x2 = xAtTime(w.end);
       if (x2 < 0 || x1 > width) continue; // off-screen, skip drawing (still hit-testable via time math)
       const active = tuningWord?.segId === segId && tuningWord.idx === idx;
+      const inGroup = selectedWords.has(wordKey(segId, idx));
       const col = speakerColor(speaker, style.speakerColors);
       const top = laneTop(lane);
       const bw = Math.max(1, x2 - x1);
@@ -437,6 +473,18 @@ export default function MainWaveform({ videoRef }: Props) {
       ctx.strokeStyle = active ? "#ffffff" : col.line;
       ctx.lineWidth = active ? 2 : 1;
       ctx.strokeRect(x1 + 0.5, top + 0.5, Math.max(1, bw - 1), LANE_H - 1);
+
+      // Group-selection marker: a dashed accent outline just inside the
+      // word's own border, so it reads as "part of the group" without
+      // fighting the active/speaker-color styling above it.
+      if (inGroup) {
+        ctx.save();
+        ctx.strokeStyle = "rgba(124, 92, 255, 0.95)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 2]);
+        ctx.strokeRect(x1 + 2, top + 2, Math.max(1, bw - 4), LANE_H - 4);
+        ctx.restore();
+      }
 
       const handleColor = active ? "#ffffff" : col.solid;
       drawHandle(x1, top, handleColor);
@@ -483,7 +531,7 @@ export default function MainWaveform({ videoRef }: Props) {
       ctx.stroke();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flat, lanes, HEIGHT, dropLane, style.speakerColors, tuningWord, waveform, waveformStep, waveformOffset, playhead, width, pxPerSec, range.start, range.end, draft]);
+  }, [flat, lanes, HEIGHT, dropLane, style.speakerColors, tuningWord, selectedWords, waveform, waveformStep, waveformOffset, playhead, width, pxPerSec, range.start, range.end, draft]);
 
   /** Nearest words in the SAME lane, which is what may actually constrain a
    * drag. Using flat[i-1]/flat[i+1] instead meant a line in one speaker's
@@ -558,24 +606,76 @@ export default function MainWaveform({ videoRef }: Props) {
     const hit = hitTest(x, e.clientY - rect.top);
 
     if (hit) {
+      const key = wordKey(hit.segId, hit.idx);
+      if (e.ctrlKey || e.metaKey) {
+        // Pure selection toggle - no drag, no seek, so building a group
+        // doesn't also scrub the video around.
+        setSelectedWords((prev) => {
+          const next = new Set(prev);
+          if (next.has(key)) next.delete(key);
+          else next.add(key);
+          return next;
+        });
+        return;
+      }
+
+      const isGroupMove = hit.mode === "move" && selectedWords.size > 1 && selectedWords.has(key);
+      if (!isGroupMove) setSelectedWords(new Set());
+
       setTuningWord({ segId: hit.segId, idx: hit.idx });
       const v = videoRef.current;
       if (v) v.currentTime = Math.max(0, flat[hit.flatIdx].w.start + 0.001);
-      dragRef.current = {
-        kind: "word",
-        flatIdx: hit.flatIdx,
-        segId: hit.segId,
-        idx: hit.idx,
-        mode: hit.mode,
-        dropLane: null,
-        wholeLine: e.shiftKey,
-        startPointerTime: t,
-        origStart: flat[hit.flatIdx].w.start,
-        origEnd: flat[hit.flatIdx].w.end,
-        moved: false,
-      };
-      e.currentTarget.style.cursor = hit.mode === "move" ? "grabbing" : "ew-resize";
+
+      if (isGroupMove) {
+        const members = flat.filter((f) => selectedWords.has(wordKey(f.segId, f.idx)));
+        let minDelta = -Infinity;
+        let maxDelta = Infinity;
+        for (const f of members) {
+          const fi = flat.indexOf(f);
+          let prevEnd = 0;
+          for (let i = fi - 1; i >= 0; i--) {
+            if (flat[i].lane !== f.lane) continue;
+            if (selectedWords.has(wordKey(flat[i].segId, flat[i].idx))) continue;
+            prevEnd = flat[i].w.end;
+            break;
+          }
+          let nextStart = Infinity;
+          for (let i = fi + 1; i < flat.length; i++) {
+            if (flat[i].lane !== f.lane) continue;
+            if (selectedWords.has(wordKey(flat[i].segId, flat[i].idx))) continue;
+            nextStart = flat[i].w.start;
+            break;
+          }
+          minDelta = Math.max(minDelta, prevEnd - f.w.start);
+          maxDelta = Math.min(maxDelta, nextStart - f.w.end);
+        }
+        dragRef.current = {
+          kind: "group",
+          words: members.map((f) => ({ segId: f.segId, idx: f.idx, origStart: f.w.start, origEnd: f.w.end })),
+          startPointerTime: t,
+          moved: false,
+          minDelta,
+          maxDelta,
+        };
+        e.currentTarget.style.cursor = "grabbing";
+      } else {
+        dragRef.current = {
+          kind: "word",
+          flatIdx: hit.flatIdx,
+          segId: hit.segId,
+          idx: hit.idx,
+          mode: hit.mode,
+          dropLane: null,
+          wholeLine: e.shiftKey,
+          startPointerTime: t,
+          origStart: flat[hit.flatIdx].w.start,
+          origEnd: flat[hit.flatIdx].w.end,
+          moved: false,
+        };
+        e.currentTarget.style.cursor = hit.mode === "move" ? "grabbing" : "ew-resize";
+      }
     } else {
+      setSelectedWords(new Set());
       const lane = laneAtY(e.clientY - rect.top);
       const [gapStart, gapEnd] = gapAt(t, lane);
       dragRef.current = {
@@ -634,6 +734,17 @@ export default function MainWaveform({ videoRef }: Props) {
         setWordTime(drag.segId, drag.idx, "start", newStart);
         setWordTime(drag.segId, drag.idx, "end", newEnd);
       }
+    } else if (drag.kind === "group") {
+      const delta = clamp(t - drag.startPointerTime, drag.minDelta, drag.maxDelta);
+      if (Math.abs(t - drag.startPointerTime) > 0.005) drag.moved = true;
+      setWordTimesBatch(
+        drag.words.map((w) => ({
+          segId: w.segId,
+          idx: w.idx,
+          start: w.origStart + delta,
+          end: w.origEnd + delta,
+        }))
+      );
     } else {
       if (Math.abs(t - drag.startPointerTime) > 0.01) drag.moved = true;
       const a = Math.max(drag.gapStart, Math.min(drag.startPointerTime, t));
@@ -703,9 +814,9 @@ export default function MainWaveform({ videoRef }: Props) {
       <div className="mw-toolbar">
         <span className="muted small">
           {activeRange
-            ? "Editing the selected clip range — drag a word to retime it, or drag empty space to add a missed line. With a word selected: Alt+←/→ steps, [ ] nudges (Shift = bigger), Z zooms, Del removes, drag up/down moves it to another speaker."
+            ? "Editing the selected clip range — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing (Esc clears). With a word selected: Alt+←/→ steps, [ ] nudges (Shift = bigger), Z zooms, Del removes, drag up/down moves it to another speaker."
             : segments.length
-            ? "Editing the full transcript — drag a word to retime it, or drag empty space to add a missed line."
+            ? "Editing the full transcript — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing (Esc clears)."
             : "No captions yet — drag on the waveform below to add one by hand."}
         </span>
         <span className="mw-zoom">

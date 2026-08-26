@@ -16,9 +16,9 @@
 // building blocks via its public C API (SpeakerEmbeddingExtractor) that the
 // diarization tool itself is built on, using the exact same embedding model
 // ClipCaption already bundles (sherpa-embedding.onnx / NeMo titanet). This
-// tool is a thin wrapper around that API: read a WAV (optionally just a
-// [start, end) time slice of it), run it through the embedding model, print
-// the resulting vector as a JSON array on stdout.
+// tool is a thin wrapper around that API: read a WAV (optionally just one or
+// more [start, end) time slices of it, concatenated), run it through the
+// embedding model, print the resulting vector as a JSON array on stdout.
 //
 // The embedding-vs-real-speaker-identity claim this whole feature rests on
 // was verified empirically before building this: extracting embeddings
@@ -51,8 +51,11 @@ namespace {
 struct Args {
   std::string model;
   std::string wav;
-  double start = -1;
-  double end = -1;
+  // One speaker can need several disjoint spans concatenated into a single
+  // embedding pass (see the top-of-file comment on why: a single span often
+  // isn't long enough on its own in fast back-and-forth dialogue). Empty
+  // means "the whole file", same as before this supported multiple ranges.
+  std::vector<std::pair<double, double>> ranges;
 };
 
 bool StartsWith(const std::string &s, const char *prefix) {
@@ -65,10 +68,16 @@ bool ParseArgs(int argc, char **argv, Args *out) {
     std::string a = argv[i];
     if (StartsWith(a, "--model=")) {
       out->model = a.substr(8);
-    } else if (StartsWith(a, "--start=")) {
-      out->start = std::atof(a.substr(8).c_str());
-    } else if (StartsWith(a, "--end=")) {
-      out->end = std::atof(a.substr(6).c_str());
+    } else if (StartsWith(a, "--range=")) {
+      std::string v = a.substr(8);
+      size_t colon = v.find(':');
+      if (colon == std::string::npos) {
+        fprintf(stderr, "--range must be START:END, got '%s'\n", v.c_str());
+        return false;
+      }
+      double start = std::atof(v.substr(0, colon).c_str());
+      double end = std::atof(v.substr(colon + 1).c_str());
+      out->ranges.emplace_back(start, end);
     } else if (!StartsWith(a, "--")) {
       out->wav = a;
     }
@@ -138,8 +147,8 @@ int main(int argc, char **argv) {
   Args args;
   if (!ParseArgs(argc, argv, &args)) {
     fprintf(stderr,
-            "usage: extract-embedding --model=PATH [--start=SEC] "
-            "[--end=SEC] WAV_PATH\n");
+            "usage: extract-embedding --model=PATH [--range=START:END ...] "
+            "WAV_PATH\n");
     return 1;
   }
 
@@ -152,23 +161,36 @@ int main(int argc, char **argv) {
   }
 
   int64_t total = static_cast<int64_t>(pcm.size());
-  int64_t first = args.start >= 0
-                       ? static_cast<int64_t>(args.start * sample_rate)
-                       : 0;
-  int64_t last = args.end >= 0 ? static_cast<int64_t>(args.end * sample_rate)
-                                : total;
-  first = std::max<int64_t>(0, std::min<int64_t>(first, total));
-  last = std::max<int64_t>(first, std::min<int64_t>(last, total));
-  if (last <= first) {
-    fprintf(stderr,
-            "Requested [--start, --end) range is empty after clamping to "
-            "the WAV's actual length\n");
-    return 1;
+  if (args.ranges.empty()) {
+    args.ranges.emplace_back(-1.0, -1.0);  // whole file
   }
 
-  std::vector<float> floats(static_cast<size_t>(last - first));
-  for (int64_t i = first; i < last; ++i) {
-    floats[static_cast<size_t>(i - first)] = pcm[static_cast<size_t>(i)] / 32768.0f;
+  // Concatenated, not just the single longest span: on fast back-and-forth
+  // dialogue no individual utterance is long enough on its own for the
+  // embedding model's minimum-length requirement, even though the speaker's
+  // TOTAL speaking time across the clip is plenty (see diarize.rs's caller).
+  // The embedding model doesn't need one continuous utterance - concatenating
+  // several of the same voice is a standard speaker-verification technique.
+  std::vector<float> floats;
+  for (const auto &range : args.ranges) {
+    int64_t first = range.first >= 0
+                         ? static_cast<int64_t>(range.first * sample_rate)
+                         : 0;
+    int64_t last = range.second >= 0
+                        ? static_cast<int64_t>(range.second * sample_rate)
+                        : total;
+    first = std::max<int64_t>(0, std::min<int64_t>(first, total));
+    last = std::max<int64_t>(first, std::min<int64_t>(last, total));
+    floats.reserve(floats.size() + static_cast<size_t>(last - first));
+    for (int64_t i = first; i < last; ++i) {
+      floats.push_back(pcm[static_cast<size_t>(i)] / 32768.0f);
+    }
+  }
+  if (floats.empty()) {
+    fprintf(stderr,
+            "Requested --range(s) are empty after clamping to the WAV's "
+            "actual length\n");
+    return 1;
   }
 
   SherpaOnnxSpeakerEmbeddingExtractorConfig config;
