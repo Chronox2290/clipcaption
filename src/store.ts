@@ -39,6 +39,7 @@ import { addEmojis } from "./lib/emojis";
 import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
 import { sanitizeFilename } from "./lib/naming";
+import { pickReelHighlights } from "./lib/highlights";
 
 interface JobState {
   id: string;
@@ -256,8 +257,24 @@ interface AppState {
     presetId: string,
     customMb: number,
     resolutionId?: string,
-    fitMode?: "fill" | "fit"
+    fitMode?: "fill" | "fit",
+    /** Explicit ranks to compile instead of the ticked checkboxes -
+     * buildReel uses this so picking a hands-off reel never mutates what
+     * the user has manually selected in the Highlights list. */
+    ranksOverride?: number[]
   ) => Promise<void>;
+  /** Hands-off reel: auto-picks highlights (every manual bookmark plus the
+   * highest-scoring detected clips up to targetDurationSec - see
+   * pickReelHighlights) and compiles them, without requiring anything to be
+   * ticked first. */
+  buildReel: (
+    outputPath: string,
+    presetId: string,
+    customMb: number,
+    targetDurationSec: number,
+    resolutionId?: string,
+    fitMode?: "fill" | "fit"
+  ) => Promise<{ ranks: number[]; totalDurationSec: number } | null>;
   openBatch: () => void;
   addBatchPaths: (paths: string[]) => void;
   addBatchFolder: (dir: string) => Promise<void>;
@@ -1221,7 +1238,8 @@ export const useApp = create<AppState>((set, get) => ({
     presetId,
     customMb,
     resolutionId = "source",
-    fitMode = "fill"
+    fitMode = "fill",
+    ranksOverride
   ) => {
     const {
       highlights,
@@ -1232,8 +1250,9 @@ export const useApp = create<AppState>((set, get) => ({
       clipOverrides,
       speakerProfiles,
     } = get();
+    const ranks = ranksOverride ?? selectedRanks;
     const ordered = highlights
-      .filter((h) => selectedRanks.includes(h.rank))
+      .filter((h) => ranks.includes(h.rank))
       .map((h) => ({ h, range: clipOverrides[h.rank] ?? { start: h.start, end: h.end } }))
       .sort((a, b) => a.range.start - b.range.start);
     if (!videoPath || !mediaInfo || ordered.length === 0) return;
@@ -1350,6 +1369,24 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) {
       set({ batch: null, error: String(e) });
     }
+  },
+
+  buildReel: async (outputPath, presetId, customMb, targetDurationSec, resolutionId, fitMode) => {
+    const { highlights, clipOverrides } = get();
+    const pick = pickReelHighlights(highlights, clipOverrides, targetDurationSec);
+    if (pick.ranks.length === 0) {
+      set({ error: "No highlights to build a reel from - scan for highlights or mark a bookmark first." });
+      return null;
+    }
+    await get().compileSelectedHighlights(
+      outputPath,
+      presetId,
+      customMb,
+      resolutionId,
+      fitMode,
+      pick.ranks
+    );
+    return pick;
   },
 
   openBatch: () => set({ screen: "batch", exportDone: null }),

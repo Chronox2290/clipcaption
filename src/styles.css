@@ -1454,10 +1454,12 @@ kbd {
 }
 .hl-mode-toggle {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .hl-mode-toggle .btn {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 110px;
 }
 .hl-compile {
   display: flex;

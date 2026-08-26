@@ -37,6 +37,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
     batch,
     exportSelectedHighlights,
     compileSelectedHighlights,
+    buildReel,
     cancelJob,
     transcribe,
     transcribeJob,
@@ -46,7 +47,11 @@ export default function HighlightsPanel({ videoRef }: Props) {
 
   const duration = mediaInfo?.durationSec ?? Infinity;
   const [cappedRank, setCappedRank] = useState<number | null>(null);
-  const [mode, setMode] = useState<"separate" | "compile">("separate");
+  const [mode, setMode] = useState<"separate" | "compile" | "reel">("separate");
+  const [reelTargetSec, setReelTargetSec] = useState(60);
+  const [reelResult, setReelResult] = useState<{ ranks: number[]; totalDurationSec: number } | null>(
+    null
+  );
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
   const [resolutionId, setResolutionId] = useState("source");
@@ -77,6 +82,16 @@ export default function HighlightsPanel({ videoRef }: Props) {
     const base = videoPath.replace(/\.[^./\\]+$/, "");
     const out = await pickSavePath(`${base}.highlight-reel.mp4`);
     if (out) void compileSelectedHighlights(out, presetId, customMb, resolutionId, fitMode);
+  };
+
+  const buildReelClicked = async () => {
+    if (!videoPath) return;
+    const base = videoPath.replace(/\.[^./\\]+$/, "");
+    const out = await pickSavePath(`${base}.reel.mp4`);
+    if (!out) return;
+    setReelResult(null);
+    const pick = await buildReel(out, presetId, customMb, reelTargetSec, resolutionId, fitMode);
+    setReelResult(pick);
   };
 
   const rangeOf = (h: Highlight) => clipOverrides[h.rank] ?? { start: h.start, end: h.end };
@@ -388,7 +403,9 @@ export default function HighlightsPanel({ videoRef }: Props) {
           a scrolling clip list, so people reasonably concluded that stitching
           clips together wasn't possible at all. */}
       <p className="muted small hl-mode-hint">
-        {selectedRanks.length === 0
+        {mode === "reel"
+          ? "No ticking needed — picks your bookmarks plus the best-scoring clips up to the target length, joined in recording order."
+          : selectedRanks.length === 0
           ? "Tick some clips to export them."
           : mode === "compile"
           ? `${selectedRanks.length} ticked clip${selectedRanks.length === 1 ? "" : "s"} → one video, joined in recording order.`
@@ -406,6 +423,13 @@ export default function HighlightsPanel({ videoRef }: Props) {
           onClick={() => setMode("compile")}
         >
           One combined file
+        </button>
+        <button
+          className={`btn btn-small ${mode === "reel" ? "btn-primary" : "btn-ghost"}`}
+          onClick={() => setMode("reel")}
+          title="Hands-off: auto-picks the best clips up to a target length, no ticking required"
+        >
+          🎬 Auto reel
         </button>
       </div>
 
@@ -448,6 +472,24 @@ export default function HighlightsPanel({ videoRef }: Props) {
             </select>
           </div>
 
+          {mode === "reel" && (
+            <div className="field">
+              <label title="Manually-bookmarked clips are always included in full, on top of this budget — this only caps how much of the auto-detected pool gets pulled in.">
+                Target length
+              </label>
+              <select
+                value={reelTargetSec}
+                onChange={(e) => setReelTargetSec(Number(e.target.value))}
+              >
+                <option value={30}>~30s</option>
+                <option value={60}>~1 min</option>
+                <option value={90}>~90s</option>
+                <option value={180}>~3 min</option>
+                <option value={300}>~5 min</option>
+              </select>
+            </div>
+          )}
+
           {isCropped && (
             <div className="field">
               <label>Frame</label>
@@ -489,6 +531,24 @@ export default function HighlightsPanel({ videoRef }: Props) {
               🎬 Compile {selectedRanks.length} clip{selectedRanks.length === 1 ? "" : "s"} into one
               file ({preset.name})
             </button>
+          )}
+
+          {mode === "reel" && (
+            <>
+              <button
+                className="btn btn-primary btn-big"
+                disabled={highlights.length === 0}
+                onClick={() => void buildReelClicked()}
+              >
+                🎬 Build reel ({preset.name})
+              </button>
+              {reelResult && (
+                <p className="muted small">
+                  Picked {reelResult.ranks.length} clip{reelResult.ranks.length === 1 ? "" : "s"} —{" "}
+                  {Math.round(reelResult.totalDurationSec)}s total.
+                </p>
+              )}
+            </>
           )}
         </div>
       )}
