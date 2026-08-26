@@ -79,7 +79,17 @@ let batchCancelRequested = false;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let pendingUpdate: any = null;
 
+/** The app's own chrome theme - buttons, panels, the editor shell. Distinct
+ * from CaptionStyle, which is how captions look in the exported VIDEO;
+ * mixing the two into one setting would be confusing since they answer
+ * different questions ("how does the app look" vs "how do my captions
+ * look"). See src/styles.css's [data-theme] blocks for what each actually
+ * changes. */
+export type AppTheme = "precision" | "warm" | "gamer";
+
 interface AppState {
+  theme: AppTheme;
+  setTheme: (t: AppTheme) => void;
   screen: "library" | "editor" | "batch";
   error: string | null;
 
@@ -539,6 +549,14 @@ async function restoreSession(
 }
 
 export const useApp = create<AppState>((set, get) => ({
+  theme: (() => {
+    const v = localStorage.getItem("cc.theme");
+    return v === "warm" || v === "gamer" ? v : "precision";
+  })(),
+  setTheme: (t) => {
+    localStorage.setItem("cc.theme", t);
+    set({ theme: t });
+  },
   screen: "library",
   error: null,
   videoPath: null,

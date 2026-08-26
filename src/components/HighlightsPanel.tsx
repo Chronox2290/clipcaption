@@ -4,6 +4,7 @@ import { fmtTime, capitalize } from "../lib/captions";
 import { pickDirectory, pickSavePath } from "../lib/tauri";
 import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
 import { chronoPositions } from "../lib/highlights";
+import { Icon } from "./Icon";
 import TimeField from "./TimeField";
 import type { Highlight } from "../types";
 
@@ -149,7 +150,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
           {isLong ? "" : " Works best on longer recordings (streams, full sessions)."}
         </p>
         <button className="btn btn-primary" onClick={() => analyzeHighlights()}>
-          ⚡ Find highlights
+          <Icon name="sparkle" /> Find highlights
         </button>
       </div>
     );
@@ -183,7 +184,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
               title="List clips most-exciting first"
               onClick={() => setSortMode("hype")}
             >
-              🔥 Hype
+              <Icon name="fire" /> Hype
             </button>
           </div>
         </div>
@@ -202,10 +203,10 @@ export default function HighlightsPanel({ videoRef }: Props) {
               if (v) addBookmark(v.currentTime);
             }}
           >
-            ＋ Mark here
+            <Icon name="pin" size={14} /> Mark here
           </button>
           <button className="btn btn-ghost btn-small" onClick={() => analyzeHighlights()}>
-            ↻ Re-scan
+            <Icon name="refresh" size={14} /> Re-scan
           </button>
           <label className="hl-count" title="How many clips a scan may return. Auto scales with the length of the recording.">
             <span className="muted small">Find</span>
@@ -258,10 +259,16 @@ export default function HighlightsPanel({ videoRef }: Props) {
                   {h.manual ? (
                     <span className="hl-manual-tag" title="You marked this clip by hand">
                       {" "}
-                      · 📌
+                      · <Icon name="pin" size={12} />
                     </span>
                   ) : (
-                    sortMode === "hype" && <span className="hl-hype-tag"> · 🔥{h.rank}</span>
+                    sortMode === "hype" && (
+                      <span className="hl-hype-tag">
+                        {" "}
+                        · <Icon name="fire" size={12} />
+                        {h.rank}
+                      </span>
+                    )
                   )}
                 </span>
                 <div className="hl-mid">
@@ -290,7 +297,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                   title="Preview: play just this clip, stops at its end"
                   onClick={() => previewRange(range.start, range.end)}
                 >
-                  ▶ Play
+                  <Icon name="play" size={12} /> Play
                 </button>
                 <button
                   className={`btn btn-small ${isEditing ? "btn-primary" : ""}`}
@@ -317,7 +324,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                         title="Set to where the video is paused"
                         onClick={() => setEdgeFromPlayhead(h, "start")}
                       >
-                        📍
+                        <Icon name="pin" size={12} />
                       </button>
                     </TimeField>
                     <span className="hl-nudge-label">End</span>
@@ -333,7 +340,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                         title="Set to where the video is paused"
                         onClick={() => setEdgeFromPlayhead(h, "end")}
                       >
-                        📍
+                        <Icon name="pin" size={12} />
                       </button>
                     </TimeField>
                   </div>
@@ -346,10 +353,10 @@ export default function HighlightsPanel({ videoRef }: Props) {
                       className="btn btn-ghost btn-small"
                       onClick={() => previewRange(range.start, range.end)}
                     >
-                      ▶ Preview
+                      <Icon name="play" size={12} /> Preview
                     </button>
                     <button className="btn btn-small" onClick={() => captionThisRange(h)}>
-                      ✦ Caption this range
+                      <Icon name="sparkle" size={12} /> Caption this range
                     </button>
                     <button className="btn btn-ghost btn-small" onClick={stopEditingHighlight}>
                       Done
@@ -375,7 +382,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                   )}
                   {captured && (
                     <div className="hl-cap-status ok">
-                      ✓ Captioned — {segments.reduce((n, s) => n + s.words.length, 0)} words. Open
+                      <Icon name="check" size={12} /> Captioned — {segments.reduce((n, s) => n + s.words.length, 0)} words. Open
                       the Transcript tab to review, or it's used automatically on export.
                     </div>
                   )}
@@ -390,10 +397,10 @@ export default function HighlightsPanel({ videoRef }: Props) {
         <div className="hl-active">
           Working range: {fmtTime(activeRange.start)} – {fmtTime(activeRange.end)}
           <button className="btn btn-ghost btn-small" onClick={() => setActiveRange(null)}>
-            ✕ clear
+            <Icon name="close" size={12} /> clear
           </button>
           <button className="btn btn-small" onClick={() => transcribe()}>
-            ✦ Caption this range
+            <Icon name="sparkle" size={12} /> Caption this range
           </button>
         </div>
       )}
@@ -429,7 +436,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
           onClick={() => setMode("reel")}
           title="Hands-off: auto-picks the best clips up to a target length, no ticking required"
         >
-          🎬 Auto reel
+          <Icon name="reel" size={14} /> Auto reel
         </button>
       </div>
 
@@ -518,7 +525,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
               disabled={selectedRanks.length === 0}
               onClick={exportSelected}
             >
-              ⚡ Caption + export selected ({selectedRanks.length})
+              <Icon name="sparkle" /> Caption + export selected ({selectedRanks.length})
             </button>
           )}
 
@@ -528,7 +535,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
               disabled={selectedRanks.length === 0}
               onClick={compileSelected}
             >
-              🎬 Compile {selectedRanks.length} clip{selectedRanks.length === 1 ? "" : "s"} into one
+              <Icon name="reel" /> Compile {selectedRanks.length} clip{selectedRanks.length === 1 ? "" : "s"} into one
               file ({preset.name})
             </button>
           )}
@@ -540,7 +547,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                 disabled={highlights.length === 0}
                 onClick={() => void buildReelClicked()}
               >
-                🎬 Build reel ({preset.name})
+                <Icon name="reel" /> Build reel ({preset.name})
               </button>
               {reelResult && (
                 <p className="muted small">

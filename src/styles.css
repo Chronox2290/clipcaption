@@ -1,17 +1,137 @@
-/* ClipCaption — dark, glassy, snappy */
-
+/* ClipCaption — dark, glassy, snappy
+ *
+ * Theme system: every color below is a token, and every token is
+ * re-declared (not overridden piecemeal) under [data-theme="warm"] and
+ * [data-theme="gamer"] further down this file — see THEMES.md-equivalent
+ * comment block there for the design reasoning behind each. "precision"
+ * (this block) is the default and needs no attribute on <html>.
+ *
+ * -rgb siblings (--accent-rgb etc.) exist because a CSS custom property
+ * can't be split into its R/G/B channels inside rgba() - `rgba(var(--accent),
+ * 0.14)` is not valid CSS. Declaring the channels separately and writing
+ * `rgba(var(--accent-rgb), 0.14)` at the call site is what actually lets a
+ * soft-background or glow color swap correctly per theme instead of being
+ * frozen at whatever hex a rule was first written with. New code should
+ * reach for these rather than a fresh literal rgba(124, 92, 255, ...).
+ */
 :root {
-  --bg0: #0b0d12;
-  --bg1: #12151d;
-  --bg2: #1a1e29;
+  /* elevation ladder - each step is a real "this sits above that" surface,
+     not just a second color to break up monotony */
+  --bg0: #0b0d12; /* app ground */
+  --bg1: #12151d; /* panel surface */
+  --bg2: #1a1e29; /* control surface (inputs, chips, list rows) */
+  --bg3: #222736; /* raised (active/selected state, popovers) */
   --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
   --text: #e8ebf2;
   --muted: #8b93a7;
+  --dim: #63697c;
+
+  /* accent = action ("press this"); accent2 = data ("this is a number you're
+     reading" - timestamps, durations, confidence %). Both existed before
+     tonight as one undifferentiated "UI purple/cyan"; the split is what's
+     new, not the hues themselves. */
   --accent: #7c5cff;
+  --accent-rgb: 124, 92, 255;
   --accent2: #2ee6ff;
+  --accent2-rgb: 46, 230, 255;
+
   --danger: #ff5c7a;
+  --danger-rgb: 255, 92, 122;
   --ok: #3ddc84;
-  --radius: 14px;
+  --ok-rgb: 61, 220, 132;
+  --warn: #ffc454;
+  --warn-rgb: 255, 196, 84;
+
+  --ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "Cascadia Code", ui-monospace, Consolas, monospace;
+
+  /* control scale - one source of truth for button/input sizing, instead of
+     ad hoc padding per component (the direct cause of at least three real
+     layout bugs found this session: the mode toggle overflowing a 3rd
+     button, the Start/End grid wrapping, the sidebar reading "squashed") */
+  --ctrl-h-sm: 26px;
+  --ctrl-h-md: 32px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius: var(--radius-lg); /* kept for existing rules that reference --radius directly */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 18px;
+}
+
+/* ---------------- theme: Creator warm ----------------
+ * Roomier, warm-shifted near-black (a touch of plum instead of cold navy),
+ * fully-rounded controls, softer glow. Closer to how a creator-first tool
+ * (Descript, CapCut) feels - approachable, built for "this is for fun with
+ * friends" rather than "I edit video for a living". */
+:root[data-theme="warm"] {
+  --bg0: #14111a;
+  --bg1: #1c1826;
+  --bg2: #241f30;
+  --bg3: #2d2739;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.15);
+  --text: #f1ecfa;
+  --muted: #a89bc2;
+  --dim: #7c6f96;
+
+  --accent: #9b7bff;
+  --accent-rgb: 155, 123, 255;
+  --accent2: #3ce6c2;
+  --accent2-rgb: 60, 230, 194;
+
+  --danger: #ff8fa5;
+  --danger-rgb: 255, 143, 165;
+  --ok: #3ce6c2;
+  --ok-rgb: 60, 230, 194;
+  --warn: #ffc76b;
+  --warn-rgb: 255, 199, 107;
+
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius: var(--radius-lg);
+}
+
+/* ---------------- theme: High-energy ----------------
+ * Purple-to-cyan gradient on primary actions with real glow (RGB-peripheral
+ * energy), pill tracks deliberately contrasted with sharper action buttons.
+ * Leans into the actual subculture this app serves - proximity-chat horror
+ * games with friends - rather than a professional editor's restraint. The
+ * gradient itself is applied per-component (buttons, active tabs), not as a
+ * flat token swap, since a single "gradient color" isn't representable as
+ * one CSS custom property - components that want it reference --accent and
+ * --accent2 together via linear-gradient(135deg, var(--accent), var(--accent2)). */
+:root[data-theme="gamer"] {
+  --bg0: #08090d;
+  --bg1: #0e1016;
+  --bg2: #161a24;
+  --bg3: #1e2430;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --text: #e8ebf2;
+  --muted: #8b93a7;
+  --dim: #6d7690;
+
+  --accent: #8b5cf6;
+  --accent-rgb: 139, 92, 246;
+  --accent2: #22d3ee;
+  --accent2-rgb: 34, 211, 238;
+
+  --danger: #ff5c7a;
+  --danger-rgb: 255, 92, 122;
+  --ok: #22d3ee;
+  --ok-rgb: 34, 211, 238;
+  --warn: #ffc454;
+  --warn-rgb: 255, 196, 84;
+
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius: var(--radius-lg);
 }
 
 * {
@@ -82,6 +202,9 @@ select {
 /* ---------- buttons ---------- */
 
 .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 14px;
   border-radius: 10px;
   border: 1px solid var(--line);
@@ -104,14 +227,13 @@ select {
   transform: none;
 }
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), #5a3df0);
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
   border-color: transparent;
   font-weight: 600;
-  box-shadow: 0 6px 24px rgba(124, 92, 255, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  box-shadow: 0 6px 24px rgba(var(--accent-rgb), 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 .btn-primary:hover {
   filter: brightness(1.1);
-  background: linear-gradient(135deg, var(--accent), #5a3df0);
 }
 .btn-ghost {
   background: transparent;
@@ -1167,6 +1289,41 @@ kbd {
   color: var(--muted);
   margin: 6px 0 2px;
 }
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: var(--space-4);
+}
+.theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: var(--space-3) var(--space-1);
+  border-radius: var(--radius-md);
+  background: var(--bg2);
+  border: 1.5px solid var(--line);
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.theme-card:hover {
+  transform: translateY(-2px);
+}
+.theme-card.sel {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.25);
+}
+.theme-swatch {
+  width: 100%;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+.theme-card-name {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .preset-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

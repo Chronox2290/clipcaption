@@ -12,10 +12,22 @@ export default function App() {
   const clearError = useApp((s) => s.clearError);
   const init = useApp((s) => s.init);
   const openVideo = useApp((s) => s.openVideo);
+  const theme = useApp((s) => s.theme);
 
   useEffect(() => {
     void init();
   }, [init]);
+
+  // "precision" is the default and needs no attribute — its tokens live in
+  // plain :root, so the alternate themes' [data-theme="..."] blocks only
+  // need to exist for "warm" and "gamer".
+  useEffect(() => {
+    if (theme === "precision") {
+      delete document.documentElement.dataset.theme;
+    } else {
+      document.documentElement.dataset.theme = theme;
+    }
+  }, [theme]);
 
   // Native file drag & drop (gives us real OS paths)
   useEffect(() => {
