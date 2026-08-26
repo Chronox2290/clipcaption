@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../store";
 import { buildAss } from "../lib/ass";
-import { paginate, applyCensor, shiftPages, fmtTime, capitalize } from "../lib/captions";
+import { paginate, applyCensor, shiftPages, layoutRows, fmtTime, capitalize } from "../lib/captions";
 import { addEmojis } from "../lib/emojis";
 import { pickSavePath } from "../lib/tauri";
 import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
@@ -52,6 +52,7 @@ export default function ExportDrawer() {
         activeRange.start
       );
     }
+    pages = layoutRows(pages);
     const ass = burn && pages.length ? buildAss(pages, style, { playResX: outW, playResY: outH }) : "";
 
     void startExport({
