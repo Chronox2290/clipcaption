@@ -236,6 +236,14 @@ export interface Highlight {
    * found. They survive a re-scan (which replaces the detected ones) and are
    * badged in the list. */
   manual?: boolean;
+  /** Set on clips found by scanning the transcript for death-related phrases
+   * ("I died", "got killed", ...) rather than the audio loudness scan - see
+   * findDeathMoments in lib/deathDetector.ts. Unlike the loudness scan, this
+   * has NOT been validated against real labeled death moments (no reference
+   * footage was available to check false-positive/negative rates against),
+   * so it's offered as a distinctly-badged, opt-in experimental pass rather
+   * than folded into the main scan silently. */
+  death?: boolean;
 }
 
 /** One clip in the multi-file batch queue. */
@@ -284,4 +292,27 @@ export interface ProjectFile {
    * a reloaded project's captions couldn't be matched back against
    * `speakerProfiles` at all (see TranscribeResult.speakerEmbeddings). */
   speakerEmbeddings: Record<string, number[]>;
+}
+
+/** One highlight pulled in from a .ccproj for the montage builder (see
+ * src/screens/Montage.tsx) - unlike Auto Reel (store.ts's buildReel), which
+ * only ever picks from the currently-open video's own highlights, a
+ * montage's clips can come from several different saved projects at once.
+ * Carries just enough of that project's own state to render this one clip's
+ * captions independently at build time (see buildMontage in store.ts). */
+export interface MontageClip {
+  /** `${projectPath}:${rank}` - unique across every project added, even if
+   * two projects happen to reuse the same highlight rank number. */
+  id: string;
+  projectPath: string;
+  videoPath: string;
+  /** e.g. the project's own filename, for telling clips from different
+   * source videos apart in the list. */
+  sourceLabel: string;
+  rank: number;
+  start: number;
+  end: number;
+  segments: Segment[];
+  style: CaptionStyle;
+  censor: boolean;
 }

@@ -1,11 +1,13 @@
 mod align;
 mod analyze;
 mod diarize;
+mod discord;
 mod encoders;
 mod export;
 mod jobs;
 mod media;
 mod models;
+mod montage;
 mod sidecar;
 mod spatial;
 mod polish;
@@ -150,6 +152,36 @@ fn export_video(
 }
 
 #[tauri::command]
+fn post_to_discord(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    webhook_url: String,
+    file_path: String,
+    message: Option<String>,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("discord");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        discord::post(app, job_id, handle, webhook_url, file_path, message);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+fn build_montage(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    req: montage::MontageRequest,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("montage");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        montage::run(app, job_id, handle, req);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
 fn cancel_job(jobs: State<Jobs>, id: String) -> Result<(), String> {
     if let Some(handle) = jobs.get(&id) {
         handle.cancel();
@@ -225,6 +257,8 @@ pub fn run() {
             ensure_model,
             transcribe,
             export_video,
+            build_montage,
+            post_to_discord,
             cancel_job,
             write_text_file,
             read_text_file,

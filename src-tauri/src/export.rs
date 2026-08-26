@@ -196,7 +196,11 @@ pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: ExportRe
     }
 }
 
-fn run_inner(
+/// The whole single-source encode pipeline (trim/concat, crop, resolution
+/// cap, subtitle burn-in, quality- or size-targeted encode) as one reusable
+/// step - `pub(crate)` so montage.rs can render each of a montage's clips
+/// through the exact same, already-proven path instead of a second one.
+pub(crate) fn run_inner(
     app: &AppHandle,
     job_id: &str,
     handle: &Arc<JobHandle>,

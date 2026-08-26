@@ -20,6 +20,7 @@ export default function Library() {
   const pickerModels = models.filter((m) => !m.capabilityOnly);
 
   const openBatch = useApp((s) => s.openBatch);
+  const openMontage = useApp((s) => s.openMontage);
 
   const browse = async () => {
     const p = await pickVideoFile();
@@ -75,6 +76,15 @@ export default function Library() {
           <span>
             <strong>Batch process clips</strong>
             <span className="muted"> — caption + compress a whole folder in one go</span>
+          </span>
+          <span className="batch-launch-arrow">→</span>
+        </button>
+
+        <button className="batch-launch" onClick={openMontage}>
+          <span className="batch-launch-icon">🎞️</span>
+          <span>
+            <strong>Build a montage</strong>
+            <span className="muted"> — stitch highlights from several projects into one reel</span>
           </span>
           <span className="batch-launch-arrow">→</span>
         </button>

@@ -23,6 +23,11 @@ export default function ExportDrawer() {
     cancelJob,
     fpsOverride,
     encoder,
+    discordWebhook,
+    setDiscordWebhook,
+    autoPostToDiscord,
+    setAutoPostToDiscord,
+    discordJob,
   } = useApp();
   const [presetId, setPresetId] = useState("original");
   // Independent of which preset is picked - previously only the "custom"
@@ -193,6 +198,32 @@ export default function ExportDrawer() {
 
       <h4>Encoding</h4>
       <EncodingOptions />
+
+      <h4>Discord</h4>
+      <div className="field">
+        <label title="From a channel's Settings → Integrations → Webhooks. Paste it once - it's remembered.">
+          Webhook URL
+        </label>
+        <input
+          type="text"
+          placeholder="https://discord.com/api/webhooks/…"
+          value={discordWebhook}
+          onChange={(e) => setDiscordWebhook(e.target.value)}
+        />
+      </div>
+      {discordWebhook && (
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={autoPostToDiscord}
+            onChange={(e) => setAutoPostToDiscord(e.target.checked)}
+          />
+          <span>Post to Discord automatically when this export finishes</span>
+        </label>
+      )}
+      {discordJob && (
+        <p className="muted small">Posting to Discord…</p>
+      )}
 
       {!exportJob && (
         <button className="btn btn-primary btn-big" onClick={go} disabled={!videoPath}>

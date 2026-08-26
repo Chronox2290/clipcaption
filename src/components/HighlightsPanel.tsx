@@ -44,6 +44,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
     transcribeJob,
     segments,
     exportDone,
+    scanForDeaths,
   } = useApp();
 
   const duration = mediaInfo?.durationSec ?? Infinity;
@@ -152,6 +153,15 @@ export default function HighlightsPanel({ videoRef }: Props) {
         <button className="btn btn-primary" onClick={() => analyzeHighlights()}>
           <Icon name="sparkle" /> Find highlights
         </button>
+        {segments.length > 0 && (
+          <button
+            className="btn btn-ghost btn-small"
+            title="Experimental: scans the transcript for phrases like 'I died' or 'got killed' - not validated against real labeled deaths, so treat hits as a starting point, not a guarantee."
+            onClick={() => scanForDeaths()}
+          >
+            <Icon name="warning" size={14} /> Flag deaths (experimental)
+          </button>
+        )}
       </div>
     );
   }
@@ -208,6 +218,15 @@ export default function HighlightsPanel({ videoRef }: Props) {
           <button className="btn btn-ghost btn-small" onClick={() => analyzeHighlights()}>
             <Icon name="refresh" size={14} /> Re-scan
           </button>
+          {segments.length > 0 && (
+            <button
+              className="btn btn-ghost btn-small"
+              title="Experimental: scans the transcript for phrases like 'I died' or 'got killed' - not validated against real labeled deaths, so treat hits as a starting point, not a guarantee."
+              onClick={() => scanForDeaths()}
+            >
+              <Icon name="warning" size={14} /> Flag deaths
+            </button>
+          )}
           <label className="hl-count" title="How many clips a scan may return. Auto scales with the length of the recording.">
             <span className="muted small">Find</span>
             <select
@@ -256,7 +275,15 @@ export default function HighlightsPanel({ videoRef }: Props) {
                 />
                 <span className="hl-rank">
                   Clip #{chrono[h.rank]}
-                  {h.manual ? (
+                  {h.death ? (
+                    <span
+                      className="hl-manual-tag"
+                      title="Found by the experimental transcript death-phrase scan, not the loudness scan or by hand"
+                    >
+                      {" "}
+                      · <Icon name="warning" size={12} />
+                    </span>
+                  ) : h.manual ? (
                     <span className="hl-manual-tag" title="You marked this clip by hand">
                       {" "}
                       · <Icon name="pin" size={12} />

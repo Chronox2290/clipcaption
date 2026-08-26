@@ -1790,6 +1790,31 @@ kbd {
   margin: 6px 0 2px;
 }
 
+/* montage builder */
+.montage-row {
+  cursor: grab;
+}
+.montage-row.sel {
+  border-color: rgba(var(--accent-rgb), 0.45);
+}
+.montage-drag-handle {
+  color: var(--dim);
+  letter-spacing: -2px;
+  cursor: grab;
+}
+.montage-source {
+  color: var(--muted);
+  font-size: 12px;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.montage-clip-name {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
 /* encoding options */
 .enc-options {
   display: flex;

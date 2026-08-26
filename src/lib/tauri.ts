@@ -87,3 +87,17 @@ export async function pickProjectOpenPath(): Promise<string | null> {
   });
   return typeof res === "string" ? res : null;
 }
+
+/** Same picker, but multi-select - the montage builder pulls clips from
+ * several saved projects at once, so adding them one dialog at a time
+ * would be needless friction. */
+export async function pickProjectOpenPaths(): Promise<string[]> {
+  if (!isTauri) return [];
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({
+    multiple: true,
+    filters: [{ name: "ClipCaption project", extensions: ["ccproj"] }],
+  });
+  if (Array.isArray(res)) return res;
+  return typeof res === "string" ? [res] : [];
+}

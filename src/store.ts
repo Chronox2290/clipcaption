@@ -14,6 +14,7 @@ import type {
   TranscribeResult,
   ProjectFile,
   PolishSuggestion,
+  MontageClip,
 } from "./types";
 import {
   invoke,
@@ -40,6 +41,7 @@ import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
 import { sanitizeFilename } from "./lib/naming";
 import { pickReelHighlights } from "./lib/highlights";
+import { findDeathMoments } from "./lib/deathDetector";
 
 interface JobState {
   id: string;
@@ -90,7 +92,7 @@ export type AppTheme = "precision" | "warm" | "gamer";
 interface AppState {
   theme: AppTheme;
   setTheme: (t: AppTheme) => void;
-  screen: "library" | "editor" | "batch";
+  screen: "library" | "editor" | "batch" | "montage";
   error: string | null;
 
   // media
@@ -175,6 +177,20 @@ interface AppState {
   exportDone: string | null;
   modelJob: JobState | null;
   alignJob: JobState | null;
+  montageJob: JobState | null;
+  discordJob: JobState | null;
+  /** Persisted webhook URL for "post finished export to Discord" - a
+   * channel's own Integrations settings gives you one, no bot setup. Empty
+   * means the feature is simply unused (Export never shows the checkbox). */
+  discordWebhook: string;
+  setDiscordWebhook: (url: string) => void;
+  /** Whether a successful export should immediately POST itself to
+   * discordWebhook with no further action - "no approval process" is the
+   * whole point, so this is a deliberate opt-in per the user's own request,
+   * not itself a confirmation step. */
+  autoPostToDiscord: boolean;
+  setAutoPostToDiscord: (v: boolean) => void;
+  postToDiscord: (filePath: string, message?: string) => Promise<void>;
 
   // models
   models: ModelInfo[];
@@ -297,6 +313,19 @@ interface AppState {
     fitMode?: "fill" | "fit"
   ) => Promise<{ ranks: number[]; totalDurationSec: number } | null>;
   openBatch: () => void;
+  openMontage: () => void;
+  /** Renders and joins clips pulled from one or more saved .ccproj files
+   * (src/screens/Montage.tsx) into one file, in the given order. Every clip
+   * is rendered at the same resolution/fps/encoder so the final join is a
+   * fast, lossless `-c copy` concat - only quality (CRF) encoding is
+   * supported per clip today, not a file-size target (see montage.rs). */
+  buildMontage: (
+    clips: MontageClip[],
+    outputPath: string,
+    presetId: string,
+    resolutionId: string,
+    fitMode: "fill" | "fit"
+  ) => Promise<void>;
   addBatchPaths: (paths: string[]) => void;
   addBatchFolder: (dir: string) => Promise<void>;
   removeBatchItem: (id: string) => void;
@@ -320,6 +349,13 @@ interface AppState {
   setEditorTab: (t: AppState["editorTab"]) => void;
   /** Adds a hand-marked clip centred on `center` seconds; returns its rank. */
   addBookmark: (center: number) => number;
+  /** EXPERIMENTAL, unvalidated keyword scan of the transcript for phrases
+   * people say right after dying (see lib/deathDetector.ts) - a distinctly-
+   * badged addition to `highlights`, never mixed silently into the
+   * loudness-based scan's own results. Re-running replaces only its own
+   * previous results, same as a loudness re-scan. Returns how many it
+   * found. */
+  scanForDeaths: () => number;
   /** Starts a review pass: sends every word below the confidence threshold
    * to the local model and populates polishSuggestions with what it
    * proposes. A no-op (clears any stale suggestions) if the model is not
@@ -623,6 +659,10 @@ export const useApp = create<AppState>((set, get) => ({
   exportDone: null,
   modelJob: null,
   alignJob: null,
+  montageJob: null,
+  discordJob: null,
+  discordWebhook: localStorage.getItem("cc.discordWebhook") ?? "",
+  autoPostToDiscord: localStorage.getItem("cc.autoPostDiscord") === "1",
   models: [],
   selectedModel: localStorage.getItem("cc.model") ?? "large-v3-turbo",
   vocabulary: localStorage.getItem("cc.vocabulary") ?? "",
@@ -687,7 +727,7 @@ export const useApp = create<AppState>((set, get) => ({
       }
 
       // 2) jobs tracked in UI state
-      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob } = get();
+      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob, montageJob, discordJob } = get();
       const patch = (
         job: JobState | null,
         key:
@@ -698,6 +738,8 @@ export const useApp = create<AppState>((set, get) => ({
           | "polishJob"
           | "polishModelJob"
           | "alignJob"
+          | "montageJob"
+          | "discordJob"
       ) => {
         if (!job || job.id !== p.id) return false;
         if (p.error) {
@@ -721,6 +763,18 @@ export const useApp = create<AppState>((set, get) => ({
             }
           } else if (key === "exportJob") {
             set({ exportJob: null, exportDone: p.result ?? null });
+            const { autoPostToDiscord, discordWebhook } = get();
+            if (autoPostToDiscord && discordWebhook && p.result) {
+              void get().postToDiscord(p.result);
+            }
+          } else if (key === "montageJob") {
+            set({ montageJob: null, exportDone: p.result ?? null });
+            const { autoPostToDiscord, discordWebhook } = get();
+            if (autoPostToDiscord && discordWebhook && p.result) {
+              void get().postToDiscord(p.result);
+            }
+          } else if (key === "discordJob") {
+            set({ discordJob: null });
           } else if (key === "polishModelJob") {
             set({ polishModelJob: null, polishAvailable: true });
           } else if (key === "alignJob" && p.result) {
@@ -800,6 +854,8 @@ export const useApp = create<AppState>((set, get) => ({
         patch(polishJob, "polishJob") ||
         patch(polishModelJob, "polishModelJob") ||
         patch(alignJob, "alignJob") ||
+        patch(montageJob, "montageJob") ||
+        patch(discordJob, "discordJob") ||
         patch(modelJob, "modelJob");
     });
     await get().refreshModels();
@@ -1502,6 +1558,81 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   openBatch: () => set({ screen: "batch", exportDone: null }),
+  openMontage: () => set({ screen: "montage", exportDone: null }),
+
+  setDiscordWebhook: (url) => {
+    localStorage.setItem("cc.discordWebhook", url);
+    set({ discordWebhook: url });
+  },
+
+  setAutoPostToDiscord: (v) => {
+    localStorage.setItem("cc.autoPostDiscord", v ? "1" : "0");
+    set({ autoPostToDiscord: v });
+  },
+
+  postToDiscord: async (filePath, message) => {
+    const { discordWebhook } = get();
+    if (!discordWebhook) return;
+    try {
+      set({ error: null });
+      const id = await invoke<string>("post_to_discord", {
+        webhookUrl: discordWebhook,
+        filePath,
+        message: message ?? null,
+      });
+      set({ discordJob: { id, stage: "posting", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  buildMontage: async (clips, outputPath, presetId, resolutionId, fitMode) => {
+    if (clips.length === 0) return;
+    const preset = getExportPreset(presetId);
+    // Resolved once and applied identically to every clip - the whole point
+    // is that every rendered segment shares the same codec parameters, so
+    // the final join can be a fast, lossless stream copy.
+    const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
+    const isCropped = !!(targetW && targetH);
+    const outW = targetW ?? 1920;
+    const outH = targetH ?? 1080;
+    const { encoder } = get();
+
+    const items = clips.map((c) => {
+      let segs = c.censor ? applyCensor(c.segments) : c.segments;
+      if (c.style.emojis) segs = addEmojis(segs);
+      let pages = paginate(segs, c.style.maxWordsPerPage);
+      pages = shiftPages(
+        pages.filter((p) => p.end > c.start && p.start < c.end),
+        c.start
+      );
+      pages = layoutRows(pages);
+      const ass = pages.length ? buildAss(pages, c.style, { playResX: outW, playResY: outH }) : "";
+      return {
+        inputPath: c.videoPath,
+        assContent: ass,
+        targetW,
+        targetH,
+        crf: preset.crf,
+        fps: preset.fps,
+        audioKbps: preset.audioKbps,
+        durationSec: c.end - c.start,
+        trimStart: c.start,
+        trimEnd: c.end,
+        encoder,
+        fitMode: isCropped ? fitMode : null,
+        maxHeight,
+      };
+    });
+
+    try {
+      set({ error: null, exportDone: null });
+      const id = await invoke<string>("build_montage", { req: { items, outputPath } });
+      set({ montageJob: { id, stage: "montage", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
 
   addBatchPaths: (paths) => {
     const existing = new Set(get().batchItems.map((i) => i.path));
@@ -1724,6 +1855,20 @@ export const useApp = create<AppState>((set, get) => ({
   setHighlightCount: (n) => {
     localStorage.setItem("cc.highlightCount", n == null ? "auto" : String(n));
     set({ highlightCount: n });
+  },
+
+  scanForDeaths: () => {
+    get().pushHistory();
+    const { highlights, segments, selectedRanks } = get();
+    const found = findDeathMoments(segments);
+    const kept = highlights.filter((h) => !h.death);
+    const base = kept.reduce((m, h) => Math.max(m, h.rank), -1) + 1;
+    const renumbered = found.map((h, i) => ({ ...h, rank: base + i }));
+    set({
+      highlights: [...kept, ...renumbered],
+      selectedRanks: [...selectedRanks.filter((r) => !highlights.find((h) => h.rank === r)?.death), ...renumbered.map((h) => h.rank)],
+    });
+    return renumbered.length;
   },
 
   downloadPolishModel: async () => {
