@@ -4,6 +4,9 @@ src-tauri/target/
 src-tauri/binaries/*.exe
 src-tauri/binaries/*.dll
 src-tauri/binaries/*.onnx
+# Scratch workspace for forced-alignment validation - downloaded model +
+# extracted audio, not project source, never meant to be committed.
+scratch_align/
 src-tauri/binaries/llama/
 src-tauri/gen/
 *.log

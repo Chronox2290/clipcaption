@@ -20,6 +20,11 @@ tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+# Runs the wav2vec2-CTC forced-alignment model (align.rs). "download-binaries"
+# fetches ONNX Runtime's own prebuilt dylib at build time, matching how the
+# other native deps here (whisper.cpp, sherpa-onnx) are obtained rather than
+# vendored - no separate sidecar needed since ort loads it directly.
+ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "api-27", "download-binaries", "tls-rustls"] }
 
 [profile.release]
 codegen-units = 1

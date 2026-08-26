@@ -1,3 +1,4 @@
+mod align;
 mod analyze;
 mod diarize;
 mod encoders;
