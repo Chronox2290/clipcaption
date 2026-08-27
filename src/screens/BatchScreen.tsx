@@ -37,6 +37,9 @@ export default function BatchScreen() {
     watchFolderCount,
     startWatchFolder,
     stopWatchFolder,
+    discordWebhook,
+    autoDigestOnBatch,
+    setAutoDigestOnBatch,
   } = useApp();
   const setScreen = () => useApp.setState({ screen: "library" });
 
@@ -117,6 +120,20 @@ export default function BatchScreen() {
           {watching ? "Stop watching" : "Start watching…"}
         </button>
       </div>
+
+      {discordWebhook && (
+        <label className="check-row watch-folder-digest">
+          <input
+            type="checkbox"
+            checked={autoDigestOnBatch}
+            onChange={(e) => setAutoDigestOnBatch(e.target.checked)}
+          />
+          <span>
+            Post an end-of-session digest to Discord once a watch session goes quiet — clip
+            count, a compiled reel of everything that finished, and anything flagged for review.
+          </span>
+        </label>
+      )}
 
       <div className="batch-body">
         <div className="batch-queue">

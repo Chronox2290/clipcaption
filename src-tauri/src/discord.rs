@@ -6,6 +6,11 @@
 //! in advance) - rather than guess a number and enforce it client-side,
 //! this just attempts the upload and surfaces Discord's own rejection
 //! message, pointing at the app's own Discord-sized export presets.
+//!
+//! `file_path` is optional so the same webhook can also carry a text-only
+//! message - the end-of-batch digest (store.ts's watch-folder session
+//! summary) needs this when every clip in a run errored or needs review,
+//! i.e. there's nothing to attach.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,11 +23,11 @@ pub fn post(
     job_id: String,
     handle: Arc<JobHandle>,
     webhook_url: String,
-    file_path: String,
+    file_path: Option<String>,
     message: Option<String>,
 ) {
     let stage = "posting";
-    let result = post_inner(&webhook_url, &file_path, message.as_deref());
+    let result = post_inner(&webhook_url, file_path.as_deref(), message.as_deref());
     match result {
         Ok(()) => emit_done(&app, &job_id, stage, None),
         Err(e) => {
@@ -35,7 +40,11 @@ pub fn post(
     }
 }
 
-fn post_inner(webhook_url: &str, file_path: &str, message: Option<&str>) -> Result<(), String> {
+fn post_inner(
+    webhook_url: &str,
+    file_path: Option<&str>,
+    message: Option<&str>,
+) -> Result<(), String> {
     if !webhook_url.starts_with("https://discord.com/api/webhooks/")
         && !webhook_url.starts_with("https://discordapp.com/api/webhooks/")
     {
@@ -45,34 +54,48 @@ fn post_inner(webhook_url: &str, file_path: &str, message: Option<&str>) -> Resu
                 .into(),
         );
     }
-
-    let bytes = std::fs::read(file_path).map_err(|e| format!("Could not read {file_path}: {e}"))?;
-    let file_name = std::path::Path::new(file_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("clip.mp4")
-        .to_string();
-
-    let part = reqwest::blocking::multipart::Part::bytes(bytes)
-        .file_name(file_name)
-        .mime_str("video/mp4")
-        .map_err(|e| e.to_string())?;
-    let mut form = reqwest::blocking::multipart::Form::new().part("file", part);
-    if let Some(msg) = message {
-        if !msg.trim().is_empty() {
-            form = form.text("content", msg.to_string());
-        }
+    let message = message.filter(|m| !m.trim().is_empty());
+    if file_path.is_none() && message.is_none() {
+        return Err("Nothing to post - no file and no message.".into());
     }
 
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(300))
         .build()
         .map_err(|e| e.to_string())?;
-    let resp = client
-        .post(webhook_url)
-        .multipart(form)
-        .send()
-        .map_err(|e| format!("Could not reach Discord: {e}"))?;
+
+    let resp = if let Some(file_path) = file_path {
+        let bytes =
+            std::fs::read(file_path).map_err(|e| format!("Could not read {file_path}: {e}"))?;
+        let file_name = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("clip.mp4")
+            .to_string();
+
+        let part = reqwest::blocking::multipart::Part::bytes(bytes)
+            .file_name(file_name)
+            .mime_str("video/mp4")
+            .map_err(|e| e.to_string())?;
+        let mut form = reqwest::blocking::multipart::Form::new().part("file", part);
+        if let Some(msg) = message {
+            form = form.text("content", msg.to_string());
+        }
+        client
+            .post(webhook_url)
+            .multipart(form)
+            .send()
+            .map_err(|e| format!("Could not reach Discord: {e}"))?
+    } else {
+        // Text-only digest: Discord's webhook endpoint takes plain JSON with
+        // just a "content" field when there's no file to attach.
+        let body = serde_json::json!({ "content": message.unwrap_or_default() });
+        client
+            .post(webhook_url)
+            .json(&body)
+            .send()
+            .map_err(|e| format!("Could not reach Discord: {e}"))?
+    };
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -97,8 +120,12 @@ mod tests {
 
     #[test]
     fn rejects_a_non_discord_url_before_touching_the_network() {
-        let err = post_inner("https://example.com/not-a-webhook", "does-not-matter.mp4", None)
-            .unwrap_err();
+        let err = post_inner(
+            "https://example.com/not-a-webhook",
+            Some("does-not-matter.mp4"),
+            None,
+        )
+        .unwrap_err();
         assert!(err.contains("doesn't look like a Discord webhook URL"), "{err}");
     }
 
@@ -107,7 +134,8 @@ mod tests {
         // A real Discord URL, just not a webhook endpoint - should still be
         // caught by the prefix check rather than falling through to a
         // confusing network-level error.
-        let err = post_inner("https://discord.com/channels/123/456", "x.mp4", None).unwrap_err();
+        let err = post_inner("https://discord.com/channels/123/456", Some("x.mp4"), None)
+            .unwrap_err();
         assert!(err.contains("doesn't look like a Discord webhook URL"), "{err}");
     }
 
@@ -118,10 +146,32 @@ mod tests {
         // file, proving control passed the URL check.
         let err = post_inner(
             "https://discord.com/api/webhooks/123456789/abcDEF-token",
-            "definitely-does-not-exist-on-disk.mp4",
+            Some("definitely-does-not-exist-on-disk.mp4"),
             None,
         )
         .unwrap_err();
         assert!(err.contains("Could not read"), "{err}");
+    }
+
+    #[test]
+    fn rejects_neither_file_nor_message() {
+        let err = post_inner(
+            "https://discord.com/api/webhooks/123456789/abcDEF-token",
+            None,
+            None,
+        )
+        .unwrap_err();
+        assert!(err.contains("Nothing to post"), "{err}");
+    }
+
+    #[test]
+    fn a_blank_message_with_no_file_is_treated_as_nothing_to_post() {
+        let err = post_inner(
+            "https://discord.com/api/webhooks/123456789/abcDEF-token",
+            None,
+            Some("   "),
+        )
+        .unwrap_err();
+        assert!(err.contains("Nothing to post"), "{err}");
     }
 }

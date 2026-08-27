@@ -137,9 +137,26 @@ fn run_inner(
 
     emit_progress(app, job_id, stage, 0.95, Some("Joining clips".into()));
 
-    let list_path = cache.join(format!("{job_id}_list.txt"));
+    let join_result = join_via_concat_demuxer(&temp_paths, &req.output_path, &cache, job_id);
+    cleanup(&temp_paths);
+    join_result
+}
+
+/// Shared concat-demuxer join, used both by the per-project montage builder
+/// above (joining freshly-rendered temp files) and by `concat_existing` (the
+/// end-of-batch digest, joining already-exported clips as-is). `-c copy`
+/// only works because every input in both callers is guaranteed to already
+/// share the same codec parameters - same encoder settings for a montage's
+/// temp renders, same export preset for one batch run's outputs.
+fn join_via_concat_demuxer(
+    paths: &[std::path::PathBuf],
+    output_path: &str,
+    scratch_dir: &std::path::Path,
+    list_name_hint: &str,
+) -> Result<(), String> {
+    let list_path = scratch_dir.join(format!("{list_name_hint}_list.txt"));
     let mut list_content = String::new();
-    for p in &temp_paths {
+    for p in paths {
         // ffmpeg's concat-demuxer list format: single-quoted paths, with an
         // embedded single quote escaped as '\''.
         let escaped = p.to_string_lossy().replace('\'', r"'\''");
@@ -151,11 +168,10 @@ fn run_inner(
         .args(["-y", "-f", "concat", "-safe", "0", "-i"])
         .arg(&list_path)
         .args(["-c", "copy"])
-        .arg(&req.output_path)
+        .arg(output_path)
         .output()
         .map_err(|e| format!("Could not run ffmpeg: {e}"));
 
-    cleanup(&temp_paths);
     let _ = std::fs::remove_file(&list_path);
 
     let out = out?;
@@ -166,4 +182,65 @@ fn run_inner(
         ));
     }
     Ok(())
+}
+
+/// Pure branch-decision for `concat_existing`, split out so it's testable
+/// without an `AppHandle`: errors on nothing to join, short-circuits a
+/// single clip (nothing to concat), otherwise says "proceed with the join."
+fn single_path_shortcut(paths: &[String]) -> Result<Option<String>, String> {
+    match paths {
+        [] => Err("No clips to join.".into()),
+        [only] => Ok(Some(only.clone())),
+        _ => Ok(None),
+    }
+}
+
+/// Stitches already-exported clips (e.g. one batch/watch-folder run's
+/// outputs) into a single file, no re-render - just the concat-demuxer join.
+/// Used for the end-of-batch Discord digest ("N clips processed, M compiled
+/// into tonight's reel"). Picks its own output path in the app cache dir
+/// since this runs unattended with no save dialog, and returns it so the
+/// caller can post it straight to Discord.
+pub fn concat_existing(app: &AppHandle, job_id: &str, paths: Vec<String>) -> Result<String, String> {
+    if let Some(shortcut) = single_path_shortcut(&paths)? {
+        return Ok(shortcut);
+    }
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("digest");
+    std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+
+    let output_path = cache
+        .join(format!("{job_id}_digest.mp4"))
+        .to_string_lossy()
+        .into_owned();
+    let path_bufs: Vec<std::path::PathBuf> = paths.into_iter().map(Into::into).collect();
+    join_via_concat_demuxer(&path_bufs, &output_path, &cache, job_id)?;
+    Ok(output_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_paths_is_an_error_not_a_silent_no_op() {
+        let err = single_path_shortcut(&[]).unwrap_err();
+        assert!(err.contains("No clips to join"), "{err}");
+    }
+
+    #[test]
+    fn a_single_path_short_circuits_without_touching_ffmpeg() {
+        let result = single_path_shortcut(&["only.mp4".to_string()]).unwrap();
+        assert_eq!(result, Some("only.mp4".to_string()));
+    }
+
+    #[test]
+    fn two_or_more_paths_proceed_to_the_real_join() {
+        let result =
+            single_path_shortcut(&["a.mp4".to_string(), "b.mp4".to_string()]).unwrap();
+        assert_eq!(result, None);
+    }
 }

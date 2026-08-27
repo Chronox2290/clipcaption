@@ -212,7 +212,7 @@ fn post_to_discord(
     app: AppHandle,
     jobs: State<Jobs>,
     webhook_url: String,
-    file_path: String,
+    file_path: Option<String>,
     message: Option<String>,
 ) -> Result<String, String> {
     let (id, handle) = jobs.create("discord");
@@ -235,6 +235,14 @@ fn build_montage(
         montage::run(app, job_id, handle, req);
     });
     Ok(id)
+}
+
+/// Synchronous - the concat-demuxer join is a `-c copy` stream copy, fast
+/// enough (a handful of already-short batch clips) not to need its own job
+/// progress channel like the other export paths.
+#[tauri::command]
+fn concat_clips(app: AppHandle, job_id: String, paths: Vec<String>) -> Result<String, String> {
+    montage::concat_existing(&app, &job_id, paths)
 }
 
 #[tauri::command]
@@ -351,6 +359,7 @@ pub fn run() {
             transcribe,
             export_video,
             build_montage,
+            concat_clips,
             build_demo,
             start_watch_folder,
             post_to_discord,

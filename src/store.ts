@@ -81,6 +81,18 @@ function waitForJob(
 let currentBatchJobId: string | null = null;
 let batchCancelRequested = false;
 
+// End-of-session Discord digest (watch-folder mode only - see runFileBatch).
+// Batch items already rolled into a previous digest, so a long watch session
+// that drains and refills its queue many times doesn't re-report the same
+// clip. Session-only, deliberately not persisted - a restart naturally
+// starts a fresh session to summarize.
+const digestedBatchIds = new Set<string>();
+// Debounces the digest: fires a while after the queue goes quiet, cancelled
+// if more work shows up first, so one clip trickling in every few minutes
+// doesn't produce a Discord message per clip.
+let digestTimer: ReturnType<typeof setTimeout> | null = null;
+const DIGEST_IDLE_MS = 90_000;
+
 // The live Update handle from @tauri-apps/plugin-updater, once a check finds
 // one. It carries a downloadAndInstall() method and isn't plain data, so —
 // same reasoning as pendingJobs above — it lives outside the store instead of
@@ -248,7 +260,19 @@ interface AppState {
    * not itself a confirmation step. */
   autoPostToDiscord: boolean;
   setAutoPostToDiscord: (v: boolean) => void;
-  postToDiscord: (filePath: string, message?: string) => Promise<void>;
+  postToDiscord: (filePath: string | null, message?: string) => Promise<void>;
+  /** Whether an idle watch-folder session posts an end-of-session digest to
+   * discordWebhook - "12 clips processed, 3 compiled into tonight's reel, 2
+   * flagged for review" - once the queue's gone quiet for a while. Distinct
+   * from autoPostToDiscord (per-clip), since watching this fire on every
+   * single clip during an active session would be noise, not a digest. */
+  autoDigestOnBatch: boolean;
+  setAutoDigestOnBatch: (v: boolean) => void;
+  /** Internal - posts the digest for whatever's accumulated in batchItems
+   * since the last one and marks it reported. Not called from the UI
+   * directly; runFileBatch schedules it (debounced) and stopWatchFolder
+   * flushes it immediately on an explicit stop. */
+  runBatchDigest: () => Promise<void>;
 
   // models
   models: ModelInfo[];
@@ -418,7 +442,8 @@ interface AppState {
     customMb: number,
     outputDir: string | null,
     resolutionId?: string,
-    fitMode?: "fill" | "fit"
+    fitMode?: "fill" | "fit",
+    isWatchSession?: boolean
   ) => Promise<void>;
   cancelFileBatch: () => void;
   clearError: () => void;
@@ -814,6 +839,7 @@ export const useApp = create<AppState>((set, get) => ({
   translateJob: null,
   discordWebhook: localStorage.getItem("cc.discordWebhook") ?? "",
   autoPostToDiscord: localStorage.getItem("cc.autoPostDiscord") === "1",
+  autoDigestOnBatch: localStorage.getItem("cc.autoDigestOnBatch") === "1",
   models: [],
   selectedModel: localStorage.getItem("cc.model") ?? "large-v3-turbo",
   vocabulary: localStorage.getItem("cc.vocabulary") ?? "",
@@ -1100,7 +1126,7 @@ export const useApp = create<AppState>((set, get) => ({
       // own - only need to actually START a run when nothing's already
       // going.
       if (!get().batchRunning) {
-        void get().runFileBatch("original", 25, null, "source", "fill");
+        void get().runFileBatch("original", 25, null, "source", "fill", true);
       }
     });
     await get().refreshModels();
@@ -1960,6 +1986,11 @@ export const useApp = create<AppState>((set, get) => ({
     set({ autoPostToDiscord: v });
   },
 
+  setAutoDigestOnBatch: (v) => {
+    localStorage.setItem("cc.autoDigestOnBatch", v ? "1" : "0");
+    set({ autoDigestOnBatch: v });
+  },
+
   generateMetadata: async () => {
     const { segments, speakerEmbeddings, speakerProfiles } = get();
     if (!segments.length) {
@@ -2084,6 +2115,49 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
+  runBatchDigest: async () => {
+    if (digestTimer) {
+      clearTimeout(digestTimer);
+      digestTimer = null;
+    }
+    const { batchItems, discordWebhook, autoDigestOnBatch } = get();
+    if (!autoDigestOnBatch || !discordWebhook) return;
+    const fresh = batchItems.filter(
+      (i) =>
+        !digestedBatchIds.has(i.id) &&
+        (i.status === "done" || i.status === "error" || i.status === "needs_review")
+    );
+    if (fresh.length === 0) return;
+    for (const i of fresh) digestedBatchIds.add(i.id);
+
+    const done = fresh.filter((i) => i.status === "done" && i.output);
+    const erroredCount = fresh.filter((i) => i.status === "error").length;
+    const needsReviewCount = fresh.filter((i) => i.status === "needs_review").length;
+
+    let reelPath: string | null = null;
+    if (done.length > 0) {
+      try {
+        reelPath = await invoke<string>("concat_clips", {
+          jobId: `digest-${Date.now()}`,
+          paths: done.map((i) => i.output!),
+        });
+      } catch {
+        // Couldn't join (e.g. these clips ended up with mismatched codec
+        // params from a mid-session settings change) - still worth sending
+        // the text summary rather than losing the whole digest over the
+        // reel step failing. The clips themselves are already saved locally
+        // either way.
+        reelPath = null;
+      }
+    }
+
+    const parts = [`${fresh.length} clip${fresh.length === 1 ? "" : "s"} processed`];
+    if (done.length > 0) parts.push(`${done.length} compiled into tonight's reel`);
+    if (needsReviewCount > 0) parts.push(`${needsReviewCount} flagged for review`);
+    if (erroredCount > 0) parts.push(`${erroredCount} failed`);
+    void get().postToDiscord(reelPath, parts.join(", ") + ".");
+  },
+
   buildMontage: async (clips, outputPath, presetId, resolutionId, fitMode) => {
     if (clips.length === 0) return;
     const preset = getExportPreset(presetId);
@@ -2178,6 +2252,12 @@ export const useApp = create<AppState>((set, get) => ({
     const id = get().watchFolderJobId;
     if (id) void get().cancelJob(id);
     set({ watching: false, watchFolderJobId: null });
+    // An explicit stop is a clear session-end signal - don't make the user
+    // wait out the idle debounce for a digest covering whatever's already
+    // finished. Anything still mid-flight when they hit stop is still
+    // finishing (this doesn't cancel the batch loop itself) and gets
+    // covered by that run's own end-of-loop digest once it completes.
+    void get().runBatchDigest();
   },
 
   removeBatchItem: (id) =>
@@ -2201,7 +2281,14 @@ export const useApp = create<AppState>((set, get) => ({
    * Process every queued clip: transcribe whole clip -> style captions ->
    * export with the chosen preset. Continues past per-file failures.
    */
-  runFileBatch: async (presetId, customMb, outputDir, resolutionId = "source", fitMode = "fill") => {
+  runFileBatch: async (
+    presetId,
+    customMb,
+    outputDir,
+    resolutionId = "source",
+    fitMode = "fill",
+    isWatchSession = false
+  ) => {
     const { selectedModel } = get();
     const preset = getExportPreset(presetId);
     const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
@@ -2372,6 +2459,19 @@ export const useApp = create<AppState>((set, get) => ({
     }
 
     set({ batchRunning: false });
+
+    // Watch-folder sessions run unattended and can drain-then-refill many
+    // times as clips trickle in one at a time - debounce so the digest
+    // fires once the queue's actually gone quiet, not once per clip.
+    // Explicitly not scheduled for a manual "Process N clips" run: the user
+    // is already watching that queue, a Discord digest would be redundant.
+    if (isWatchSession) {
+      if (digestTimer) clearTimeout(digestTimer);
+      digestTimer = setTimeout(() => {
+        digestTimer = null;
+        void get().runBatchDigest();
+      }, DIGEST_IDLE_MS);
+    }
   },
 
   cancelFileBatch: () => {
