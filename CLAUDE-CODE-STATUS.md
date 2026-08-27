@@ -1,9 +1,31 @@
 # ClipCaption — status summary
 
 Plain-language write-up of what's changed recently and where things stand. Current as of
-**2026-08-27**, commit `64c187d`. Everything below "New since v0.2.10" was built in one long session
+**2026-08-28**, commit `3b91d58`. Everything below "New since v0.2.10" was built in one long session
 after the v0.2.10 draft release described further down — that release note is kept as-is since it's
 still an accurate record of what shipped in it, not because it's the latest state.
+
+**2026-08-28 correction — the "New since v0.2.10" list below is missing a whole chunk of already-shipped
+work.** Picking this session back up, `CLAUDE-CODE-BRIEF.md`'s "Priority build order" section (montage
+builder, tiered auto-apply, death detector, Discord webhook, confidence-gated auto-export) was listed
+as **not yet done** — flatly contradicted by commit `0fd3587` ("Add montage builder, Discord webhook
+auto-post, experimental death detector"), which is already on this branch, plus `d163267`/`8d5c227`
+(tiered auto-cleanup, confidence-gated auto-export) also already shipped. Verified directly against the
+code, not just commit messages, before writing this: `src-tauri/src/montage.rs` +
+`src/screens/Montage.tsx` (full multi-project montage builder, reachable from the Library screen),
+`src-tauri/src/discord.rs` (webhook post, already wired to both single export and montage completion),
+`src/lib/deathDetector.ts` (a real but explicitly `EXPERIMENTAL, unvalidated` regex-based transcript
+scan — genuinely still needs the refinement/validation Tier 1 calls for, that part of the brief was
+accurate). So: **this whole section undercounts what's shipped.** Rather than rewrite it retroactively,
+leaving it as-is (matching this file's own stated policy of not rewriting past entries) and correcting
+forward from here. Bottom line for whoever reads this next: **trust the actual code and `git log` over
+either planning doc's "not yet done" framing** for anything in the priority-build-order or backlog
+sections — both docs had drifted out of sync with a chunk of real shipped work, presumably from an
+earlier reconciliation gap between concurrent sessions (see CLAUDE.md's note about that happening
+before, 2026-08-24). Real, still-outstanding gaps found on this same pass: the montage builder only
+pulls from manually-picked `.ccproj` files (no watch-folder/batch auto-hookup, no target-file-size limit
+on the final joined output); the death detector is real but unvalidated against any real labeled death
+moment. Both are being worked next, see below.
 
 ## New since v0.2.10 (this session)
 

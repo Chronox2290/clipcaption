@@ -179,29 +179,31 @@ it doesn't get chased as a bug later.
 
 ## Priority build order after that
 
+**2026-08-28: all five items below are already shipped — re-verified directly against the code, not
+just commit messages, before writing this note.** This list was stale (see `CLAUDE-CODE-STATUS.md`'s
+2026-08-28 entry for the full correction). Keeping the original text below as a record of what was
+asked for, with each item's actual location noted inline, rather than deleting it.
+
 The north star: the whole pipeline — record → find the good moments → transcribe → collate →
 share — should need as close to zero manual editing as possible. Manual editing should be the
 override you reach for occasionally, not the default path every clip goes through.
 
-1. **A compilation/montage builder.** Doesn't exist yet at all. Stitches the top highlights into one
-   shareable reel — the actual missing piece that turns "a folder of individually-captioned clips"
-   into "the thing that was wanted," not a nice-to-have layered on later.
-2. **Tiered auto-apply for the transcript cleanup pass.** It currently queues every flagged word for
-   manual accept/skip, on purpose, as a safety valve. Worth revisiting as tiered: auto-apply the
-   cases the model is very confident about and there's really only one sane fix, only queue the
-   genuinely ambiguous ones for a human.
-3. **A dedicated "death" detector**, separate from the general highlight scan. Death sounds/messages
-   are a far more consistent signal across games than general hype detection — a more tractable win
-   than trying to make the general scan smarter all at once.
-4. **Discord auto-publish via webhook.** Paste a webhook URL into settings, finished clip posts
-   straight to the channel automatically. No approval process, no hosting requirement — the easy
-   version of "share it," as opposed to Instagram (see below).
-5. **Confidence-gated auto-export, once #2 exists.** Take tiered auto-cleanup one step further: a
-   clip where every flagged word cleared automatically — nothing needed a human — can skip the
-   editor screen entirely and go straight to compiled/exported/shared. Only clips with genuinely
-   ambiguous words stop for review. This is the actual "as close to zero manual editing as possible"
-   outcome, not just a faster editing screen — worth building as the natural next step after tiered
-   cleanup lands, not a separate project.
+1. **A compilation/montage builder.** ✅ Done — `src-tauri/src/montage.rs` + `src/screens/Montage.tsx`.
+   Pulls highlights from several manually-picked `.ccproj` files, lets you tick/reorder, renders each
+   clip independently then concat-joins. **Real gap still open:** no watch-folder/batch pipeline
+   auto-hookup (nothing builds a montage automatically at the end of a batch run), and no target-file-size
+   limit on the final joined output (quality-only). Worth closing both, not a full rebuild.
+2. **Tiered auto-apply for the transcript cleanup pass.** ✅ Done — `d163267`.
+3. **A dedicated "death" detector**, separate from the general highlight scan. ✅ Done, but
+   **explicitly marked `EXPERIMENTAL, unvalidated`** in the code itself (`src/lib/deathDetector.ts`) —
+   a keyword/phrase regex scan over the transcript, never measured against real labeled death moments
+   the way the loudness scan and DTW timing fix were. This is the one item on this list with genuine
+   remaining work: validate it against real footage (find or create a ground-truth clip with confirmed
+   deaths) and tune the false-positive/negative rate, the same rigor already applied to every other
+   accuracy claim in this project.
+4. **Discord auto-publish via webhook.** ✅ Done — `src-tauri/src/discord.rs`, wired to both single
+   export and montage completion via an "auto-post to Discord" toggle.
+5. **Confidence-gated auto-export.** ✅ Done — `8d5c227`.
 
 **Cross-cutting, not a queued item — bake this into all four above as they're built:** the pipeline
 is gaining stages (detect → transcribe → clean up → collate → share), and each one needs to fail
