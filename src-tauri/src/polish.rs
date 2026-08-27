@@ -332,6 +332,131 @@ impl Server {
     }
 }
 
+// ---------------- caption translation ----------------
+//
+// "Translating/displaying captions in a language other than what's spoken"
+// (brief) - a third, separate use of the same local model. Deliberately
+// SEGMENT-level, not per-word like the correction pass above: a
+// translation has a different word count and order than the source, so
+// there is no honest per-word mapping to preserve. The frontend re-times
+// the translated text evenly across each segment's original [start,end]
+// span (distributeWordTimes, already used for hand-typed captions) rather
+// than this module inventing fake per-word timestamps - keeps the "Rust
+// never touches segments directly" split intact.
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateSegment {
+    pub id: String,
+    pub text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslateRequest {
+    pub segments: Vec<TranslateSegment>,
+    pub target_language: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslatedSegment {
+    pub id: String,
+    pub text: String,
+}
+
+pub fn translate(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: TranslateRequest) {
+    let stage = "translating";
+    let result = translate_inner(&app, &job_id, &handle, &req);
+    match result {
+        Ok(json) => emit_done(&app, &job_id, stage, Some(json)),
+        Err(e) => {
+            if handle.is_cancelled() {
+                emit_error(&app, &job_id, stage, "Cancelled".into());
+            } else {
+                emit_error(&app, &job_id, stage, e);
+            }
+        }
+    }
+}
+
+fn translate_inner(
+    app: &AppHandle,
+    job_id: &str,
+    handle: &Arc<JobHandle>,
+    req: &TranslateRequest,
+) -> Result<String, String> {
+    if req.segments.is_empty() {
+        return serde_json::to_string(&Vec::<TranslatedSegment>::new()).map_err(|e| e.to_string());
+    }
+    let server = start(app).ok_or_else(|| {
+        "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it."
+            .to_string()
+    })?;
+
+    let total = req.segments.len();
+    let mut out = Vec::with_capacity(total);
+    for (i, seg) in req.segments.iter().enumerate() {
+        if handle.is_cancelled() {
+            return Err("Cancelled".into());
+        }
+        // A failed line falls back to its own original text rather than
+        // dropping out of the transcript - a mixed-language caption line is
+        // recoverable (retry, or leave it); a missing one silently breaks
+        // the timeline.
+        let text = server
+            .translate_line(&seg.text, &req.target_language)
+            .unwrap_or_else(|| seg.text.clone());
+        out.push(TranslatedSegment { id: seg.id.clone(), text });
+        emit_progress(app, job_id, "translating", (i + 1) as f32 / total as f32, None);
+    }
+    serde_json::to_string(&out).map_err(|e| e.to_string())
+}
+
+impl Server {
+    fn translate_line(&self, text: &str, target_language: &str) -> Option<String> {
+        if text.trim().is_empty() {
+            return Some(String::new());
+        }
+        let system = format!(
+            "You translate short lines of spoken dialogue from a video game session into {target_language}. Reply with ONLY the translation, nothing else - no quotes, no explanation, no original text."
+        );
+        let body = ChatRequest {
+            messages: vec![ChatMessage::system(&system), ChatMessage::user(text)],
+            temperature: 0.2,
+            max_tokens: 200,
+            cache_prompt: true,
+            logprobs: false,
+            top_logprobs: None,
+        };
+        let resp: ChatResponse = self
+            .client
+            .post(format!(
+                "http://127.0.0.1:{}/v1/chat/completions",
+                self.port
+            ))
+            .json(&body)
+            .send()
+            .ok()?
+            .json()
+            .ok()?;
+        let out = resp
+            .choices
+            .into_iter()
+            .next()?
+            .message
+            .content
+            .trim()
+            .trim_matches(['"', '\u{201c}', '\u{201d}'])
+            .to_string();
+        if out.is_empty() {
+            None
+        } else {
+            Some(out)
+        }
+    }
+}
+
 /// Parses the TITLE/HOOK/HASHTAGS format asked for above. Line-prefix
 /// matching (not a rigid line-position assumption) so a model that adds a
 /// blank line or reorders slightly still parses, rather than a strict

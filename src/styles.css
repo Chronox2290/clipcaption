@@ -1016,8 +1016,24 @@ kbd {
 .transcript-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 .transcript-actions .btn {
+  flex: 1;
+}
+.translate-control {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 100%;
+}
+.translate-control select {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--bg0);
+  color: inherit;
+  padding: 0 8px;
+}
+.translate-control .btn {
   flex: 1;
 }
 

@@ -229,6 +229,14 @@ interface AppState {
    * side by side - see src-tauri/src/demo.rs. Caller resolves the save path
    * (same division of labor as buildMontage/compileSelectedHighlights). */
   buildDemo: (outputPath: string) => Promise<void>;
+  translateJob: JobState | null;
+  /** Replaces every segment's words with a machine translation into
+   * `targetLanguage`, re-timed evenly across each segment's own original
+   * [start,end] span (see distributeWordTimes) since a translation has no
+   * honest per-word mapping to the source audio. Pushes undo history first
+   * - fully reversible via the normal Undo button, which is also how you
+   * get back to the original language. */
+  translateTranscript: (targetLanguage: string) => Promise<void>;
   /** Persisted webhook URL for "post finished export to Discord" - a
    * channel's own Integrations settings gives you one, no bot setup. Empty
    * means the feature is simply unused (Export never shows the checkbox). */
@@ -803,6 +811,7 @@ export const useApp = create<AppState>((set, get) => ({
   metadataJob: null,
   clipMetadata: null,
   demoJob: null,
+  translateJob: null,
   discordWebhook: localStorage.getItem("cc.discordWebhook") ?? "",
   autoPostToDiscord: localStorage.getItem("cc.autoPostDiscord") === "1",
   models: [],
@@ -869,7 +878,7 @@ export const useApp = create<AppState>((set, get) => ({
       }
 
       // 2) jobs tracked in UI state
-      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob, montageJob, discordJob, metadataJob, demoJob } = get();
+      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob, montageJob, discordJob, metadataJob, demoJob, translateJob } = get();
       const patch = (
         job: JobState | null,
         key:
@@ -884,6 +893,7 @@ export const useApp = create<AppState>((set, get) => ({
           | "discordJob"
           | "metadataJob"
           | "demoJob"
+          | "translateJob"
       ) => {
         if (!job || job.id !== p.id) return false;
         if (p.error) {
@@ -939,6 +949,23 @@ export const useApp = create<AppState>((set, get) => ({
             set({ discordJob: null });
           } else if (key === "demoJob") {
             set({ demoJob: null, exportDone: p.result ?? null });
+          } else if (key === "translateJob" && p.result) {
+            try {
+              const translated = JSON.parse(p.result) as { id: string; text: string }[];
+              const byId = new Map(translated.map((t) => [t.id, t.text]));
+              const segments = get().segments.map((seg) => {
+                const text = byId.get(seg.id);
+                if (text == null) return seg;
+                const tokens = text.trim().split(/\s+/).filter(Boolean);
+                const s0 = seg.words[0]?.start ?? 0;
+                const e0 = seg.words[seg.words.length - 1]?.end ?? s0 + 1;
+                const words = tokens.length ? distributeWordTimes(tokens, s0, e0) : seg.words;
+                return { ...seg, words };
+              });
+              set({ translateJob: null, segments });
+            } catch {
+              set({ translateJob: null, error: "Failed to parse translated transcript" });
+            }
           } else if (key === "metadataJob" && p.result) {
             try {
               const clipMetadata = JSON.parse(p.result) as ClipMetadata;
@@ -1049,6 +1076,7 @@ export const useApp = create<AppState>((set, get) => ({
         patch(discordJob, "discordJob") ||
         patch(metadataJob, "metadataJob") ||
         patch(demoJob, "demoJob") ||
+        patch(translateJob, "translateJob") ||
         patch(modelJob, "modelJob");
     });
     await listenWatchFolderFile(({ jobId, path }) => {
@@ -1992,6 +2020,24 @@ export const useApp = create<AppState>((set, get) => ({
         },
       });
       set({ demoJob: { id, stage: "demo", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  translateTranscript: async (targetLanguage) => {
+    const { segments } = get();
+    if (!segments.length) return;
+    get().pushHistory();
+    try {
+      set({ error: null });
+      const id = await invoke<string>("translate_transcript", {
+        req: {
+          segments: segments.map((s) => ({ id: s.id, text: s.words.map((w) => w.text).join(" ") })),
+          targetLanguage,
+        },
+      });
+      set({ translateJob: { id, stage: "translating", progress: 0 } });
     } catch (e) {
       set({ error: String(e) });
     }

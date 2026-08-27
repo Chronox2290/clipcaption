@@ -46,6 +46,9 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const audioTracks = useApp((s) => s.audioTracks);
   const selectedAudioTrack = useApp((s) => s.selectedAudioTrack);
   const setSelectedAudioTrack = useApp((s) => s.setSelectedAudioTrack);
+  const translateJob = useApp((s) => s.translateJob);
+  const translateTranscript = useApp((s) => s.translateTranscript);
+  const [translateLanguage, setTranslateLanguage] = useState("Spanish");
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);
   const setSpeakerName = useApp((s) => s.setSpeakerName);
@@ -424,6 +427,43 @@ export default function TranscriptPanel({ videoRef }: Props) {
               ? `⬇ Downloading alignment model… ${Math.round((modelJob.progress ?? 0) * 100)}%`
               : "⬇ Get timing alignment (~360MB)"}
           </button>
+        )}
+        {polishAvailable && (
+          <span className="translate-control">
+            <select
+              value={translateLanguage}
+              onChange={(e) => setTranslateLanguage(e.target.value)}
+              disabled={!!translateJob}
+              title="Replaces the transcript's text with a machine translation, re-timed evenly across each line's original span. Fully undoable - Undo gets the original language back."
+            >
+              {[
+                "Spanish",
+                "French",
+                "German",
+                "Portuguese",
+                "Italian",
+                "Japanese",
+                "Korean",
+                "Chinese (Simplified)",
+                "Russian",
+                "Arabic",
+                "Hindi",
+              ].map((lang) => (
+                <option key={lang} value={lang}>
+                  {lang}
+                </option>
+              ))}
+            </select>
+            <button
+              className="btn btn-ghost"
+              onClick={() => void translateTranscript(translateLanguage)}
+              disabled={!!translateJob || segments.length === 0}
+            >
+              {translateJob
+                ? `🌐 Translating… ${Math.round((translateJob.progress ?? 0) * 100)}%`
+                : "🌐 Translate captions"}
+            </button>
+          </span>
         )}
       </div>
 

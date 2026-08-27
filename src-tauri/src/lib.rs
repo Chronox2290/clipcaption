@@ -139,6 +139,20 @@ fn record_phrase_correction(app: AppHandle, original: String, corrected: String)
 }
 
 #[tauri::command]
+fn translate_transcript(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    req: polish::TranslateRequest,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("translate");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        polish::translate(app, job_id, handle, req);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
 fn generate_metadata(
     app: AppHandle,
     jobs: State<Jobs>,
@@ -350,6 +364,7 @@ pub fn run() {
             polish_transcript,
             record_phrase_correction,
             generate_metadata,
+            translate_transcript,
             align_transcript
         ])
         .run(tauri::generate_context!())
