@@ -103,6 +103,35 @@ numbers (word accuracy, timing accuracy), not one blended figure:**
 See `CLAUDE-CODE-BRIEF.md`'s dated 2026-08-27 entries for the full reasoning and numbers behind each
 of the accuracy findings above.
 
+## New, 2026-08-28
+
+**End-of-session Discord digest for watch-folder runs.** The brief's own "bonus, not scoped" idea
+("12 clips processed automatically, 3 compiled into tonight's reel, 2 flagged for your review") —
+built for real. A watch-folder session that goes quiet for 90s (or is explicitly stopped) posts one
+summary to the same Discord webhook already used for auto-post: clip count, a compiled reel of
+everything that finished this session (plain concat-demuxer join of the batch's own already-exported
+outputs — no re-render, since one batch run always shares one export preset), and how many were
+flagged for review or failed. Debounced so a session where clips trickle in one at a time doesn't spam
+a message per clip. Deliberately scoped to watch-folder runs only, not manual "Process N clips" runs —
+the user is already looking at that queue in the UI, a Discord ping would be redundant. Discord's
+`post_to_discord` now takes an optional file path so a run where nothing succeeded can still post a
+text-only digest instead of being silently skipped. New toggle in the batch screen, off by default,
+only shown once a webhook is configured. Verified: full Rust test suite (79 passing incl. 5 new tests
+for the digest/text-only-post logic), `tsc`/`vite build` clean, and the actual concat-demuxer command
+run for real against two synthetic clips (confirmed the joined output's duration and both streams are
+correct) — not just assumed from montage.rs's existing working code path it's reused from.
+
+**Correction to the 2026-08-27 numbered priority list** — see `CLAUDE-CODE-BRIEF.md`'s 2026-08-28 note:
+the montage builder, Discord webhook, tiered auto-apply, confidence-gated auto-export, and the death
+detector were already shipped before this session started (commit `0fd3587` and others) — the planning
+docs had drifted out of sync with the actual code. Corrected forward rather than rewritten
+retroactively; see the note there for what's real vs. what was stale. The montage builder's one real
+gap (no watch-folder/batch pipeline hookup) is what "end-of-session digest" above actually closes, just
+via a lighter-weight plain concat rather than routing through montage.rs's per-clip re-render pipeline
+(unnecessary here — a batch run's outputs are already captioned/exported and share one preset's codec
+settings, so there's nothing to re-render). The montage builder's other named gap — no target-file-size
+limit on the final joined output — is still open, next up.
+
 ## What ClipCaption is
 
 A Windows desktop app that auto-captions and compresses game clips — built for recording co-op
