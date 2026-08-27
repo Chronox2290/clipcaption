@@ -14,7 +14,7 @@ still an accurate record of what shipped in it, not because it's the latest stat
   screen). Also added a second, more visible "Open Project…" button directly in the editor's header.
 
 **Everything from the brief's "rest of the backlog" section, per an explicit "build all of it"
-instruction — 11 of 13 items, each with real tests or a real functional smoke test against the
+instruction — all 13 items, each with real tests or a real functional smoke test against the
 actual bundled tools before being called done, not just a type-check:**
 - **Confidence-gated auto-export** and **tiered auto-cleanup** — a clip where the AI cleanup pass
   found nothing to flag skips the editor entirely and goes straight to export; one with genuinely
@@ -44,7 +44,15 @@ actual bundled tools before being called done, not just a type-check:**
   as a preview overlay only.
 - **Thumbnail auto-picker** — grabs the frame at a highlight's own loudness-peak moment as a
   one-click thumbnail.
-- Not done: **multi-language caption translation**, **OBS watch-folder background service**.
+- **Multi-language caption translation** — same local model translates the transcript into a target
+  language, re-timed evenly across each line's original span (a translation has no honest per-word
+  mapping to the source audio); fully undoable, same Undo button as any other transcript edit.
+  Verified real translation quality against the actual model (Spanish, Korean) and confirmed the
+  existing caption fonts already render non-Latin scripts correctly via libass's automatic font
+  fallback (Segoe UI → Malgun Gothic for Korean glyphs) - no font-stack changes needed.
+- **OBS watch-folder background service** — point it at OBS's recording folder and every new clip
+  gets captioned + exported automatically via the existing batch pipeline, no manual step. Per
+  CLAUDE.md's Tier 0 framing, this was the single biggest lever left for "runs unattended."
 
 **Transcription accuracy — measured against the real ground-truth clip, tracked as two separate
 numbers (word accuracy, timing accuracy), not one blended figure:**
@@ -168,9 +176,6 @@ reassign it, keyboard shortcuts for frame-accurate nudging, and full undo/redo.
   v0.2.10" above.
 - **Voice/game audio separation, Case B** (single mixed-down recording, via Spleeter) — the biggest
   remaining transcription-accuracy lever, needs a bundled-dependency decision before starting.
-- **Batch/watch-folder ingestion as a true background service** — batch processing of a folder
-  exists; the "runs unattended, watches for new files with no manual step" version does not yet.
-- **Multi-language caption translation** — not started.
 - **Multi-select and a "razor" cut tool** on the timeline — currently one word or line at a time.
 - Automatically collapsing whisper's occasional stuttering repeats ("go, go, go, go, go") — not
   done; confirmed the AI cleanup pass won't touch these safely, so it needs its own simple check.
