@@ -36,6 +36,8 @@ export default function HighlightsPanel({ videoRef }: Props) {
     removeHighlight,
     adjustHighlightRange,
     setClipName,
+    highlightVotes,
+    rateHighlight,
     batch,
     exportSelectedHighlights,
     compileSelectedHighlights,
@@ -312,6 +314,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
                     {fmtTime(range.start)} – {fmtTime(range.end)}
                     <span className="muted"> · {(range.end - range.start).toFixed(0)}s</span>
                     {isAdjusted && <span className="hl-adjusted"> · trimmed</span>}
+                    {h.reason && <span className="hl-reason"> · {h.reason}</span>}
                   </div>
                   <div className="hl-score">
                     <div
@@ -320,6 +323,26 @@ export default function HighlightsPanel({ videoRef }: Props) {
                     />
                   </div>
                 </div>
+                {h.peakZ != null && (
+                  <div className="hl-vote">
+                    <button
+                      className={`btn btn-ghost btn-small ${highlightVotes[h.rank] === 1 ? "hl-voted-up" : ""}`}
+                      title="Good pick — see more like this"
+                      disabled={!!highlightVotes[h.rank]}
+                      onClick={() => void rateHighlight(h.rank, 1)}
+                    >
+                      <Icon name="thumbUp" size={12} />
+                    </button>
+                    <button
+                      className={`btn btn-ghost btn-small ${highlightVotes[h.rank] === -1 ? "hl-voted-down" : ""}`}
+                      title="Not a highlight — see fewer like this"
+                      disabled={!!highlightVotes[h.rank]}
+                      onClick={() => void rateHighlight(h.rank, -1)}
+                    >
+                      <Icon name="thumbDown" size={12} />
+                    </button>
+                  </div>
+                )}
                 <button
                   className="btn btn-ghost btn-small"
                   title="Preview: play just this clip, stops at its end"

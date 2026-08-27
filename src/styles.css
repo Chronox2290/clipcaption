@@ -1607,6 +1607,23 @@ kbd {
 .hl-adjusted {
   color: var(--accent2);
 }
+.hl-reason {
+  color: var(--muted);
+}
+.hl-vote {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+.hl-vote .btn:disabled {
+  opacity: 0.55;
+}
+.hl-voted-up {
+  color: var(--good, #3ddc84);
+}
+.hl-voted-down {
+  color: var(--warn, #ff8a5b);
+}
 .hl-edit {
   display: flex;
   flex-direction: column;

@@ -139,6 +139,11 @@ interface AppState {
 
   // highlights
   highlights: Highlight[];
+  /** How the user rated a highlight this session (by rank), so the vote
+   * buttons show which way you already voted and can't double-count -
+   * cleared whenever a fresh scan replaces the highlight list. */
+  highlightVotes: Record<number, 1 | -1>;
+  rateHighlight: (rank: number, vote: 1 | -1) => Promise<void>;
   analyzeJob: JobState | null;
   polishJob: JobState | null;
   /** Downloading the (large, optional) cleanup model - a separate slot from
@@ -664,6 +669,7 @@ export const useApp = create<AppState>((set, get) => ({
   tuningWord: null,
   style: getPreset("beast"),
   highlights: [],
+  highlightVotes: {},
   analyzeJob: null,
   polishJob: null,
   polishModelJob: null,
@@ -882,6 +888,10 @@ export const useApp = create<AppState>((set, get) => ({
                 clipOverrides,
                 clipNames,
                 editingRank: null,
+                // Old votes referenced ranks from the replaced list - keeping
+                // them risks a stale vote silently landing on an unrelated
+                // clip that happens to reuse the same rank number.
+                highlightVotes: {},
               });
             } catch {
               set({ analyzeJob: null, error: "Failed to parse highlights" });
@@ -1267,6 +1277,30 @@ export const useApp = create<AppState>((set, get) => ({
       editingRank: wasEditing ? null : editingRank,
       activeRange: wasEditing ? null : activeRange,
     });
+  },
+
+  /** One vote per highlight per session (see highlightVotes) - feeds the
+   * bucket the clip's own peak_z/duration falls into (see
+   * analyze::record_feedback), nudging that bucket's score for every
+   * future scan. Fire-and-forget: a clip that was already voted on, or
+   * that has no peakZ (hand-marked/death-detected, not from the loudness
+   * scan), is a no-op rather than an error - there's nothing to attribute
+   * the vote to. */
+  rateHighlight: async (rank, vote) => {
+    const { highlights, highlightVotes } = get();
+    if (highlightVotes[rank]) return;
+    const h = highlights.find((x) => x.rank === rank);
+    if (!h || h.peakZ == null) return;
+    set({ highlightVotes: { ...highlightVotes, [rank]: vote } });
+    try {
+      await invoke("record_highlight_feedback", {
+        peakZ: h.peakZ,
+        durationSec: h.end - h.start,
+        vote,
+      });
+    } catch (e) {
+      set({ error: String(e) });
+    }
   },
 
   /** Open a highlight's range for manual extend/trim; auto-includes it in the export selection. */

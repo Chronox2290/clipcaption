@@ -31,7 +31,9 @@ export type IconName =
   | "mask"
   | "fire"
   | "refresh"
-  | "film";
+  | "film"
+  | "thumbUp"
+  | "thumbDown";
 
 const PATHS: Record<IconName, string> = {
   play: "M6 4l14 8-14 8V4z",
@@ -53,6 +55,8 @@ const PATHS: Record<IconName, string> = {
   fire: "M12 2s5 4.5 5 9.5a5 5 0 01-10 0c0-1 .3-2 .8-2.8.6 1 1.7 1.8 2.7 1.3-.5-2 .5-4 1.5-5",
   refresh: "M4 4v5h5M20 20v-5h-5M4.5 15a8 8 0 0014.5 3.5M19.5 9A8 8 0 005 5.5",
   film: "M4 4h16v16H4V4zM4 9h16M4 15h16M8 4v16M16 4v16",
+  thumbUp: "M7 11v9H4a1 1 0 01-1-1v-7a1 1 0 011-1h3zM7 11l3.5-7a2 2 0 013.6 1.2L13 9h5a2 2 0 012 2.3l-1.5 7A2 2 0 0116.6 20H10a3 3 0 01-3-3v-6z",
+  thumbDown: "M17 13V4h3a1 1 0 011 1v7a1 1 0 01-1 1h-3zM17 13l-3.5 7a2 2 0 01-3.6-1.2L11 15H6a2 2 0 01-2-2.3l1.5-7A2 2 0 017.4 4H14a3 3 0 013 3v6z",
 };
 
 export function Icon({

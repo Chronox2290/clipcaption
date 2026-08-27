@@ -152,6 +152,16 @@ fn analyze_highlights(
 }
 
 #[tauri::command]
+fn record_highlight_feedback(
+    app: AppHandle,
+    peak_z: f64,
+    duration_sec: f64,
+    vote: i32,
+) -> Result<(), String> {
+    analyze::record_feedback(&app, peak_z, duration_sec, vote)
+}
+
+#[tauri::command]
 fn export_video(
     app: AppHandle,
     jobs: State<Jobs>,
@@ -265,6 +275,7 @@ pub fn run() {
             probe_video,
             prepare_preview,
             analyze_highlights,
+            record_highlight_feedback,
             list_videos,
             detect_encoders,
             list_models,

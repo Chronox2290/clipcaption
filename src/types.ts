@@ -253,6 +253,16 @@ export interface Highlight {
    * so it's offered as a distinctly-badged, opt-in experimental pass rather
    * than folded into the main scan silently. */
   death?: boolean;
+  /** Plain-language "why this clip" tag from the loudness scan (see
+   * analyze::describe_region in src-tauri/src/analyze.rs) - e.g. "Sudden
+   * burst · loud". Absent on manually-marked and death-detected clips,
+   * which already carry their own reason via `manual`/`death`. */
+  reason?: string;
+  /** The loudness scan's raw excitement z-score for this clip's peak
+   * moment - kept alongside `reason` so a thumbs up/down vote (see
+   * rateHighlight in store.ts) can tell the backend exactly which
+   * detection bucket to nudge, without re-deriving it from score. */
+  peakZ?: number;
 }
 
 /** One clip in the multi-file batch queue. */
