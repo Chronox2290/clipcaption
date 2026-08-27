@@ -69,9 +69,14 @@ numbers (word accuracy, timing accuracy), not one blended figure:**
   recording already has separate mic/game tracks (OBS Advanced output mode), the app now probes for
   them and lets you pick the voice track directly — no AI separation needed. Verified end-to-end
   against a real synthetic multi-track file.
-- **Not started: Case B**, real voice/game source separation for a single mixed-down recording
-  (the actual common case) via Spleeter. Flagged as needing a decision before starting — it's a much
-  bigger bundled-dependency call than anything else on this list, not a quick addition.
+- **Case B tested for real, rejected.** sherpa-onnx (already bundled for diarization) ships both a
+  Spleeter port and a UVR MDX-NET model with zero new bundling work needed, so both got tested
+  directly against the ground-truth clip instead of guessing. Both are fast (RTF 0.03 and 0.21) but
+  both measurably DESTROY word accuracy — Spleeter 68.4% → 53.9%, UVR → 50.0% — stripping real
+  speech out along with the game noise. Root cause: both are trained on music mixes (studio vocals
+  over an instrumental bed), not Discord voice chat with overlapping speakers and non-musical noise
+  - a genuine domain mismatch no threshold tweak or model swap (Demucs included) fixes, since all
+  three share that same training-domain gap. Not implemented.
 
 See `CLAUDE-CODE-BRIEF.md`'s dated 2026-08-27 entries for the full reasoning and numbers behind each
 of the accuracy findings above.

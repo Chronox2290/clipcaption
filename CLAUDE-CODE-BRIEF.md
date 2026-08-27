@@ -136,15 +136,26 @@ comparison ran whisper-cli directly with the exact flags `transcribe.rs` builds.
   lets the user pick the voice track, feeds it straight to whisper while the highlight/death scan
   keeps using the full file. Verified end-to-end against a real synthetic multi-track file (confirmed
   ffprobe's per-audio-stream enumeration matches ffmpeg's `-map 0:a:N` selector exactly).
-- **Case B (Spleeter voice separation) — not started, flagging for a decision rather than guessing.**
-  This is a materially bigger call than anything else in this list: bundling Spleeter (a
-  TensorFlow-based Python tool, or an ONNX/other port of it if one exists and is verified to actually
-  work) into a Rust/Tauri desktop app is a new class of dependency this app doesn't have yet — likely
-  either a bundled Python runtime or a from-scratch inference port, with real questions about model
-  file size, GPU/CPU fallback behavior, and packaging risk similar to what the 2GB cleanup-model
-  install already ran into. Given the "cheap" levers above turned out to already be applied or to not
-  measurably help on this clip, Case B is the next real lever left — but it's exactly the kind of
-  irreversible-ish architectural choice worth confirming before starting, not assuming.
+- **Case B (voice/game source separation) — tested for real, 2026-08-27, REJECTED. Neither Spleeter
+  nor Demucs-family works on this content, regardless of which one or how it's bundled.** The user
+  correctly pushed back on the Spleeter-vs-Demucs framing (clips are 30s-2min, not multi-hour, so
+  htdemucs's slower per-clip cost isn't actually disqualifying the way it looked against a
+  whole-session assumption) - but that reframing turned out to be moot. sherpa-onnx, already bundled
+  in this app for diarization, ships BOTH a Spleeter port and a UVR MDX-NET model (a Demucs-family
+  cousin) through the same CLI - zero new bundling infrastructure needed, so both got tested directly
+  against the ground-truth clip instead of guessing from vendor claims:
+    - Baseline (no separation): 68.4% word accuracy.
+    - Spleeter-isolated vocals: 53.9% (-14.5pp), despite a very fast RTF of 0.03.
+    - UVR-isolated vocals: 50.0% (-18.4pp), RTF 0.21 (still fast).
+  Both isolators are trivially fast to run - speed was never the problem. Both measurably DESTROY
+  transcription accuracy: 92 and 83 words emitted respectively vs. 137 in the baseline - they strip
+  real speech out along with the game noise, not just noise. Root cause (not just a tuning miss):
+  both architectures are trained on MUSIC mixes (studio vocals over a clean instrumental bed), not
+  Discord voice chat with overlapping speakers, compression artifacts, and non-musical noise
+  (footsteps, gunfire, UI sounds) - a genuine domain mismatch a different threshold or a different
+  specific model (Demucs vs UVR vs Spleeter) wouldn't fix, since all three share that same training
+  domain gap. Not implemented. Same "tested, deliberately not shipped, written up so nobody re-tries
+  it blind" treatment as the VAD rejection and the name-prompt test above.
 
 **Export bug, found during the ground-truth work — FIXED (2026-08-27).** Captions overlapped in the
 exported video but rendered correctly in the live preview. Confirmed cause: `ExportDrawer.tsx` was
