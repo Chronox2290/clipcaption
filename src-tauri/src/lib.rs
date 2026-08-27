@@ -142,12 +142,13 @@ fn analyze_highlights(
     jobs: State<Jobs>,
     path: String,
     max_count: Option<usize>,
+    genre: Option<analyze::Genre>,
 ) -> Result<String, String> {
     let (id, handle) = jobs.create("hl");
     let job_id = id.clone();
     let max = max_count.unwrap_or(12);
     std::thread::spawn(move || {
-        analyze::run(app, job_id, handle, path, max);
+        analyze::run(app, job_id, handle, path, max, genre.unwrap_or_default());
     });
     Ok(id)
 }

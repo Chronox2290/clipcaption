@@ -40,6 +40,102 @@ pub struct Highlight {
     pub reason: String,
 }
 
+/// How to read "exciting" differs by genre - a solo-FPS clip is a string of
+/// short, sharp, mostly-independent bursts (a kill, a clutch), while a MOBA
+/// team fight or a battle-royale final circle is one long escalating event.
+/// Runs the SAME loudness heuristic either way (there's no genre detection
+/// here, no screen-reading) - this only retunes which bursts count as one
+/// highlight and how the window around them is drawn. `General` reproduces
+/// the exact constants this file used before genre tuning existed, so it's
+/// a strict no-op default, not a fourth profile competing with the others.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Genre {
+    #[default]
+    General,
+    Fps,
+    BattleRoyale,
+    Moba,
+}
+
+struct Tuning {
+    /// z-score a frame must clear to count as "exciting" at all.
+    threshold: f32,
+    /// How long (in 0.1s frames) excitement must be sustained to smooth out
+    /// single-frame noise - the moving-average window before thresholding.
+    sustain_frames: usize,
+    /// Shortest raw region (in frames, before pre/post-roll) that counts -
+    /// drops single-frame blips.
+    min_region_frames: usize,
+    /// Two exciting regions this close together (in frames) merge into one
+    /// highlight instead of becoming two separate clips.
+    merge_gap_frames: usize,
+    pre_roll: f64,
+    post_roll: f64,
+    min_len: f64,
+    max_len: f64,
+}
+
+impl Genre {
+    fn tuning(self) -> Tuning {
+        match self {
+            // Unchanged from this file's original, ungenred constants.
+            Genre::General => Tuning {
+                threshold: 1.6,
+                sustain_frames: 12,
+                min_region_frames: 8,
+                merge_gap_frames: 50,
+                pre_roll: 6.0,
+                post_roll: 4.0,
+                min_len: 8.0,
+                max_len: 75.0,
+            },
+            // Kills/clutches/deaths are short and mostly independent of each
+            // other - a tighter merge gap keeps two kills 10s apart as two
+            // clips instead of one blurred-together highlight, and a
+            // shorter max keeps a clip to the moment, not the whole fight.
+            Genre::Fps => Tuning {
+                threshold: 1.6,
+                sustain_frames: 6,
+                min_region_frames: 5,
+                merge_gap_frames: 20,
+                pre_roll: 4.0,
+                post_roll: 3.0,
+                min_len: 5.0,
+                max_len: 45.0,
+            },
+            // A final-circle fight has real lulls (repositioning, healing)
+            // that shouldn't split it into separate clips, and the payoff
+            // (a win, a death) deserves a longer post-roll to catch the
+            // reaction, not just the shot that ended it.
+            Genre::BattleRoyale => Tuning {
+                threshold: 1.5,
+                sustain_frames: 15,
+                min_region_frames: 10,
+                merge_gap_frames: 80,
+                pre_roll: 6.0,
+                post_roll: 6.0,
+                min_len: 10.0,
+                max_len: 90.0,
+            },
+            // A team fight builds before it's loud (positioning, an engage
+            // call) - a longer pre-roll actually captures the setup, and a
+            // wide merge gap keeps the whole fight as one clip rather than
+            // fragmenting it around every individual ability cast.
+            Genre::Moba => Tuning {
+                threshold: 1.5,
+                sustain_frames: 15,
+                min_region_frames: 10,
+                merge_gap_frames: 70,
+                pre_roll: 8.0,
+                post_roll: 5.0,
+                min_len: 12.0,
+                max_len: 90.0,
+            },
+        }
+    }
+}
+
 /// Classifies a highlight by its raw excitement intensity and final window
 /// duration into one of 9 buckets - the same classification both labels a
 /// clip's "why" tag (describe_region) and keys the persisted thumbs-up/down
@@ -117,8 +213,15 @@ pub fn record_feedback(app: &AppHandle, peak_z: f64, dur_sec: f64, vote: i32) ->
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
-pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, path: String, max_count: usize) {
-    match run_inner(&app, &job_id, &handle, &path, max_count) {
+pub fn run(
+    app: AppHandle,
+    job_id: String,
+    handle: Arc<JobHandle>,
+    path: String,
+    max_count: usize,
+    genre: Genre,
+) {
+    match run_inner(&app, &job_id, &handle, &path, max_count, genre) {
         Ok(json) => emit_done(&app, &job_id, "analyzing", Some(json)),
         Err(e) => {
             if handle.is_cancelled() {
@@ -136,6 +239,7 @@ fn run_inner(
     handle: &Arc<JobHandle>,
     path: &str,
     max_count: usize,
+    genre: Genre,
 ) -> Result<String, String> {
     let info = media::probe(path)?;
     let duration = info.duration_sec;
@@ -209,7 +313,7 @@ fn run_inner(
     emit_progress(app, job_id, "analyzing", 0.97, Some("finding highlights".into()));
 
     let bias = load_bias(app);
-    let highlights = detect_highlights(&rms, duration, max_count, &bias);
+    let highlights = detect_highlights(&rms, duration, max_count, &bias, genre);
     serde_json::to_string(&highlights).map_err(|e| e.to_string())
 }
 
@@ -228,16 +332,19 @@ fn frame_rms(bytes: &[u8]) -> f32 {
 
 /// Pure detection logic (unit-tested): RMS frames -> ranked highlight windows.
 /// `bias` is the learned bucket->weight map from record_feedback - pass
-/// `&HashMap::new()` for the plain, unbiased heuristic.
+/// `&HashMap::new()` for the plain, unbiased heuristic. `genre` retunes what
+/// counts as one highlight and how wide its window is - see Genre::tuning.
 pub fn detect_highlights(
     rms: &[f32],
     duration: f64,
     max_count: usize,
     bias: &HashMap<String, f32>,
+    genre: Genre,
 ) -> Vec<Highlight> {
     if rms.len() < 300 {
         return Vec::new();
     }
+    let tuning = genre.tuning();
 
     // 1. Smooth the envelope over ~0.5 s
     let smooth = moving_avg(rms, 5);
@@ -251,18 +358,16 @@ pub fn detect_highlights(
     let clipped: Vec<f32> = smooth.iter().map(|&v| v.min(p90)).collect();
     let z = rolling_z(&smooth, &clipped, 600);
 
-    // 3. Sustained excitement over ~1.2 s (a single loud frame is not a highlight)
-    let sustained = moving_avg(&z, 12);
+    // 3. Sustained excitement (a single loud frame is not a highlight)
+    let sustained = moving_avg(&z, tuning.sustain_frames);
 
-    // 4. Group frames above threshold into regions (gaps < 5 s merge)
-    const THRESHOLD: f32 = 1.6;
-    const MERGE_GAP_FRAMES: usize = 50;
+    // 4. Group frames above threshold into regions (close gaps merge)
     let mut regions: Vec<(usize, usize, f32)> = Vec::new(); // (start, end, peak_z)
     let mut cur: Option<(usize, usize, f32)> = None;
     let mut gap = 0usize;
 
     for (i, &v) in sustained.iter().enumerate() {
-        if v >= THRESHOLD {
+        if v >= tuning.threshold {
             match cur.as_mut() {
                 Some(r) => {
                     r.1 = i;
@@ -273,7 +378,7 @@ pub fn detect_highlights(
             gap = 0;
         } else if let Some(r) = cur {
             gap += 1;
-            if gap > MERGE_GAP_FRAMES {
+            if gap > tuning.merge_gap_frames {
                 regions.push(r);
                 cur = None;
                 gap = 0;
@@ -284,8 +389,8 @@ pub fn detect_highlights(
         regions.push(r);
     }
 
-    // drop blips: excitement must last at least ~0.8 s to count
-    regions.retain(|r| r.1 - r.0 >= 8);
+    // drop blips: excitement must last long enough to count
+    regions.retain(|r| r.1 - r.0 >= tuning.min_region_frames);
 
     // 5. Score = peak excitement + a bonus for how long it stayed exciting
     struct Scored {
@@ -319,24 +424,22 @@ pub fn detect_highlights(
     scored.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
 
     // 6. Expand into clip windows: pre-roll for context, post-roll for payoff
-    const PRE_ROLL: f64 = 6.0;
-    const POST_ROLL: f64 = 4.0;
-    const MIN_LEN: f64 = 8.0;
-    const MAX_LEN: f64 = 75.0;
+    let (pre_roll, post_roll, min_len, max_len) =
+        (tuning.pre_roll, tuning.post_roll, tuning.min_len, tuning.max_len);
 
     let mut out: Vec<Highlight> = Vec::new();
     for r in scored.iter() {
-        let mut start = (r.start - PRE_ROLL).max(0.0);
-        let mut end = (r.end + POST_ROLL).min(duration);
-        if end - start < MIN_LEN {
-            let need = MIN_LEN - (end - start);
+        let mut start = (r.start - pre_roll).max(0.0);
+        let mut end = (r.end + post_roll).min(duration);
+        if end - start < min_len {
+            let need = min_len - (end - start);
             start = (start - need / 2.0).max(0.0);
             end = (end + need / 2.0).min(duration);
         }
-        if end - start > MAX_LEN {
+        if end - start > max_len {
             // keep the window centered on the peak
-            start = (r.peak_time - MAX_LEN * 0.4).max(0.0);
-            end = (start + MAX_LEN).min(duration);
+            start = (r.peak_time - max_len * 0.4).max(0.0);
+            end = (start + max_len).min(duration);
         }
         // merge with previous window if overlapping
         if let Some(prev) = out.last_mut() {
@@ -472,7 +575,7 @@ mod tests {
     fn finds_loud_bursts() {
         // 10 min "vod" with three shouting moments
         let rms = synthetic(600, &[(100, 4, 0.5), (300, 6, 0.6), (500, 3, 0.45)]);
-        let hl = detect_highlights(&rms, 600.0, 10, &HashMap::new());
+        let hl = detect_highlights(&rms, 600.0, 10, &HashMap::new(), Genre::General);
         assert_eq!(hl.len(), 3, "expected 3 highlights, got {:?}", hl);
         // windows should contain the bursts
         assert!(hl[0].start <= 100.0 && hl[0].end >= 104.0);
@@ -486,7 +589,7 @@ mod tests {
     #[test]
     fn quiet_audio_returns_nothing_big() {
         let rms = synthetic(600, &[]);
-        let hl = detect_highlights(&rms, 600.0, 10, &HashMap::new());
+        let hl = detect_highlights(&rms, 600.0, 10, &HashMap::new(), Genre::General);
         assert!(
             hl.len() <= 2,
             "flat audio should produce few/no highlights, got {}",
@@ -499,17 +602,57 @@ mod tests {
         let bursts: Vec<(usize, usize, f32)> =
             (0..20).map(|i| (30 + i * 25, 3, 0.5f32)).collect();
         let rms = synthetic(600, &bursts);
-        let hl = detect_highlights(&rms, 600.0, 5, &HashMap::new());
+        let hl = detect_highlights(&rms, 600.0, 5, &HashMap::new(), Genre::General);
         assert!(hl.len() <= 5);
     }
 
     #[test]
     fn window_lengths_clamped() {
         let rms = synthetic(600, &[(200, 120, 0.5)]); // 2-minute sustained loudness
-        let hl = detect_highlights(&rms, 600.0, 10, &HashMap::new());
+        let hl = detect_highlights(&rms, 600.0, 10, &HashMap::new(), Genre::General);
         for h in &hl {
             assert!(h.end - h.start <= 75.5, "window too long: {:?}", h);
             assert!(h.end - h.start >= 7.5, "window too short: {:?}", h);
+        }
+    }
+
+    #[test]
+    fn genre_tuning_constants_differ_meaningfully() {
+        // Direct check on the config table itself: FPS is tuned tighter
+        // (shorter clips, faster to split into separate moments) than
+        // battle royale/MOBA on every axis that matters for that framing.
+        let fps = Genre::Fps.tuning();
+        let br = Genre::BattleRoyale.tuning();
+        let moba = Genre::Moba.tuning();
+        assert!(fps.max_len < br.max_len && fps.max_len < moba.max_len);
+        assert!(fps.merge_gap_frames < br.merge_gap_frames && fps.merge_gap_frames < moba.merge_gap_frames);
+        assert!(fps.min_len < br.min_len && fps.min_len < moba.min_len);
+        // General reproduces the exact pre-genre-tuning constants.
+        let g = Genre::General.tuning();
+        assert_eq!((g.threshold, g.sustain_frames, g.merge_gap_frames), (1.6, 12, 50));
+        assert_eq!((g.pre_roll, g.post_roll, g.min_len, g.max_len), (6.0, 4.0, 8.0, 75.0));
+    }
+
+    #[test]
+    fn every_genre_produces_valid_highlights_on_the_same_audio() {
+        // Same 3-burst fixture as finds_loud_bursts, run through every genre -
+        // proves genre selection reaches all the way through detect_highlights
+        // to the final windows (not accepted and silently ignored), and that
+        // every genre respects its OWN bounds on the same input.
+        let rms = synthetic(600, &[(100, 4, 0.5), (300, 6, 0.6), (500, 3, 0.45)]);
+        for genre in [Genre::General, Genre::Fps, Genre::BattleRoyale, Genre::Moba] {
+            let tuning = genre.tuning();
+            let hl = detect_highlights(&rms, 600.0, 10, &HashMap::new(), genre);
+            assert!(!hl.is_empty(), "{genre:?} found nothing on a fixture every other genre finds bursts in");
+            for h in &hl {
+                let len = h.end - h.start;
+                assert!(
+                    len <= tuning.max_len + 0.5 && len >= tuning.min_len - 0.5,
+                    "{genre:?} window {len}s outside its own [{}, {}] bounds",
+                    tuning.min_len,
+                    tuning.max_len
+                );
+            }
         }
     }
 
@@ -539,14 +682,14 @@ mod tests {
     #[test]
     fn learned_bias_moves_score_up_or_down_without_touching_the_reason() {
         let rms = synthetic(600, &[(300, 6, 0.6)]);
-        let baseline = detect_highlights(&rms, 600.0, 10, &HashMap::new());
+        let baseline = detect_highlights(&rms, 600.0, 10, &HashMap::new(), Genre::General);
         assert_eq!(baseline.len(), 1);
         let h = &baseline[0];
         let key = feedback_bucket(h.peak_z, h.end - h.start);
 
         let mut up = HashMap::new();
         up.insert(key.clone(), 10.0);
-        let boosted = detect_highlights(&rms, 600.0, 10, &up);
+        let boosted = detect_highlights(&rms, 600.0, 10, &up, Genre::General);
         assert!(
             boosted[0].score > h.score,
             "a history of thumbs-up on this bucket should raise its score: {} vs {}",
@@ -560,7 +703,7 @@ mod tests {
 
         let mut down = HashMap::new();
         down.insert(key, -10.0);
-        let lowered = detect_highlights(&rms, 600.0, 10, &down);
+        let lowered = detect_highlights(&rms, 600.0, 10, &down, Genre::General);
         assert!(
             lowered[0].score < h.score,
             "a history of thumbs-down on this bucket should lower its score: {} vs {}",

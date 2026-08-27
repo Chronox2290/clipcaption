@@ -22,6 +22,8 @@ export default function HighlightsPanel({ videoRef }: Props) {
     addBookmark,
     highlightCount,
     setHighlightCount,
+    highlightGenre,
+    setHighlightGenre,
     activeRange,
     setActiveRange,
     selectedRanks,
@@ -153,6 +155,18 @@ export default function HighlightsPanel({ videoRef }: Props) {
           hype, clutch moments — and proposes ready-to-cut clips.
           {isLong ? "" : " Works best on longer recordings (streams, full sessions)."}
         </p>
+        <label className="hl-count" title="Retunes what counts as one highlight - an FPS clip is a string of short, independent bursts; a battle royale final circle or a MOBA team fight is one long escalating one.">
+          <span className="muted small">Genre</span>
+          <select
+            value={highlightGenre}
+            onChange={(e) => setHighlightGenre(e.target.value as typeof highlightGenre)}
+          >
+            <option value="general">General</option>
+            <option value="fps">FPS</option>
+            <option value="battleroyale">Battle royale</option>
+            <option value="moba">MOBA</option>
+          </select>
+        </label>
         <button className="btn btn-primary" onClick={() => analyzeHighlights()}>
           <Icon name="sparkle" /> Find highlights
         </button>
@@ -246,6 +260,18 @@ export default function HighlightsPanel({ videoRef }: Props) {
                   {n}
                 </option>
               ))}
+            </select>
+          </label>
+          <label className="hl-count" title="Retunes what counts as one highlight - an FPS clip is a string of short, independent bursts; a battle royale final circle or a MOBA team fight is one long escalating one. Applies on the next re-scan.">
+            <span className="muted small">Genre</span>
+            <select
+              value={highlightGenre}
+              onChange={(e) => setHighlightGenre(e.target.value as typeof highlightGenre)}
+            >
+              <option value="general">General</option>
+              <option value="fps">FPS</option>
+              <option value="battleroyale">Battle royale</option>
+              <option value="moba">MOBA</option>
             </select>
           </label>
         </div>

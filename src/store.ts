@@ -93,6 +93,11 @@ let pendingUpdate: any = null;
  * changes. */
 export type AppTheme = "precision" | "warm" | "gamer";
 
+/** Matches src-tauri/src/analyze.rs's Genre enum (serde rename_all =
+ * "lowercase") exactly - passed straight through to the analyze_highlights
+ * command with no translation layer. */
+export type HighlightGenre = "general" | "fps" | "battleroyale" | "moba";
+
 interface AppState {
   theme: AppTheme;
   setTheme: (t: AppTheme) => void;
@@ -441,6 +446,12 @@ interface AppState {
    * length. */
   highlightCount: number | null;
   setHighlightCount: (n: number | null) => void;
+  /** Retunes what counts as one highlight and how wide its window is - see
+   * Genre::tuning in src-tauri/src/analyze.rs. There's no game detection
+   * here; the user picks. Persisted since it's a per-user habit ("I always
+   * caption FPS clips"), not a per-project setting. */
+  highlightGenre: HighlightGenre;
+  setHighlightGenre: (g: HighlightGenre) => void;
   dismissRestoredNotice: () => void;
   /** Throws away the autosaved working state for the current video and resets
    * the editor to a clean slate for it. */
@@ -684,6 +695,7 @@ export const useApp = create<AppState>((set, get) => ({
     const v = localStorage.getItem("cc.highlightCount");
     return v == null || v === "auto" ? null : Number(v);
   })(),
+  highlightGenre: (localStorage.getItem("cc.highlightGenre") as HighlightGenre | null) ?? "general",
   segments: [],
   censor: false,
   transcriptSourceRank: null,
@@ -1319,6 +1331,7 @@ export const useApp = create<AppState>((set, get) => ({
       const id = await invoke<string>("analyze_highlights", {
         path: videoPath,
         maxCount: autoHighlightCount(get().highlightCount, get().mediaInfo?.durationSec),
+        genre: get().highlightGenre,
       });
       set({ analyzeJob: { id, stage: "analyzing", progress: 0 } });
     } catch (e) {
@@ -2185,6 +2198,11 @@ export const useApp = create<AppState>((set, get) => ({
   setHighlightCount: (n) => {
     localStorage.setItem("cc.highlightCount", n == null ? "auto" : String(n));
     set({ highlightCount: n });
+  },
+
+  setHighlightGenre: (g) => {
+    localStorage.setItem("cc.highlightGenre", g);
+    set({ highlightGenre: g });
   },
 
   scanForDeaths: () => {
