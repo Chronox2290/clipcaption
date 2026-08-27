@@ -1,7 +1,7 @@
 # ClipCaption — status summary
 
 Plain-language write-up of what's changed recently and where things stand. Current as of
-**2026-08-27**, commit `448f40c`. Everything below "New since v0.2.10" was built in one long session
+**2026-08-27**, commit `64c187d`. Everything below "New since v0.2.10" was built in one long session
 after the v0.2.10 draft release described further down — that release note is kept as-is since it's
 still an accurate record of what shipped in it, not because it's the latest state.
 
@@ -192,7 +192,18 @@ reassign it, keyboard shortcuts for frame-accurate nudging, and full undo/redo.
 
 ## Current release state
 
-- The app version manifest is still pinned at 0.2.10 — none of "New since v0.2.10" above has been
-  built into an installer or tagged as a release yet. A real local install build (not just a compile
-  check) is still owed before any of this ships, matching how every prior release was verified.
-- **v0.2.9 is the version currently live** — what existing installs would update to today.
+- **v0.2.12 is the current draft release** — includes everything under "New since v0.2.10" above
+  plus a CI fix (unauthenticated GitHub API rate limit was failing the release build) and a batch
+  of real bugs found by live-testing that build: a misleading "model isn't installed" error that
+  was actually a health-check timeout, translation silently processing the whole transcript instead
+  of just the active clip (same bug also found and fixed in AI cleanup and forced alignment), a
+  serious Auto Reel export deadlock on long source recordings (redesigned the range-compilation
+  pipeline — extract each range independently, then concat-join, instead of one filtergraph
+  decoding almost the whole source), and the video player's seek bar not scoping to the active clip.
+  None of these five fixes have been verified in an actual running build yet, only unit-tested — a
+  local build and a real Auto Reel export test against a long recording is owed before pushing this
+  as the next draft release, matching how every prior release was verified.
+- Source/game-voice separation (Spleeter and UVR, via sherpa-onnx's bundled models) was tested for
+  real against ground-truth gameplay audio and rejected — both measurably hurt transcription
+  accuracy, trained on music rather than voice-chat audio. Not implemented; see
+  `CLAUDE-CODE-BRIEF.md`'s 2026-08-27 entries for the full numbers.
