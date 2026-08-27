@@ -399,10 +399,16 @@ export default function TranscriptPanel({ videoRef }: Props) {
             className="btn btn-ghost"
             onClick={() => void reviewTranscript()}
             disabled={!!polishJob || segments.length === 0}
-            title="Checks every word whisper wasn't confident about against an offline AI model - names, mishearings. Nothing is changed until you review and accept each fix."
+            title={
+              activeRange
+                ? "Checks this clip's words whisper wasn't confident about against an offline AI model - names, mishearings. Nothing is changed until you review and accept each fix."
+                : "No clip range is active, so this checks the WHOLE loaded transcript - open a specific clip/highlight first to check just that instead. Nothing is changed until you review and accept each fix."
+            }
           >
             {polishJob
               ? `✨ Checking… ${Math.round((polishJob.progress ?? 0) * 100)}%`
+              : activeRange
+              ? "✨ Clean up this clip"
               : "✨ Clean up transcript"}
           </button>
         ) : (
@@ -422,10 +428,16 @@ export default function TranscriptPanel({ videoRef }: Props) {
             className="btn btn-ghost"
             onClick={() => void alignTranscript()}
             disabled={!!alignJob || segments.length === 0}
-            title="Re-times every word against the actual audio using the transcript's own text, instead of trusting whisper's original guess - fixes mistimed and missed-entirely words. Undoable."
+            title={
+              activeRange
+                ? "Re-times this clip's words against the actual audio using the transcript's own text, instead of trusting whisper's original guess - fixes mistimed and missed-entirely words. Undoable."
+                : "No clip range is active, so this re-times the WHOLE loaded transcript - open a specific clip/highlight first to align just that instead (much faster). Undoable."
+            }
           >
             {alignJob
               ? `⏱ Aligning… ${Math.round((alignJob.progress ?? 0) * 100)}%`
+              : activeRange
+              ? "⏱ Align this clip"
               : "⏱ Align timing"}
           </button>
         ) : (

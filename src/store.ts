@@ -977,12 +977,21 @@ export const useApp = create<AppState>((set, get) => ({
             set({ polishModelJob: null, polishAvailable: true });
           } else if (key === "alignJob" && p.result) {
             try {
-              const { segments, totalTurns, failedTurns, failedWords } = JSON.parse(p.result) as {
+              const { segments: aligned, totalTurns, failedTurns, failedWords } = JSON.parse(
+                p.result
+              ) as {
                 segments: Segment[];
                 totalTurns: number;
                 failedTurns: number;
                 failedWords: number;
               };
+              // Merged by id, not replaced wholesale - alignTranscript may
+              // have only sent the active clip's own segments (see its own
+              // comment), and a plain `set({ segments: aligned })` here
+              // would silently delete every segment outside that range from
+              // the transcript entirely.
+              const byId = new Map(aligned.map((s) => [s.id, s]));
+              const segments = get().segments.map((s) => byId.get(s.id) ?? s);
               set({
                 segments,
                 alignJob: null,
@@ -2486,12 +2495,26 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   reviewTranscript: async () => {
-    const { segments, speakerProfiles } = get();
+    const { segments, speakerProfiles, activeRange } = get();
+    // Scoped to the active range when one is set - same convention as
+    // translateTranscript/Caption this range, not the whole loaded session
+    // by default. Suggestions are applied back by segId (acceptPolishSuggestion/
+    // the auto-apply loop), so sending a subset here just means suggestions
+    // only ever come back for that subset - no merge-by-id needed downstream,
+    // unlike alignTranscript below.
+    const inScope = activeRange
+      ? segments.filter((s) => {
+          const s0 = s.words[0]?.start ?? 0;
+          const e0 = s.words[s.words.length - 1]?.end ?? s0;
+          return e0 > activeRange.start && s0 < activeRange.end;
+        })
+      : segments;
+    if (!inScope.length) return;
     try {
       set({ error: null, polishSuggestions: [] });
       const id = await invoke<string>("polish_transcript", {
         req: {
-          segments: segments.map((s) => ({
+          segments: inScope.map((s) => ({
             id: s.id,
             words: s.words.map((w) => ({ text: w.text, confidence: w.confidence ?? 1 })),
           })),
@@ -2506,15 +2529,28 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   alignTranscript: async () => {
-    const { segments, videoPath } = get();
+    const { segments, videoPath, activeRange } = get();
     if (!videoPath) return;
+    // Scoped to the active range when one is set - re-aligning an entire
+    // long recording's transcript when only one clip is being worked on
+    // was real, reported wasted time (same issue translateTranscript had).
+    // The response is merged back by segment id (see the alignJob dispatch
+    // case), so segments outside the range are untouched, not dropped.
+    const inScope = activeRange
+      ? segments.filter((s) => {
+          const s0 = s.words[0]?.start ?? 0;
+          const e0 = s.words[s.words.length - 1]?.end ?? s0;
+          return e0 > activeRange.start && s0 < activeRange.end;
+        })
+      : segments;
+    if (!inScope.length) return;
     get().pushHistory();
     try {
       set({ error: null });
       const id = await invoke<string>("align_transcript", {
         req: {
           videoPath,
-          segments: segments.map((s) => ({
+          segments: inScope.map((s) => ({
             id: s.id,
             speaker: s.speaker ?? undefined,
             pan: s.pan ?? undefined,
