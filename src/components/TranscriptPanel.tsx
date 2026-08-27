@@ -48,7 +48,18 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const setSelectedAudioTrack = useApp((s) => s.setSelectedAudioTrack);
   const translateJob = useApp((s) => s.translateJob);
   const translateTranscript = useApp((s) => s.translateTranscript);
+  const activeRange = useApp((s) => s.activeRange);
   const [translateLanguage, setTranslateLanguage] = useState("Spanish");
+  // Mirrors translateTranscript's own scoping in store.ts - purely for an
+  // accurate "line N/M" and button label here, not a second source of
+  // truth for what actually gets sent.
+  const translateScope = activeRange
+    ? segments.filter((s) => {
+        const s0 = s.words[0]?.start ?? 0;
+        const e0 = s.words[s.words.length - 1]?.end ?? s0;
+        return e0 > activeRange.start && s0 < activeRange.end;
+      })
+    : segments;
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);
   const setSpeakerName = useApp((s) => s.setSpeakerName);
@@ -435,7 +446,11 @@ export default function TranscriptPanel({ videoRef }: Props) {
               value={translateLanguage}
               onChange={(e) => setTranslateLanguage(e.target.value)}
               disabled={!!translateJob}
-              title="Replaces the transcript's text with a machine translation, re-timed evenly across each line's original span. Fully undoable - Undo gets the original language back. One AI call per line, so a long recording's transcript can take a while - the count below tracks real progress, it isn't stuck."
+              title={
+                activeRange
+                  ? "Replaces this clip's captions with a machine translation, re-timed evenly across each line's original span. Fully undoable - Undo gets the original language back."
+                  : "No clip range is active, so this replaces the WHOLE loaded transcript's captions - open a specific clip/highlight first to translate just that instead. Re-timed evenly across each line's original span. Fully undoable. One AI call per line, so a long recording can take a while - the count below tracks real progress, it isn't stuck."
+              }
             >
               {[
                 "Spanish",
@@ -459,10 +474,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
               <>
                 <span className="muted small translate-progress">
                   🌐 Translating line {Math.min(
-                    segments.length,
-                    Math.round((translateJob.progress ?? 0) * segments.length)
+                    translateScope.length,
+                    Math.round((translateJob.progress ?? 0) * translateScope.length)
                   )}
-                  /{segments.length}…
+                  /{translateScope.length}…
                 </span>
                 <button className="btn btn-ghost btn-small" onClick={() => cancelJob(translateJob.id)}>
                   Cancel
@@ -472,9 +487,11 @@ export default function TranscriptPanel({ videoRef }: Props) {
               <button
                 className="btn btn-ghost"
                 onClick={() => void translateTranscript(translateLanguage)}
-                disabled={segments.length === 0}
+                disabled={translateScope.length === 0}
               >
-                🌐 Translate captions
+                {activeRange
+                  ? `🌐 Translate this clip (${translateScope.length} line${translateScope.length === 1 ? "" : "s"})`
+                  : "🌐 Translate whole transcript"}
               </button>
             )}
           </span>

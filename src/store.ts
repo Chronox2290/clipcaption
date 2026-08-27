@@ -2026,14 +2026,30 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   translateTranscript: async (targetLanguage) => {
-    const { segments } = get();
+    const { segments, activeRange } = get();
     if (!segments.length) return;
+    // Scoped to the active range when one is set - same "this range, not
+    // the whole loaded session" convention as Caption this range/buildDemo,
+    // not the whole transcript by default. Translating an 80-minute
+    // session's every line when only one clip is being worked on was a
+    // real, reported inefficiency; segments outside the range are left
+    // untouched (byId lookup below just skips them, same mechanism that
+    // already no-ops on any segment translate_transcript wasn't asked
+    // about).
+    const inScope = activeRange
+      ? segments.filter((s) => {
+          const s0 = s.words[0]?.start ?? 0;
+          const e0 = s.words[s.words.length - 1]?.end ?? s0;
+          return e0 > activeRange.start && s0 < activeRange.end;
+        })
+      : segments;
+    if (!inScope.length) return;
     get().pushHistory();
     try {
       set({ error: null });
       const id = await invoke<string>("translate_transcript", {
         req: {
-          segments: segments.map((s) => ({ id: s.id, text: s.words.map((w) => w.text).join(" ") })),
+          segments: inScope.map((s) => ({ id: s.id, text: s.words.map((w) => w.text).join(" ") })),
           targetLanguage,
         },
       });
