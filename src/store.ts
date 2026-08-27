@@ -269,6 +269,10 @@ interface AppState {
   analyzeHighlights: () => Promise<void>;
   setActiveRange: (r: { start: number; end: number } | null) => void;
   toggleHighlightSelected: (rank: number) => void;
+  /** Drops a highlight from the list entirely (not just deselecting it) -
+   * for a detected clip that isn't actually suitable, so it stops cluttering
+   * the sidebar. Undoable like any other transcript/highlight edit. */
+  removeHighlight: (rank: number) => void;
   selectAllHighlights: () => void;
   selectNoneHighlights: () => void;
   startEditingHighlight: (h: Highlight) => void;
@@ -1200,6 +1204,24 @@ export const useApp = create<AppState>((set, get) => ({
 
   selectAllHighlights: () => set({ selectedRanks: get().highlights.map((h) => h.rank) }),
   selectNoneHighlights: () => set({ selectedRanks: [] }),
+
+  removeHighlight: (rank) => {
+    get().pushHistory();
+    const { highlights, selectedRanks, clipOverrides, clipNames, editingRank, activeRange } = get();
+    const nextOverrides = { ...clipOverrides };
+    delete nextOverrides[rank];
+    const nextNames = { ...clipNames };
+    delete nextNames[rank];
+    const wasEditing = editingRank === rank;
+    set({
+      highlights: highlights.filter((h) => h.rank !== rank),
+      selectedRanks: selectedRanks.filter((r) => r !== rank),
+      clipOverrides: nextOverrides,
+      clipNames: nextNames,
+      editingRank: wasEditing ? null : editingRank,
+      activeRange: wasEditing ? null : activeRange,
+    });
+  },
 
   /** Open a highlight's range for manual extend/trim; auto-includes it in the export selection. */
   startEditingHighlight: (h) => {

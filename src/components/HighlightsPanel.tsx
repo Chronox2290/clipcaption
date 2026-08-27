@@ -33,6 +33,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
     selectNoneHighlights,
     startEditingHighlight,
     stopEditingHighlight,
+    removeHighlight,
     adjustHighlightRange,
     setClipName,
     batch,
@@ -332,6 +333,13 @@ export default function HighlightsPanel({ videoRef }: Props) {
                   onClick={() => (isEditing ? stopEditingHighlight() : startEditingHighlight(h))}
                 >
                   {isEditing ? "Editing…" : "Edit"}
+                </button>
+                <button
+                  className="btn btn-ghost btn-small"
+                  title="Remove this clip from the list - not just deselect it"
+                  onClick={() => removeHighlight(h.rank)}
+                >
+                  <Icon name="close" size={12} />
                 </button>
               </div>
 

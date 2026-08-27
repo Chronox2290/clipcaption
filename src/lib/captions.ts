@@ -13,28 +13,50 @@ export function paginate(
   // genuine pause.
   maxGapSec = 0.45
 ): CaptionPage[] {
-  // A whisper "segment" is already one continuous spoken unit (whisper's own
-  // silence detection drew that boundary) — if it fits on one page by word
-  // count, a merely-noticeable gap inside it (a dramatic pause, or timing
-  // jitter from word-level alignment) shouldn't fragment it into orphaned
-  // one/two-word captions that lose their sentence's context. Only break a
-  // short segment early for a genuinely long pause; a segment that has to
-  // split anyway (too many words) still uses the tighter threshold to find a
-  // natural place to do it.
+  // Grouped by speaker across ALL segments, in chronological order - NOT
+  // walked one raw segment at a time. Reassigning a word to the correct
+  // speaker (the timeline's drag-to-lane / group-move tools) necessarily
+  // splits it into its own single-word segment, since a segment can only
+  // carry one speaker; a run of words corrected one at a time (or even all
+  // at once) back onto the same speaker used to stay permanently fragmented
+  // into separate one-word pages forever after, purely as a side effect of
+  // how the correction was implemented - "go, go, go, go." read as one page
+  // before a mid-run word got retimed/reassigned, and four stacked one-word
+  // pages after, even once every word agreed on the same speaker again. The
+  // gap/word-count/sentence-end logic below is what actually decides where
+  // a natural pause is; segment identity is no longer trusted as a proxy
+  // for that on its own.
   const hardGapSec = maxGapSec * 2;
 
-  const pages: CaptionPage[] = [];
+  const bySpeaker = new Map<string, { seg: Segment; w: WordSpan }[]>();
   for (const seg of segments) {
-    const gapThreshold = seg.words.length <= maxWordsPerPage ? hardGapSec : maxGapSec;
-    let current: WordSpan[] = [];
-    for (const w of seg.words) {
+    // A speakerless segment (diarization unavailable, or a hand-typed line
+    // before it ran) doesn't merge with some other unrelated speakerless
+    // segment just because both are "no speaker" - key those by their own
+    // segment id, keeping the old per-segment behaviour for that case only.
+    const key = seg.speaker == null ? `id:${seg.id}` : `spk:${seg.speaker}`;
+    if (!bySpeaker.has(key)) bySpeaker.set(key, []);
+    const arr = bySpeaker.get(key)!;
+    for (const w of seg.words) arr.push({ seg, w });
+  }
+
+  const pages: CaptionPage[] = [];
+  for (const group of bySpeaker.values()) {
+    group.sort((a, b) => a.w.start - b.w.start);
+    let current: { seg: Segment; w: WordSpan }[] = [];
+    for (const entry of group) {
       const prev = current[current.length - 1];
-      const gapBreak = prev && w.start - Math.min(prev.end, w.start) > gapThreshold;
+      // Forgiving of an internal pause as long as the page isn't already
+      // overflowing its word budget - same reasoning as before, just judged
+      // against the page being built rather than the source segment's own
+      // (no longer meaningful, post-edit) word count.
+      const gapThreshold = current.length < maxWordsPerPage ? hardGapSec : maxGapSec;
+      const gapBreak = prev && entry.w.start - Math.min(prev.w.end, entry.w.start) > gapThreshold;
       if (current.length >= maxWordsPerPage || gapBreak) {
-        if (current.length) pages.push(toPage(current, seg));
+        if (current.length) pages.push(toPageMulti(current));
         current = [];
       }
-      current.push(w);
+      current.push(entry);
 
       // Break AFTER a sentence ends, rather than only when the word budget
       // runs out. Counting words alone cuts sentences at arbitrary points and
@@ -42,13 +64,14 @@ export function paginate(
       // made captions read as a stream of fragments rather than lines someone
       // said. A one-word "Yeah." is left to join what follows instead of
       // flashing on its own.
-      if (current.length >= MIN_WORDS_TO_END_A_PAGE && endsSentence(w.text)) {
-        pages.push(toPage(current, seg));
+      if (current.length >= MIN_WORDS_TO_END_A_PAGE && endsSentence(entry.w.text)) {
+        pages.push(toPageMulti(current));
         current = [];
       }
     }
-    if (current.length) pages.push(toPage(current, seg));
+    if (current.length) pages.push(toPageMulti(current));
   }
+  pages.sort((a, b) => a.start - b.start);
   return pages;
 }
 
@@ -67,7 +90,16 @@ function endsSentence(text: string): boolean {
   return /[.!?]["')\]]*$/.test(t);
 }
 
-function toPage(words: WordSpan[], seg: Segment): CaptionPage {
+/** Builds a page from a run of (segment, word) entries - not necessarily all
+ * from the same original segment, since paginate() now groups by speaker
+ * across segment boundaries (see its own comment for why). Pan/intensity are
+ * per-segment spatial-audio metadata with no single correct value once a
+ * page spans more than one original segment, so the first word's own
+ * segment stands in for the whole page - a reasonable approximation, since
+ * pan/intensity aren't expected to swing wildly word-to-word within what
+ * reads as one continuous line. */
+function toPageMulti(entries: { seg: Segment; w: WordSpan }[]): CaptionPage {
+  const words = entries.map((e) => e.w);
   const start = words[0].start;
   // Belt-and-braces against a page that can never satisfy pageAt's
   // `t >= start && t <= end`. The backend now guarantees every word ends
@@ -76,6 +108,7 @@ function toPage(words: WordSpan[], seg: Segment): CaptionPage {
   // caption simply never appears, with the words all present and correct in
   // the transcript panel.
   const end = Math.max(words[words.length - 1].end, start + 0.06);
+  const seg = entries[0].seg;
   return {
     start,
     end,
