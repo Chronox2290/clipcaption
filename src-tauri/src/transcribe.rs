@@ -132,6 +132,16 @@ pub struct Request {
     /// How many people are talking, when the user knows. None lets
     /// diarization guess (see diarize::run for why that is worse).
     pub speaker_count: Option<u32>,
+    /// Which audio stream to transcribe from, when the source has more than
+    /// one (OBS's Advanced output mode can record mic and desktop/game
+    /// audio onto separate tracks) - an index among AUDIO streams only,
+    /// matching ffmpeg's `-map 0:a:N` (see media::list_audio_tracks). None
+    /// uses ffmpeg's own default stream selection, same as before this
+    /// existed. Highlight/death detection's own audio scan (analyze.rs)
+    /// deliberately does NOT take this - it wants the full mixed/game
+    /// track, not just voice.
+    #[serde(default)]
+    pub audio_track: Option<u32>,
 }
 
 pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: Request) {
@@ -154,7 +164,7 @@ fn run_inner(
     handle: &Arc<JobHandle>,
     req: &Request,
 ) -> Result<String, String> {
-    let Request { path, model, start, end, prompt, speaker_count } = req;
+    let Request { path, model, start, end, prompt, speaker_count, audio_track } = req;
     let (path, model) = (path.as_str(), model.as_str());
     let (start, end) = (*start, *end);
     let model_path = models::model_path(app, model)?;
@@ -186,6 +196,13 @@ fn run_inner(
     if let Some(end) = end {
         let dur = (end - offset).max(0.1);
         extract_cmd.args(["-t", &format!("{dur:.3}")]);
+    }
+    if let Some(track) = audio_track {
+        // Selects the Nth AUDIO stream specifically (see
+        // media::list_audio_tracks) - lets a source with separate mic/game
+        // tracks feed whisper the clean voice track directly, no AI
+        // separation needed.
+        extract_cmd.args(["-map", &format!("0:a:{track}")]);
     }
     let extract = extract_cmd
         .args([

@@ -33,6 +33,11 @@ fn extract_thumbnail(app: AppHandle, video_path: String, time_sec: f64) -> Resul
 }
 
 #[tauri::command]
+fn list_audio_tracks(path: String) -> Result<Vec<media::AudioTrackInfo>, String> {
+    media::list_audio_tracks(&path)
+}
+
+#[tauri::command]
 fn detect_encoders() -> Vec<String> {
     encoders::available()
 }
@@ -311,6 +316,7 @@ pub fn run() {
             probe_video,
             prepare_preview,
             extract_thumbnail,
+            list_audio_tracks,
             analyze_highlights,
             record_highlight_feedback,
             list_videos,

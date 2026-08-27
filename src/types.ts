@@ -105,6 +105,17 @@ export interface CaptionPage {
   row?: number;
 }
 
+/** One audio stream in a source file - see list_audio_tracks in
+ * src-tauri/src/media.rs. `index` is the stream's position among audio
+ * streams only, matching ffmpeg's `-map 0:a:N`. */
+export interface AudioTrackInfo {
+  index: number;
+  codec: string;
+  channels: number;
+  language: string | null;
+  title: string | null;
+}
+
 export interface MediaInfo {
   path: string;
   durationSec: number;

@@ -11,6 +11,7 @@ import type {
   ModelInfo,
   Segment,
   SpeakerProfile,
+  AudioTrackInfo,
   TranscribeResult,
   ProjectFile,
   PolishSuggestion,
@@ -110,6 +111,17 @@ interface AppState {
   videoPath: string | null;
   previewSrc: string | null;
   mediaInfo: MediaInfo | null;
+  /** Every audio stream in the open video (see media::list_audio_tracks) -
+   * length 1 for a normal single-track recording, more for OBS's Advanced
+   * output mode recording mic/game audio separately. */
+  audioTracks: AudioTrackInfo[];
+  /** Which track to feed whisper, when there's more than one - an index
+   * among audioTracks, or null to let ffmpeg pick (a normal single-track
+   * file, or a multi-track one the user hasn't chosen for yet). The
+   * highlight/death-detection audio scan always uses the full file
+   * regardless of this. */
+  selectedAudioTrack: number | null;
+  setSelectedAudioTrack: (i: number | null) => void;
   /** Path of the .ccproj file this session was saved to/loaded from, so
    * "Save Project" can write straight back without prompting again. */
   projectPath: string | null;
@@ -718,6 +730,8 @@ export const useApp = create<AppState>((set, get) => ({
   videoPath: null,
   previewSrc: null,
   mediaInfo: null,
+  audioTracks: [],
+  selectedAudioTrack: null,
   projectPath: null,
   restoredSession: false,
   editorTab: "transcript",
@@ -1057,10 +1071,17 @@ export const useApp = create<AppState>((set, get) => ({
       const previewSrc = await fileSrc(previewPath);
       const recent = [path, ...get().recent.filter((r) => r !== path)].slice(0, 8);
       localStorage.setItem("cc.recent", JSON.stringify(recent));
+      // Best-effort: a probe failure here just means no track picker shown,
+      // same as a normal single-track file - never blocks opening the video.
+      const audioTracks = await invoke<AudioTrackInfo[]>("list_audio_tracks", { path }).catch(
+        () => [] as AudioTrackInfo[]
+      );
       set({
         videoPath: path,
         previewSrc,
         mediaInfo,
+        audioTracks,
+        selectedAudioTrack: null,
         projectPath: null,
         segments: [],
         transcriptSourceRank: null,
@@ -1103,6 +1124,8 @@ export const useApp = create<AppState>((set, get) => ({
       videoPath: null,
       previewSrc: null,
       mediaInfo: null,
+      audioTracks: [],
+      selectedAudioTrack: null,
       projectPath: null,
       segments: [],
       transcriptSourceRank: null,
@@ -1153,6 +1176,7 @@ export const useApp = create<AppState>((set, get) => ({
           speakerCount: get().speakerCount,
           start: activeRange?.start ?? null,
           end: activeRange?.end ?? null,
+          audioTrack: get().selectedAudioTrack,
         },
       });
       set({ transcribeJob: { id, stage: "starting", progress: -1 } });
@@ -2310,6 +2334,8 @@ export const useApp = create<AppState>((set, get) => ({
     localStorage.setItem("cc.safeZonePreset", id ?? "");
     set({ safeZonePreset: id });
   },
+
+  setSelectedAudioTrack: (i) => set({ selectedAudioTrack: i }),
 
   scanForDeaths: () => {
     get().pushHistory();

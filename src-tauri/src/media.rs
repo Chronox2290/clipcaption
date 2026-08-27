@@ -37,6 +37,75 @@ struct FfStream {
     height: Option<u32>,
     avg_frame_rate: Option<String>,
     r_frame_rate: Option<String>,
+    channels: Option<u32>,
+    tags: Option<FfTags>,
+}
+
+#[derive(Deserialize)]
+struct FfTags {
+    language: Option<String>,
+    title: Option<String>,
+}
+
+/// One audio stream in a source file - see list_audio_tracks. `index` is
+/// the audio stream's OWN position among audio streams only (0, 1, 2...),
+/// matching ffmpeg's `-map 0:a:N` selector, not the file's absolute stream
+/// index (which also counts video/subtitle streams and would silently pick
+/// the wrong track if used with -map 0:a:N).
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioTrackInfo {
+    pub index: u32,
+    pub codec: String,
+    pub channels: u32,
+    pub language: Option<String>,
+    pub title: Option<String>,
+}
+
+/// Lists every audio track in a source file - OBS's Advanced output mode
+/// can record mic and desktop/game audio onto separate tracks (up to 6),
+/// and when it does, picking the voice track directly is a near-free
+/// transcription-quality win: no AI separation needed, just ffmpeg stream
+/// selection. Returns an empty (not error) list for a normal single-track
+/// file - the caller only shows a track picker when there's more than one.
+pub fn list_audio_tracks(path: &str) -> Result<Vec<AudioTrackInfo>, String> {
+    let out = sidecar::command("ffprobe")
+        .args([
+            "-v",
+            "error",
+            "-print_format",
+            "json",
+            "-show_streams",
+            "-select_streams",
+            "a",
+            path,
+        ])
+        .output()
+        .map_err(|e| format!("Could not run ffprobe: {e}. Run scripts/get-sidecars.ps1 first."))?;
+
+    if !out.status.success() {
+        return Err(format!(
+            "ffprobe failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+
+    let parsed: FfprobeOut =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("ffprobe parse error: {e}"))?;
+
+    Ok(parsed
+        .streams
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .map(|(i, s)| AudioTrackInfo {
+            index: i as u32,
+            codec: s.codec_name.unwrap_or_default(),
+            channels: s.channels.unwrap_or(0),
+            language: s.tags.as_ref().and_then(|t| t.language.clone()),
+            title: s.tags.and_then(|t| t.title),
+        })
+        .collect())
 }
 
 fn parse_rate(rate: &str) -> f64 {

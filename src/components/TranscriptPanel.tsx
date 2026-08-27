@@ -43,6 +43,9 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const setTuning = useApp((s) => s.setTuningWord);
   const speakerCount = useApp((s) => s.speakerCount);
   const setSpeakerCount = useApp((s) => s.setSpeakerCount);
+  const audioTracks = useApp((s) => s.audioTracks);
+  const selectedAudioTrack = useApp((s) => s.selectedAudioTrack);
+  const setSelectedAudioTrack = useApp((s) => s.setSelectedAudioTrack);
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);
   const setSpeakerName = useApp((s) => s.setSpeakerName);
@@ -94,6 +97,28 @@ export default function TranscriptPanel({ videoRef }: Props) {
     return (
       <div className="panel-empty">
         <p className="muted">No transcript yet.</p>
+        {audioTracks.length > 1 && (
+          <label
+            className="speaker-count"
+            title="This recording has more than one audio track (OBS can record mic and game audio separately) - pick the one with your voice on it for a cleaner transcript."
+          >
+            <span className="muted small">Voice track</span>
+            <select
+              value={selectedAudioTrack ?? "auto"}
+              onChange={(e) =>
+                setSelectedAudioTrack(e.target.value === "auto" ? null : Number(e.target.value))
+              }
+            >
+              <option value="auto">Auto</option>
+              {audioTracks.map((t) => (
+                <option key={t.index} value={t.index}>
+                  Track {t.index + 1}
+                  {t.title ? ` — ${t.title}` : ""} ({t.codec}, {t.channels}ch)
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <button className="btn btn-primary" onClick={() => transcribe()} disabled={!model?.downloaded}>
           ✦ Auto-caption this clip
         </button>
