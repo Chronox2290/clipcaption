@@ -2136,6 +2136,14 @@ export const useApp = create<AppState>((set, get) => ({
       const raw = await invoke<string>("read_text_file", { path });
       const project = JSON.parse(raw) as ProjectFile;
       await get().openVideo(project.videoPath); // resets to a clean slate for that video
+      // openVideo catches its own errors internally (so a failed drag-drop
+      // open doesn't crash) rather than throwing - which means a video that
+      // no longer exists at its saved path (moved, renamed, drive letter
+      // changed) fails silently there, and this call would otherwise carry
+      // straight on applying the project's transcript/highlights against
+      // nothing. Bail here instead, with openVideo's own error still on
+      // screen from when it set it.
+      if (get().videoPath !== project.videoPath) return;
       set({
         selectedModel: project.selectedModel ?? get().selectedModel,
         style: project.style ?? get().style,
