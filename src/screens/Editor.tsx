@@ -290,20 +290,16 @@ export default function Editor() {
                 {playing ? "❚❚" : "▶"}
               </button>
               <div className="seek-wrap">
-                {activeRange && mediaInfo && mediaInfo.durationSec > 0 && (
-                  <div
-                    className="seek-range"
-                    style={{
-                      left: `${(activeRange.start / mediaInfo.durationSec) * 100}%`,
-                      width: `${((activeRange.end - activeRange.start) / mediaInfo.durationSec) * 100}%`,
-                    }}
-                  />
-                )}
                 <input
                   className="seek"
                   type="range"
-                  min={0}
-                  max={mediaInfo?.durationSec ?? 0}
+                  // While a clip's range is active, the bar covers just that
+                  // clip instead of the whole recording - a highlight can be
+                  // a few seconds inside an hours-long source, where the old
+                  // full-length bar made the clip an invisible sliver and
+                  // scrubbing within it imprecise to the point of unusable.
+                  min={activeRange ? activeRange.start : 0}
+                  max={activeRange ? activeRange.end : mediaInfo?.durationSec ?? 0}
                   step={0.05}
                   value={time}
                   onChange={(e) => {
@@ -313,7 +309,14 @@ export default function Editor() {
                 />
               </div>
               <span className="time muted">
-                {fmtTime(time)} / {fmtTime(mediaInfo?.durationSec ?? 0)}
+                {activeRange
+                  ? // Clamped: `time` can briefly sit outside the range right
+                    // as it becomes active, before the video has actually
+                    // seeked there - fmtTime has no negative-input guard of
+                    // its own, so an unclamped value here would flash a
+                    // nonsensical "-1:57" for a frame or two.
+                    `${fmtTime(Math.max(0, time - activeRange.start))} / ${fmtTime(activeRange.end - activeRange.start)}`
+                  : `${fmtTime(time)} / ${fmtTime(mediaInfo?.durationSec ?? 0)}`}
               </span>
             </div>
             <p className="muted small kbd-hint">
