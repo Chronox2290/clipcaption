@@ -123,6 +123,11 @@ fn polish_transcript(
 }
 
 #[tauri::command]
+fn record_phrase_correction(app: AppHandle, original: String, corrected: String) -> Result<(), String> {
+    polish::record_correction(&app, &original, &corrected)
+}
+
+#[tauri::command]
 fn generate_metadata(
     app: AppHandle,
     jobs: State<Jobs>,
@@ -308,6 +313,7 @@ pub fn run() {
             polish_available,
             download_polish_model,
             polish_transcript,
+            record_phrase_correction,
             generate_metadata,
             align_transcript
         ])

@@ -485,10 +485,24 @@ fn run_inner(
         return serde_json::to_string(&Vec::<Suggestion>::new()).map_err(|e| e.to_string());
     }
 
-    let server = start(app).ok_or_else(|| {
-        "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it."
-            .to_string()
-    })?;
+    // Known fixes never touch the model at all - a repeat of a correction
+    // already accepted once (see record_correction) is applied straight
+    // away at full confidence. When every flagged word is already known,
+    // this means a cleanup pass on a NEW clip can finish instantly without
+    // the ~2GB model even being installed, let alone running.
+    let dictionary = load_dictionary(app);
+    let needs_model = candidates
+        .iter()
+        .any(|c| dictionary_hit(&dictionary, &c.original).is_none());
+
+    let server = if needs_model {
+        Some(start(app).ok_or_else(|| {
+            "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it."
+                .to_string()
+        })?)
+    } else {
+        None
+    };
 
     let total = candidates.len();
     let mut out = Vec::with_capacity(total);
@@ -496,7 +510,17 @@ fn run_inner(
         if handle.is_cancelled() {
             return Err("Cancelled".into());
         }
-        if let Some(s) = server.correct(candidate, &req.players) {
+        if let Some(known) = dictionary_hit(&dictionary, &candidate.original) {
+            if !is_no_op(&known, &candidate.original) {
+                out.push(Suggestion {
+                    seg_id: candidate.seg_id.clone(),
+                    word_idx: candidate.word_idx,
+                    original: candidate.original.clone(),
+                    suggested: known,
+                    confidence: 1.0,
+                });
+            }
+        } else if let Some(s) = server.as_ref().and_then(|s| s.correct(candidate, &req.players)) {
             out.push(s);
         }
         emit_progress(
@@ -508,6 +532,59 @@ fn run_inner(
         );
     }
     serde_json::to_string(&out).map_err(|e| e.to_string())
+}
+
+/// Where the self-growing phrase dictionary lives - a plain original->
+/// corrected map, not a model. See record_correction for how it grows and
+/// run_inner above for how it's used to skip the model entirely on repeats.
+fn dictionary_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("phrase_dictionary.json"))
+}
+
+/// Case/whitespace-insensitive dictionary lookup - pulled out of run_inner
+/// as its own pure function so the matching rule is unit-testable without
+/// an AppHandle, same reasoning as is_no_op below.
+fn dictionary_hit(
+    dictionary: &std::collections::HashMap<String, String>,
+    original: &str,
+) -> Option<String> {
+    dictionary.get(&original.trim().to_lowercase()).cloned()
+}
+
+/// Never errors - a missing or unreadable dictionary file just means
+/// nothing learned yet, same "enhancement, not a requirement" shape as
+/// every other optional signal in this app.
+fn load_dictionary(app: &AppHandle) -> std::collections::HashMap<String, String> {
+    dictionary_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Remembers one accepted correction - whether auto-applied at high
+/// confidence or approved by hand in the review list, both are called from
+/// the frontend the moment a suggestion actually lands in the transcript
+/// (same "the decision and the edit both happen in the frontend" split as
+/// everywhere else in this module). Keyed case-insensitively since a name
+/// misheard mid-sentence ("chris") is the same correction as one misheard
+/// at a sentence start ("Chris").
+pub fn record_correction(app: &AppHandle, original: &str, corrected: &str) -> Result<(), String> {
+    let key = original.trim().to_lowercase();
+    let value = corrected.trim().to_string();
+    if key.is_empty() || value.is_empty() || is_no_op(&value, original) {
+        return Ok(()); // not actually a correction - nothing to remember
+    }
+    let path = dictionary_path(app)?;
+    let mut map = load_dictionary(app);
+    map.insert(key, value);
+    let json = serde_json::to_string(&map).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
 }
 
 /// Renders one segment's words as a sentence with the word at `mark_idx`
@@ -753,6 +830,16 @@ fn port_is_taken(port: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dictionary_hit_is_case_and_whitespace_insensitive() {
+        let mut dict = std::collections::HashMap::new();
+        dict.insert("wat".to_string(), "way".to_string());
+        assert_eq!(dictionary_hit(&dict, "Wat"), Some("way".to_string()));
+        assert_eq!(dictionary_hit(&dict, "  wat  "), Some("way".to_string()));
+        assert_eq!(dictionary_hit(&dict, "WAT"), Some("way".to_string()));
+        assert_eq!(dictionary_hit(&dict, "other"), None);
+    }
 
     #[test]
     fn same_sentinel_is_a_no_op() {

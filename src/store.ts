@@ -473,6 +473,19 @@ function loadRecent(): string[] {
   }
 }
 
+/** Fire-and-forget: teaches the self-growing phrase dictionary (see
+ * src-tauri/src/polish.rs) whenever a correction actually lands in the
+ * transcript, whether auto-applied at high confidence or approved by hand -
+ * called from every place a PolishSuggestion gets accepted, so the same
+ * misheard name or game term doesn't need re-explaining clip after clip.
+ * Best-effort: a write failure here shouldn't interrupt the edit that
+ * already happened. */
+function recordPhraseCorrection(original: string, suggested: string): Promise<void> {
+  return invoke<void>("record_phrase_correction", { original, corrected: suggested }).catch(() => {
+    /* the dictionary just won't grow from this one - not worth surfacing */
+  });
+}
+
 function loadCustomStylePresets(): CaptionStyle[] {
   try {
     const raw = JSON.parse(localStorage.getItem("cc.customStylePresets") ?? "[]");
@@ -896,6 +909,7 @@ export const useApp = create<AppState>((set, get) => ({
               }
               for (const s of autoApplied) {
                 get().updateWord(s.segId, s.wordIdx, s.suggested);
+                void recordPhraseCorrection(s.original, s.suggested);
               }
               set({
                 polishJob: null,
@@ -2027,6 +2041,7 @@ export const useApp = create<AppState>((set, get) => ({
               for (const s of autoApplied) {
                 if (!bySeg.has(s.segId)) bySeg.set(s.segId, new Map());
                 bySeg.get(s.segId)!.set(s.wordIdx, s.suggested);
+                void recordPhraseCorrection(s.original, s.suggested);
               }
               segments = segments.map((sg) => {
                 const fixes = bySeg.get(sg.id);
@@ -2282,6 +2297,7 @@ export const useApp = create<AppState>((set, get) => ({
     const s = get().polishSuggestions[index];
     if (!s) return;
     get().updateWord(s.segId, s.wordIdx, s.suggested);
+    void recordPhraseCorrection(s.original, s.suggested);
     set({ polishSuggestions: get().polishSuggestions.filter((_, i) => i !== index) });
   },
 
@@ -2296,6 +2312,7 @@ export const useApp = create<AppState>((set, get) => ({
     // is precautionary rather than a known bug, but cheap to get right.
     for (const s of get().polishSuggestions) {
       get().updateWord(s.segId, s.wordIdx, s.suggested);
+      void recordPhraseCorrection(s.original, s.suggested);
     }
     set({ polishSuggestions: [] });
   },
