@@ -41,6 +41,7 @@ import {
   UNSURE_BELOW,
 } from "./lib/captions";
 import { addEmojis } from "./lib/emojis";
+import { extendHighlightBounds } from "./lib/clipBoundaries";
 import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
 import { sanitizeFilename } from "./lib/naming";
@@ -845,6 +846,24 @@ export const useApp = create<AppState>((set, get) => ({
                 speakerEmbeddings: speakerEmbeddings ?? {},
                 transcribeJob: null,
               });
+              // This transcribe was for one highlight's own range (see
+              // captionThisRange in HighlightsPanel.tsx) - now that its
+              // words exist, check for a setup/reaction line just outside
+              // the current window and widen it to include one. Only ever
+              // widens (see extendHighlightBounds), so this can't clip
+              // anything the loudness scan already found.
+              const rank = get().transcriptSourceRank;
+              const duration = get().mediaInfo?.durationSec;
+              if (rank != null && duration != null) {
+                const h = get().highlights.find((x) => x.rank === rank);
+                if (h) {
+                  const current = get().clipOverrides[rank] ?? { start: h.start, end: h.end };
+                  const extended = extendHighlightBounds(current, segments, duration);
+                  if (extended.extendedBefore || extended.extendedAfter) {
+                    get().adjustHighlightRange(rank, extended.start, extended.end);
+                  }
+                }
+              }
             } catch {
               set({ transcribeJob: null, error: "Failed to parse transcript" });
             }
