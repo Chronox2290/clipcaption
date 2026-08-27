@@ -30,6 +30,7 @@ export default function Editor() {
     projectPath,
     saveProject,
     saveProjectAs,
+    loadProject,
     speakerEmbeddings,
     speakerProfiles,
   } = useApp();
@@ -204,6 +205,13 @@ export default function Editor() {
         </button>
         <button className="btn btn-ghost btn-small" onClick={() => void saveProjectAs()}>
           Save As…
+        </button>
+        <button
+          className="btn btn-ghost btn-small"
+          onClick={() => void loadProject()}
+          title="Open a different saved .ccproj - your work on this video is autosaved first"
+        >
+          📁 Open Project…
         </button>
       </header>
       {restoredSession && (
