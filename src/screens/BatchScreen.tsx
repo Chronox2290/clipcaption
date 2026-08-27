@@ -32,8 +32,22 @@ export default function BatchScreen() {
     setCensor,
     models,
     selectedModel,
+    watching,
+    watchFolderPath,
+    watchFolderCount,
+    startWatchFolder,
+    stopWatchFolder,
   } = useApp();
   const setScreen = () => useApp.setState({ screen: "library" });
+
+  const toggleWatch = async () => {
+    if (watching) {
+      stopWatchFolder();
+      return;
+    }
+    const dir = await pickDirectory();
+    if (dir) void startWatchFolder(dir);
+  };
 
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
@@ -87,6 +101,22 @@ export default function BatchScreen() {
           caption + compress many clips in one go
         </span>
       </header>
+
+      <div className={`watch-folder-banner ${watching ? "active" : ""}`}>
+        <div className="watch-folder-info">
+          <strong>{watching ? "Watching" : "Watch a folder"}</strong>
+          <span className="muted small">
+            {watching
+              ? `${watchFolderPath} — new recordings are captioned + exported automatically${
+                  watchFolderCount > 0 ? ` (${watchFolderCount} so far this session)` : ""
+                }`
+              : "Point this at OBS's recording output folder — every new clip gets captioned and exported with no manual step, using the settings below."}
+          </span>
+        </div>
+        <button className="btn btn-small" onClick={() => void toggleWatch()}>
+          {watching ? "Stop watching" : "Start watching…"}
+        </button>
+      </div>
 
       <div className="batch-body">
         <div className="batch-queue">

@@ -22,6 +22,7 @@ import {
   invoke,
   fileSrc,
   listenJobProgress,
+  listenWatchFolderFile,
   isTauri,
   pickProjectSavePath,
   pickProjectOpenPath,
@@ -381,6 +382,21 @@ interface AppState {
   ) => Promise<void>;
   addBatchPaths: (paths: string[]) => void;
   addBatchFolder: (dir: string) => Promise<void>;
+  /** OBS watch-folder background service (src-tauri/src/watchfolder.rs) -
+   * every NEW video that lands in `watchFolderPath` gets queued into the
+   * same batch pipeline automatically, captioned+exported with sensible
+   * defaults (original quality, saved beside the source), no manual step.
+   * Existing files in the folder when watching starts are NOT queued - use
+   * "Add folder" for those. */
+  watching: boolean;
+  watchFolderPath: string | null;
+  watchFolderJobId: string | null;
+  /** How many clips this watch session has auto-queued - a simple "it's
+   * actually doing something" signal for an otherwise silent background
+   * service. */
+  watchFolderCount: number;
+  startWatchFolder: (folder: string) => Promise<void>;
+  stopWatchFolder: () => void;
   removeBatchItem: (id: string) => void;
   clearBatchItems: () => void;
   /** Loads a "needs_review" batch item's own transcript into the main
@@ -773,6 +789,10 @@ export const useApp = create<AppState>((set, get) => ({
   batch: null,
   batchItems: [],
   batchRunning: false,
+  watching: false,
+  watchFolderPath: null,
+  watchFolderJobId: null,
+  watchFolderCount: 0,
   transcribeJob: null,
   exportJob: null,
   exportDone: null,
@@ -1030,6 +1050,21 @@ export const useApp = create<AppState>((set, get) => ({
         patch(metadataJob, "metadataJob") ||
         patch(demoJob, "demoJob") ||
         patch(modelJob, "modelJob");
+    });
+    await listenWatchFolderFile(({ jobId, path }) => {
+      // Ignore events from a watch session that's since been stopped (or a
+      // stale one from before an app restart) - jobId is the only thing
+      // that ties an event back to a still-active watcher.
+      if (jobId !== get().watchFolderJobId) return;
+      get().addBatchPaths([path]);
+      set({ watchFolderCount: get().watchFolderCount + 1 });
+      // The batch loop re-reads its queue fresh each pass (see
+      // runFileBatch), so a file dropped in mid-run gets picked up on its
+      // own - only need to actually START a run when nothing's already
+      // going.
+      if (!get().batchRunning) {
+        void get().runFileBatch("original", 25, null, "source", "fill");
+      }
     });
     await get().refreshModels();
     try {
@@ -2053,6 +2088,27 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
+  startWatchFolder: async (folder) => {
+    try {
+      const id = await invoke<string>("start_watch_folder", { folder });
+      set({
+        watching: true,
+        watchFolderPath: folder,
+        watchFolderJobId: id,
+        watchFolderCount: 0,
+        error: null,
+      });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  stopWatchFolder: () => {
+    const id = get().watchFolderJobId;
+    if (id) void get().cancelJob(id);
+    set({ watching: false, watchFolderJobId: null });
+  },
+
   removeBatchItem: (id) =>
     set({ batchItems: get().batchItems.filter((i) => i.id !== id) }),
 
@@ -2086,12 +2142,18 @@ export const useApp = create<AppState>((set, get) => ({
         batchItems: get().batchItems.map((i) => (i.id === id ? { ...i, ...patch } : i)),
       });
 
-    for (const item of get().batchItems) {
+    // A while loop that re-reads batchItems fresh each pass, not a snapshot
+    // for-of - so a file the watch-folder service (or a manual add) drops
+    // into the queue mid-run gets picked up automatically once the current
+    // item finishes, rather than sitting there until someone re-triggers a
+    // run by hand.
+    while (true) {
+      const item = get().batchItems.find((i) => i.status === "pending");
+      if (!item) break;
       if (batchCancelRequested) {
-        if (item.status === "pending") setItem(item.id, { status: "skipped" });
+        setItem(item.id, { status: "skipped" });
         continue;
       }
-      if (item.status !== "pending") continue;
 
       const { style, censor } = get(); // mid-batch tweaks apply to later clips
       try {

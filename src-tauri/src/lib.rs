@@ -13,6 +13,7 @@ mod sidecar;
 mod spatial;
 mod polish;
 mod transcribe;
+mod watchfolder;
 
 use jobs::Jobs;
 use tauri::{AppHandle, Manager, State};
@@ -237,6 +238,16 @@ fn build_demo(
 }
 
 #[tauri::command]
+fn start_watch_folder(app: AppHandle, jobs: State<Jobs>, folder: String) -> Result<String, String> {
+    let (id, handle) = jobs.create("watch");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        watchfolder::run(app, job_id, handle, folder);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
 fn cancel_job(jobs: State<Jobs>, id: String) -> Result<(), String> {
     if let Some(handle) = jobs.get(&id) {
         handle.cancel();
@@ -327,6 +338,7 @@ pub fn run() {
             export_video,
             build_montage,
             build_demo,
+            start_watch_folder,
             post_to_discord,
             cancel_job,
             write_text_file,

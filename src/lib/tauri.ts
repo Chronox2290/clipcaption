@@ -26,6 +26,21 @@ export async function listenJobProgress(
   return un;
 }
 
+/** One event per newly-stable file the OBS watch-folder service finds -
+ * see src-tauri/src/watchfolder.rs. Separate channel from job-progress
+ * since a watch job reports many results over an open-ended lifetime, not
+ * the usual one-result-then-done shape. */
+export async function listenWatchFolderFile(
+  cb: (p: { jobId: string; path: string }) => void
+): Promise<() => void> {
+  if (!isTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  const un = await listen<{ jobId: string; path: string }>("watch-folder-file", (e) =>
+    cb(e.payload)
+  );
+  return un;
+}
+
 export async function pickVideoFile(): Promise<string | null> {
   if (!isTauri) return null;
   const { open } = await import("@tauri-apps/plugin-dialog");
