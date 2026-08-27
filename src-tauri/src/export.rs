@@ -210,7 +210,12 @@ pub(crate) fn run_inner(
     } else {
         req
     };
-    let result = run_single_source(app, job_id, handle, req, &cache);
+    // Range extraction+join (when it happened) already reported progress up
+    // through 0.5 - the final pass reports into the other half instead of
+    // its usual full [0,1], so the job's overall progress climbs smoothly
+    // to 100% instead of visibly jumping back down to 0% partway through.
+    let (p_from, p_to) = if joined_source.is_some() { (0.5, 1.0) } else { (0.0, 1.0) };
+    let result = run_single_source(app, job_id, handle, req, &cache, p_from, p_to);
 
     if let Some(joined) = &joined_source {
         let _ = std::fs::remove_file(joined);
@@ -222,14 +227,20 @@ pub(crate) fn run_inner(
 /// subtitle burn-in, quality- or size-targeted encode) - split out from
 /// run_inner so the joined-temp-file cleanup above can run unconditionally
 /// (success or error) without every early return inside here needing to
-/// remember it separately.
+/// remember it separately. `p_from`/`p_to` scope where this pipeline's own
+/// progress reporting sits within the job's overall progress - [0,1]
+/// normally, or the back half when range extraction already used the front
+/// half (see run_inner).
 fn run_single_source(
     app: &AppHandle,
     job_id: &str,
     handle: &Arc<JobHandle>,
     req: &ExportRequest,
     cache: &Path,
+    p_from: f32,
+    p_to: f32,
 ) -> Result<(), String> {
+    let remap = |inner: f32| remap_progress(p_from, p_to, inner);
     // Write the .ass subtitle file if captions are being burned
     let ass_path: Option<PathBuf> = if req.ass_content.trim().is_empty() {
         None
@@ -273,7 +284,7 @@ fn run_single_source(
                 "-movflags".into(), "+faststart".into(),
                 req.output_path.clone(),
             ]);
-            run_ffmpeg(app, job_id, handle, &args, out_duration, 0.0, 1.0, "encoding (GPU)")?;
+            run_ffmpeg(app, job_id, handle, &args, out_duration, remap(0.0), remap(1.0), "encoding (GPU)")?;
             if let Some(ass) = ass_path {
                 let _ = std::fs::remove_file(ass);
             }
@@ -301,7 +312,7 @@ fn run_single_source(
             "-f".into(), "mp4".into(),
             null_out.into(),
         ]);
-        run_ffmpeg(app, job_id, handle, &args1, out_duration, 0.0, 0.5, "pass 1/2")?;
+        run_ffmpeg(app, job_id, handle, &args1, out_duration, remap(0.0), remap(0.5), "pass 1/2")?;
 
         // Pass 2
         let mut args2: Vec<String> = req.input_args();
@@ -321,7 +332,7 @@ fn run_single_source(
             "-movflags".into(), "+faststart".into(),
             req.output_path.clone(),
         ]);
-        run_ffmpeg(app, job_id, handle, &args2, out_duration, 0.5, 1.0, "pass 2/2")?;
+        run_ffmpeg(app, job_id, handle, &args2, out_duration, remap(0.5), remap(1.0), "pass 2/2")?;
 
         // clean pass logs
         for ext in ["log", "log.mbtree"] {
@@ -344,7 +355,7 @@ fn run_single_source(
             req.output_path.clone(),
         ]);
         let label = if encoder == "x264" { "encoding" } else { "encoding (GPU)" };
-        run_ffmpeg(app, job_id, handle, &args, out_duration, 0.0, 1.0, label)?;
+        run_ffmpeg(app, job_id, handle, &args, out_duration, remap(0.0), remap(1.0), label)?;
     }
 
     if let Some(ass) = ass_path {
@@ -478,6 +489,16 @@ fn concat_list_content(paths: &[PathBuf]) -> String {
         out.push_str(&format!("file '{escaped}'\n"));
     }
     out
+}
+
+/// Remaps an inner [0,1] progress fraction (one pass's own pass-1-of-2/
+/// pass-2-of-2 etc. slice) into an outer [p_from,p_to] window - used so a
+/// pipeline stage that's really the SECOND half of a job's overall work
+/// (the final encode after range extraction+join already used the first
+/// half) reports progress that climbs smoothly to 100%, instead of jumping
+/// back down to 0% the moment that stage starts.
+fn remap_progress(p_from: f32, p_to: f32, inner: f32) -> f32 {
+    p_from + inner * (p_to - p_from)
 }
 
 /// Escape a path for use inside an ffmpeg filter argument.
@@ -710,6 +731,18 @@ mod tests {
         let paths = vec![PathBuf::from("a.mp4"), PathBuf::from("it's a clip.mp4")];
         let content = concat_list_content(&paths);
         assert_eq!(content, "file 'a.mp4'\nfile 'it'\\''s a clip.mp4'\n");
+    }
+
+    #[test]
+    fn remap_progress_maps_inner_zero_to_one_onto_the_outer_window() {
+        // The exact case this exists for: range extraction+join used the
+        // front half, so the final encode's own [0,1] must land in [0.5,1].
+        assert!((remap_progress(0.5, 1.0, 0.0) - 0.5).abs() < 1e-6);
+        assert!((remap_progress(0.5, 1.0, 1.0) - 1.0).abs() < 1e-6);
+        assert!((remap_progress(0.5, 1.0, 0.5) - 0.75).abs() < 1e-6);
+        // A plain single-source export (no range resolution) uses the full
+        // window - remapping is a no-op there.
+        assert!((remap_progress(0.0, 1.0, 0.37) - 0.37).abs() < 1e-6);
     }
 
     #[test]
