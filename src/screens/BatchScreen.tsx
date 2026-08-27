@@ -12,6 +12,7 @@ const STATUS_ICON: Record<string, string> = {
   done: "✔",
   error: "✕",
   skipped: "–",
+  needs_review: "⚠",
 };
 
 export default function BatchScreen() {
@@ -24,6 +25,7 @@ export default function BatchScreen() {
     clearBatchItems,
     runFileBatch,
     cancelFileBatch,
+    reviewBatchItem,
     style,
     setStyle,
     censor,
@@ -148,11 +150,25 @@ export default function BatchScreen() {
                     {item.status === "done" && item.output && (
                       <span className="muted small">{item.output}</span>
                     )}
+                    {item.status === "needs_review" && (
+                      <span className="muted small">
+                        AI cleanup found a word it wasn't sure about - held back from export.
+                      </span>
+                    )}
                   </div>
                   <span className="muted small">
                     {item.status === "transcribing" && "captioning…"}
                     {item.status === "exporting" && "exporting…"}
                   </span>
+                  {item.status === "needs_review" && (
+                    <button
+                      className="btn btn-small btn-primary"
+                      onClick={() => void reviewBatchItem(item.id)}
+                      disabled={batchRunning}
+                    >
+                      Review & export
+                    </button>
+                  )}
                   {!batchRunning && item.status === "pending" && (
                     <button
                       className="btn btn-ghost btn-small"

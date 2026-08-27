@@ -334,6 +334,12 @@ interface AppState {
   addBatchFolder: (dir: string) => Promise<void>;
   removeBatchItem: (id: string) => void;
   clearBatchItems: () => void;
+  /** Loads a "needs_review" batch item's own transcript into the main
+   * editor (no re-transcribing - carries the batch run's own segments
+   * forward) and re-runs the cleanup pass fresh there so the exact same
+   * accept/reject review UI already built for a single open clip handles
+   * it, rather than a second bespoke review surface. */
+  reviewBatchItem: (id: string) => Promise<void>;
   runFileBatch: (
     presetId: string,
     customMb: number,
@@ -1694,6 +1700,18 @@ export const useApp = create<AppState>((set, get) => ({
 
   clearBatchItems: () => set({ batchItems: [] }),
 
+  reviewBatchItem: async (id) => {
+    const item = get().batchItems.find((i) => i.id === id);
+    if (!item || !item.segments) return;
+    await get().openVideo(item.path);
+    set({
+      segments: item.segments,
+      speakerEmbeddings: item.speakerEmbeddings ?? {},
+      editorTab: "transcript",
+    });
+    await get().reviewTranscript();
+  },
+
   /**
    * Process every queued clip: transcribe whole clip -> style captions ->
    * export with the chosen preset. Continues past per-file failures.
@@ -1738,9 +1756,63 @@ export const useApp = create<AppState>((set, get) => ({
         );
         currentBatchJobId = null;
 
-        const { segments, speakerEmbeddings } = result
-          ? (JSON.parse(result) as TranscribeResult)
-          : { segments: [], speakerEmbeddings: {} };
+        const parsed: TranscribeResult = result
+          ? JSON.parse(result)
+          : { segments: [], waveform: [], waveformStep: 0.01, waveformOffset: 0, speakerEmbeddings: {} };
+        let segments: Segment[] = parsed.segments;
+        const speakerEmbeddings = parsed.speakerEmbeddings ?? {};
+
+        // Confidence-gated cleanup: a clip where every flagged word clears
+        // automatically skips straight to export like before this existed.
+        // One that still has genuinely ambiguous words is held back rather
+        // than exporting an unreviewed guess - status "needs_review", picked
+        // up later via reviewBatchItem instead of blocking the rest of the
+        // batch behind it.
+        if (get().polishAvailable) {
+          setItem(item.id, { status: "transcribing", progress: -1 });
+          try {
+            const pid = await invoke<string>("polish_transcript", {
+              req: {
+                segments: segments.map((s) => ({
+                  id: s.id,
+                  words: s.words.map((w) => ({ text: w.text, confidence: w.confidence ?? 1 })),
+                })),
+                players: get().speakerProfiles.map((p) => p.name),
+                threshold: UNSURE_BELOW,
+              },
+            });
+            currentBatchJobId = pid;
+            const presult = await waitForJob(pid);
+            currentBatchJobId = null;
+            const suggestions = presult ? (JSON.parse(presult) as PolishSuggestion[]) : [];
+            const forReview = suggestions.filter((s) => s.confidence < AUTO_APPLY_CONFIDENCE);
+            const autoApplied = suggestions.filter((s) => s.confidence >= AUTO_APPLY_CONFIDENCE);
+            if (autoApplied.length > 0) {
+              const bySeg = new Map<string, Map<number, string>>();
+              for (const s of autoApplied) {
+                if (!bySeg.has(s.segId)) bySeg.set(s.segId, new Map());
+                bySeg.get(s.segId)!.set(s.wordIdx, s.suggested);
+              }
+              segments = segments.map((sg) => {
+                const fixes = bySeg.get(sg.id);
+                if (!fixes) return sg;
+                return {
+                  ...sg,
+                  words: sg.words.map((w, i) => (fixes.has(i) ? { ...w, text: fixes.get(i)! } : w)),
+                };
+              });
+            }
+            if (forReview.length > 0) {
+              setItem(item.id, { status: "needs_review", progress: 1, segments, speakerEmbeddings });
+              continue;
+            }
+          } catch {
+            // Cleanup pass failing shouldn't block export - carry on with
+            // the unreviewed transcript exactly like before this existed.
+            currentBatchJobId = null;
+          }
+        }
+
         // Each batch clip is its own file with its own independent
         // diarization pass (and often a different source video entirely),
         // so — same as exportSelectedHighlights — names are resolved by

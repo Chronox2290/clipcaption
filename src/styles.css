@@ -1741,6 +1741,12 @@ kbd {
 .batch-row.st-skipped {
   opacity: 0.5;
 }
+.batch-row.st-needs_review {
+  border-color: rgba(var(--warn-rgb), 0.5);
+}
+.st-needs_review .batch-status {
+  color: var(--warn);
+}
 .batch-status {
   width: 20px;
   text-align: center;

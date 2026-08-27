@@ -251,10 +251,20 @@ export interface BatchItem {
   id: string;
   path: string;
   name: string;
-  status: "pending" | "transcribing" | "exporting" | "done" | "error" | "skipped";
+  /** "needs_review": the AI cleanup pass found at least one word it wasn't
+   * confident enough to fix on its own - this clip is deliberately held
+   * back from auto-export rather than shipping an unreviewed guess (see
+   * reviewBatchItem in store.ts). Every other clip in the batch that
+   * cleared cleanup automatically still exports without waiting on it. */
+  status: "pending" | "transcribing" | "exporting" | "done" | "error" | "skipped" | "needs_review";
   progress: number; // 0..1 within the current stage, -1 indeterminate
   output?: string;
   error?: string;
+  /** Set only when status is "needs_review" - carries this item's own
+   * transcribe result forward so reviewBatchItem can load it straight into
+   * the editor without re-transcribing. */
+  segments?: Segment[];
+  speakerEmbeddings?: Record<string, number[]>;
 }
 
 export interface BatchState {
