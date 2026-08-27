@@ -1,7 +1,72 @@
 # ClipCaption — status summary
 
 Plain-language write-up of what's changed recently and where things stand. Current as of
-**v0.2.10** (commit `6293573`).
+**2026-08-27**, commit `448f40c`. Everything below "New since v0.2.10" was built in one long session
+after the v0.2.10 draft release described further down — that release note is kept as-is since it's
+still an accurate record of what shipped in it, not because it's the latest state.
+
+## New since v0.2.10 (this session)
+
+**Two bugs, both re-verified fixed, not just assumed:**
+- The exported-video caption-overlap bug (captions stacked with no offset in the export, correct in
+  the live preview) — one export path was missing a layout call the other three already had.
+- "Load Project is broken" — was never actually broken, just hard to find (it's on the Library/home
+  screen). Also added a second, more visible "Open Project…" button directly in the editor's header.
+
+**Everything from the brief's "rest of the backlog" section, per an explicit "build all of it"
+instruction — 11 of 13 items, each with real tests or a real functional smoke test against the
+actual bundled tools before being called done, not just a type-check:**
+- **Confidence-gated auto-export** and **tiered auto-cleanup** — a clip where the AI cleanup pass
+  found nothing to flag skips the editor entirely and goes straight to export; one with genuinely
+  ambiguous words is held for review instead.
+- **Cross-cutting error visibility** — a partial forced-alignment run or a failed batch item now
+  says so plainly instead of finishing silently as if nothing went wrong.
+- **Local AI title/hook/hashtag generation**, using the same on-device model that already does
+  transcript cleanup. Caught and fixed a real bug while testing against the actual model: the
+  request shape it was sending would have made every generation silently fail (llama-server rejects
+  `logprobs:false` alongside a `top_logprobs` field with an HTTP 400).
+- **Explainable highlight scoring** — every auto-detected highlight now shows a plain-language "why"
+  tag (e.g. "Sustained hype · loud"), and a thumbs up/down teaches the detector a persisted,
+  bucketed bias that nudges future scans toward what you actually keep picking.
+- **One-click before/after demo export** — renders the clip raw and captioned side by side into one
+  shareable file.
+- **Shareable style presets** — export/import a caption look as a plain `.ccstyle` JSON file, no
+  marketplace.
+- **Genre-aware highlight tuning** — FPS/battle royale/MOBA bias what counts as one highlight and
+  how wide its window is (short independent bursts vs. one long escalating event); "General"
+  reproduces the exact pre-existing behavior untouched.
+- **Self-growing phrase dictionary** — an accepted correction (auto-applied or approved by hand) is
+  remembered, so the AI cleanup pass stops re-asking about the same misheard name clip after clip;
+  when every flagged word is already known, the model doesn't even need to be running.
+- **Transcript-aware highlight boundaries** — a "watch this" setup line or "did you see that"
+  reaction just outside a highlight's window now extends it; never trims.
+- **Platform safe-zone overlays** — shows where TikTok/Reels/Shorts' own UI sits over a 9:16 export,
+  as a preview overlay only.
+- **Thumbnail auto-picker** — grabs the frame at a highlight's own loudness-peak moment as a
+  one-click thumbnail.
+- Not done: **multi-language caption translation**, **OBS watch-folder background service**.
+
+**Transcription accuracy — measured against the real ground-truth clip, tracked as two separate
+numbers (word accuracy, timing accuracy), not one blended figure:**
+- Decoding parameters (temperature/best-of/beam-size/language pinning) were already all in effect —
+  confirmed against the actual bundled whisper-cli's own defaults, not assumed. Nothing to change.
+- Tested auto-feeding saved speaker/friend names into the transcription prompt (a real gap: the
+  prompt field was 100% manual before this). Measured result on the ground-truth clip: word accuracy
+  went DOWN slightly (68.4% → 66.4%). Not adopted — written up so it isn't re-tried blind, same
+  treatment as the earlier VAD rejection.
+- Tested `large-v3` against the current default `large-v3-turbo`. Turbo wins on word accuracy
+  (68.4% vs 63.8%); large-v3 wins meaningfully on timing precision (median word-start error 62ms vs
+  123ms). A real trade-off, not a clean win — currently flagged for a decision, default unchanged.
+- **Multi-track audio detection shipped** (the "Case A" half of the voice/game-audio split): if a
+  recording already has separate mic/game tracks (OBS Advanced output mode), the app now probes for
+  them and lets you pick the voice track directly — no AI separation needed. Verified end-to-end
+  against a real synthetic multi-track file.
+- **Not started: Case B**, real voice/game source separation for a single mixed-down recording
+  (the actual common case) via Spleeter. Flagged as needing a decision before starting — it's a much
+  bigger bundled-dependency call than anything else on this list, not a quick addition.
+
+See `CLAUDE-CODE-BRIEF.md`'s dated 2026-08-27 entries for the full reasoning and numbers behind each
+of the accuracy findings above.
 
 ## What ClipCaption is
 
@@ -97,9 +162,15 @@ reassign it, keyboard shortcuts for frame-accurate nudging, and full undo/redo.
 ## What's still open
 
 - **Speaker accuracy** beyond just setting the headcount — the top remaining correctness issue.
-- **Forced alignment** — a further word-timing upgrade that's been researched and scoped but not
-  built, because it needs about 10 minutes of you manually confirming real word timings first so
-  any claimed improvement can actually be measured rather than assumed.
+- **Forced alignment is now built** (this note was stale — see the dated 2026-08-27 entries in
+  `CLAUDE-CODE-BRIEF.md` for the real measured word-timing numbers against the ground-truth clip).
+- **Model-size trade-off (large-v3 vs large-v3-turbo)** — measured, not yet decided; see "New since
+  v0.2.10" above.
+- **Voice/game audio separation, Case B** (single mixed-down recording, via Spleeter) — the biggest
+  remaining transcription-accuracy lever, needs a bundled-dependency decision before starting.
+- **Batch/watch-folder ingestion as a true background service** — batch processing of a folder
+  exists; the "runs unattended, watches for new files with no manual step" version does not yet.
+- **Multi-language caption translation** — not started.
 - **Multi-select and a "razor" cut tool** on the timeline — currently one word or line at a time.
 - Automatically collapsing whisper's occasional stuttering repeats ("go, go, go, go, go") — not
   done; confirmed the AI cleanup pass won't touch these safely, so it needs its own simple check.
@@ -111,7 +182,7 @@ reassign it, keyboard shortcuts for frame-accurate nudging, and full undo/redo.
 
 ## Current release state
 
-- Latest commit: `6293573` ("Release v0.2.10").
-- **v0.2.10 is built and signed, sitting as an unpublished draft GitHub Release** — verified with
-  a real local install build, not just a compile check. Waiting on someone to click "Publish."
+- The app version manifest is still pinned at 0.2.10 — none of "New since v0.2.10" above has been
+  built into an installer or tagged as a release yet. A real local install build (not just a compile
+  check) is still owed before any of this ships, matching how every prior release was verified.
 - **v0.2.9 is the version currently live** — what existing installs would update to today.
