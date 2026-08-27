@@ -122,6 +122,20 @@ fn polish_transcript(
 }
 
 #[tauri::command]
+fn generate_metadata(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    req: polish::MetadataRequest,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("metadata");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        polish::generate_metadata(app, job_id, handle, req);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
 fn analyze_highlights(
     app: AppHandle,
     jobs: State<Jobs>,
@@ -266,6 +280,7 @@ pub fn run() {
             polish_available,
             download_polish_model,
             polish_transcript,
+            generate_metadata,
             align_transcript
         ])
         .run(tauri::generate_context!())

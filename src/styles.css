@@ -1444,6 +1444,36 @@ kbd {
   user-select: text;
 }
 
+.metadata-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+.metadata-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(124, 92, 255, 0.06);
+  border: 1px solid rgba(124, 92, 255, 0.2);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.metadata-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  padding-top: 2px;
+}
+.metadata-text {
+  flex: 1;
+  font-size: 13px;
+  user-select: text;
+  word-break: break-word;
+}
+
 /* highlights */
 .hl-panel {
   display: flex;

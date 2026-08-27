@@ -15,6 +15,7 @@ import type {
   ProjectFile,
   PolishSuggestion,
   MontageClip,
+  ClipMetadata,
 } from "./types";
 import {
   invoke,
@@ -32,6 +33,7 @@ import {
   nextId,
   paginate,
   resolveSpeakerNames,
+  speakerLabel,
   layoutRows,
   shiftPages,
   UNSURE_BELOW,
@@ -179,6 +181,12 @@ interface AppState {
   alignJob: JobState | null;
   montageJob: JobState | null;
   discordJob: JobState | null;
+  metadataJob: JobState | null;
+  /** Last title/hook/hashtags generated for the open clip - cleared when a
+   * new generation starts, never applied anywhere, just displayed for the
+   * user to copy. */
+  clipMetadata: ClipMetadata | null;
+  generateMetadata: () => Promise<void>;
   /** Persisted webhook URL for "post finished export to Discord" - a
    * channel's own Integrations settings gives you one, no bot setup. Empty
    * means the feature is simply unused (Export never shows the checkbox). */
@@ -677,6 +685,8 @@ export const useApp = create<AppState>((set, get) => ({
   alignJob: null,
   montageJob: null,
   discordJob: null,
+  metadataJob: null,
+  clipMetadata: null,
   discordWebhook: localStorage.getItem("cc.discordWebhook") ?? "",
   autoPostToDiscord: localStorage.getItem("cc.autoPostDiscord") === "1",
   models: [],
@@ -743,7 +753,7 @@ export const useApp = create<AppState>((set, get) => ({
       }
 
       // 2) jobs tracked in UI state
-      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob, montageJob, discordJob } = get();
+      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob, montageJob, discordJob, metadataJob } = get();
       const patch = (
         job: JobState | null,
         key:
@@ -756,6 +766,7 @@ export const useApp = create<AppState>((set, get) => ({
           | "alignJob"
           | "montageJob"
           | "discordJob"
+          | "metadataJob"
       ) => {
         if (!job || job.id !== p.id) return false;
         if (p.error) {
@@ -791,6 +802,13 @@ export const useApp = create<AppState>((set, get) => ({
             }
           } else if (key === "discordJob") {
             set({ discordJob: null });
+          } else if (key === "metadataJob" && p.result) {
+            try {
+              const clipMetadata = JSON.parse(p.result) as ClipMetadata;
+              set({ metadataJob: null, clipMetadata });
+            } catch {
+              set({ metadataJob: null, error: "Failed to parse generated metadata" });
+            }
           } else if (key === "polishModelJob") {
             set({ polishModelJob: null, polishAvailable: true });
           } else if (key === "alignJob" && p.result) {
@@ -887,6 +905,7 @@ export const useApp = create<AppState>((set, get) => ({
         patch(alignJob, "alignJob") ||
         patch(montageJob, "montageJob") ||
         patch(discordJob, "discordJob") ||
+        patch(metadataJob, "metadataJob") ||
         patch(modelJob, "modelJob");
     });
     await get().refreshModels();
@@ -1617,6 +1636,29 @@ export const useApp = create<AppState>((set, get) => ({
   setAutoPostToDiscord: (v) => {
     localStorage.setItem("cc.autoPostDiscord", v ? "1" : "0");
     set({ autoPostToDiscord: v });
+  },
+
+  generateMetadata: async () => {
+    const { segments, speakerEmbeddings, speakerProfiles } = get();
+    if (!segments.length) {
+      set({ error: "No transcript to work from - caption this clip first." });
+      return;
+    }
+    const names = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
+    const transcript = segments
+      .map((s) => {
+        const text = s.words.map((w) => w.text).join(" ");
+        const label = speakerLabel(s.speaker, names);
+        return label ? `${label}: ${text}` : text;
+      })
+      .join("\n");
+    try {
+      set({ error: null, clipMetadata: null });
+      const id = await invoke<string>("generate_metadata", { req: { transcript } });
+      set({ metadataJob: { id, stage: "metadata", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
   },
 
   postToDiscord: async (filePath, message) => {

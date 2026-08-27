@@ -28,7 +28,17 @@ export default function ExportDrawer() {
     autoPostToDiscord,
     setAutoPostToDiscord,
     discordJob,
+    polishAvailable,
+    generateMetadata,
+    metadataJob,
+    clipMetadata,
   } = useApp();
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  const copy = (field: string, text: string) => {
+    void navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField((f) => (f === field ? null : f)), 1500);
+  };
   const [presetId, setPresetId] = useState("original");
   // Independent of which preset is picked - previously only the "custom"
   // preset (no forced resolution at all) could target a file size, so a
@@ -223,6 +233,47 @@ export default function ExportDrawer() {
       )}
       {discordJob && (
         <p className="muted small">Posting to Discord…</p>
+      )}
+
+      {polishAvailable && segments.length > 0 && (
+        <>
+          <h4>Title, hook &amp; hashtags</h4>
+          <button
+            className="btn btn-small"
+            onClick={() => void generateMetadata()}
+            disabled={!!metadataJob}
+          >
+            {metadataJob ? "Generating…" : clipMetadata ? "Regenerate" : "✨ Generate from transcript"}
+          </button>
+          {clipMetadata && (
+            <div className="metadata-result">
+              <div className="metadata-row">
+                <span className="metadata-label">Title</span>
+                <span className="metadata-text">{clipMetadata.title}</span>
+                <button className="btn btn-ghost btn-small" onClick={() => copy("title", clipMetadata.title)}>
+                  {copiedField === "title" ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <div className="metadata-row">
+                <span className="metadata-label">Hook</span>
+                <span className="metadata-text">{clipMetadata.hook}</span>
+                <button className="btn btn-ghost btn-small" onClick={() => copy("hook", clipMetadata.hook)}>
+                  {copiedField === "hook" ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <div className="metadata-row">
+                <span className="metadata-label">Hashtags</span>
+                <span className="metadata-text">{clipMetadata.hashtags.join(" ")}</span>
+                <button
+                  className="btn btn-ghost btn-small"
+                  onClick={() => copy("hashtags", clipMetadata.hashtags.join(" "))}
+                >
+                  {copiedField === "hashtags" ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {!exportJob && (

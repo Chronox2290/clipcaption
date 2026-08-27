@@ -24,6 +24,15 @@ export interface PolishSuggestion {
   confidence: number;
 }
 
+/** Title/hook/hashtags generated from a clip's transcript by the same local
+ * LLM cleanup uses (see src-tauri/src/polish.rs's suggest_metadata) -
+ * shown for the user to copy, never applied automatically anywhere. */
+export interface ClipMetadata {
+  title: string;
+  hook: string;
+  hashtags: string[];
+}
+
 export interface Segment {
   id: string;
   words: WordSpan[];

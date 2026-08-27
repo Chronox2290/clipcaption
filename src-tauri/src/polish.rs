@@ -234,6 +234,142 @@ pub fn available(app: &AppHandle) -> bool {
         && model_path(app).map(|p| p.exists()).unwrap_or(false)
 }
 
+// ---------------- title / hook / hashtag generation ----------------
+//
+// A second, separate use of the same local model - competitors charge for
+// cloud metadata generation; this is free and never leaves the machine.
+// Deliberately a different shape of task than the word-correction pass
+// above: generating a few lines of freeform marketing copy from a whole
+// transcript tolerates imperfection in a way that correcting one exact
+// word does not, so the "never show it more than one sentence" caution in
+// this module's own doc comment doesn't apply here the same way.
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MetadataRequest {
+    pub transcript: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipMetadata {
+    pub title: String,
+    pub hook: String,
+    pub hashtags: Vec<String>,
+}
+
+pub fn generate_metadata(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: MetadataRequest) {
+    let stage = "metadata";
+    let result = generate_metadata_inner(&app, &handle, &req);
+    match result {
+        Ok(json) => emit_done(&app, &job_id, stage, Some(json)),
+        Err(e) => {
+            if handle.is_cancelled() {
+                emit_error(&app, &job_id, stage, "Cancelled".into());
+            } else {
+                emit_error(&app, &job_id, stage, e);
+            }
+        }
+    }
+}
+
+fn generate_metadata_inner(
+    app: &AppHandle,
+    handle: &Arc<JobHandle>,
+    req: &MetadataRequest,
+) -> Result<String, String> {
+    if req.transcript.trim().is_empty() {
+        return Err("No transcript to work from - caption this clip first.".into());
+    }
+    let server = start(app).ok_or_else(|| {
+        "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it."
+            .to_string()
+    })?;
+    if handle.is_cancelled() {
+        return Err("Cancelled".into());
+    }
+    let metadata = server
+        .suggest_metadata(&req.transcript)
+        .ok_or("The model didn't return a usable answer - try again.")?;
+    serde_json::to_string(&metadata).map_err(|e| e.to_string())
+}
+
+const METADATA_SYSTEM_PROMPT: &str = "You write short, punchy social-media metadata for clips of friends playing co-op games together, based on a transcript of what was said. Reply in EXACTLY this three-line format, nothing else:\nTITLE: <a short, catchy title, under 60 characters>\nHOOK: <one attention-grabbing line for the first second of the video, under 100 characters>\nHASHTAGS: <5 to 8 relevant hashtags separated by spaces, each starting with #, lowercase, no spaces inside a tag>";
+
+impl Server {
+    /// Cap how much transcript text gets sent - a long clip's full
+    /// transcript could blow the small context window this server is
+    /// deliberately run with (see start()'s own comment); the model only
+    /// needs enough to get the gist of what happened, not every word.
+    fn suggest_metadata(&self, transcript: &str) -> Option<ClipMetadata> {
+        const MAX_CHARS: usize = 3000;
+        let clipped: String = transcript.chars().take(MAX_CHARS).collect();
+
+        let body = ChatRequest {
+            messages: vec![
+                ChatMessage::system(METADATA_SYSTEM_PROMPT),
+                ChatMessage::user(&format!("Transcript:\n{clipped}")),
+            ],
+            temperature: 0.7,
+            max_tokens: 200,
+            cache_prompt: false,
+            logprobs: false,
+            top_logprobs: None,
+        };
+        let resp: ChatResponse = self
+            .client
+            .post(format!(
+                "http://127.0.0.1:{}/v1/chat/completions",
+                self.port
+            ))
+            .json(&body)
+            .send()
+            .ok()?
+            .json()
+            .ok()?;
+        let text = resp.choices.into_iter().next()?.message.content;
+        parse_metadata(&text)
+    }
+}
+
+/// Parses the TITLE/HOOK/HASHTAGS format asked for above. Line-prefix
+/// matching (not a rigid line-position assumption) so a model that adds a
+/// blank line or reorders slightly still parses, rather than a strict
+/// three-line-exactly format failing on the first minor deviation.
+fn parse_metadata(text: &str) -> Option<ClipMetadata> {
+    let mut title = None;
+    let mut hook = None;
+    let mut hashtags = None;
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(rest) = strip_prefix_ci(line, "TITLE:") {
+            title = Some(rest.trim().to_string());
+        } else if let Some(rest) = strip_prefix_ci(line, "HOOK:") {
+            hook = Some(rest.trim().to_string());
+        } else if let Some(rest) = strip_prefix_ci(line, "HASHTAGS:") {
+            hashtags = Some(
+                rest.split_whitespace()
+                    .map(|t| t.trim_start_matches('#').to_lowercase())
+                    .filter(|t| !t.is_empty())
+                    .map(|t| format!("#{t}"))
+                    .collect::<Vec<_>>(),
+            );
+        }
+    }
+    let title = title.filter(|t| !t.is_empty())?;
+    let hook = hook.filter(|h| !h.is_empty())?;
+    let hashtags = hashtags.filter(|h| !h.is_empty())?;
+    Some(ClipMetadata { title, hook, hashtags })
+}
+
+fn strip_prefix_ci<'a>(line: &'a str, prefix: &str) -> Option<&'a str> {
+    if line.len() >= prefix.len() && line[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        Some(&line[prefix.len()..])
+    } else {
+        None
+    }
+}
+
 /// Downloads the cleanup model into app_data_dir/models (see model_path) -
 /// the same resumable-download shape as models::download for whisper's own
 /// models, kept as its own small copy rather than generalizing that
@@ -450,7 +586,7 @@ impl Server {
             max_tokens: 24,
             cache_prompt: true,
             logprobs: true,
-            top_logprobs: 1,
+            top_logprobs: Some(1),
         };
         let resp: ChatResponse = self
             .client
@@ -544,7 +680,12 @@ struct ChatRequest {
     /// assumed from the OpenAI spec it mimics. This is the actual signal
     /// AUTO_APPLY_CONFIDENCE is built on.
     logprobs: bool,
-    top_logprobs: u32,
+    /// Must be omitted (not just falsy) when logprobs is false - confirmed
+    /// against the real server, which rejects `top_logprobs` present
+    /// alongside `logprobs: false` with a 400 ("top_logprobs requires
+    /// logprobs to be set to true") rather than ignoring it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_logprobs: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -681,6 +822,32 @@ mod tests {
     fn free_port_returns_a_port_nothing_is_listening_on_yet() {
         let port = free_port().expect("OS should hand out a port");
         assert!(!port_is_taken(port));
+    }
+
+    #[test]
+    fn parses_a_clean_three_line_answer() {
+        let text = "TITLE: We Got Wiped by a Mimic\nHOOK: This chest was NOT a chest\nHASHTAGS: #gaming #coop #fail #funny #twitchclips";
+        let m = parse_metadata(text).expect("should parse");
+        assert_eq!(m.title, "We Got Wiped by a Mimic");
+        assert_eq!(m.hook, "This chest was NOT a chest");
+        assert_eq!(m.hashtags, vec!["#gaming", "#coop", "#fail", "#funny", "#twitchclips"]);
+    }
+
+    #[test]
+    fn parses_lowercase_labels_and_blank_lines_and_normalizes_hashtags() {
+        // Real models don't always follow a format exactly - tolerate
+        // lowercase labels, a stray blank line, and hashtags the model
+        // forgot to prefix with # or wrote in mixed case.
+        let text = "\ntitle: Clutch 1v3 Ace\n\nhook: Nobody believed this would work\nhashtags: Gaming COOP #ace clutch";
+        let m = parse_metadata(text).expect("should parse");
+        assert_eq!(m.title, "Clutch 1v3 Ace");
+        assert_eq!(m.hashtags, vec!["#gaming", "#coop", "#ace", "#clutch"]);
+    }
+
+    #[test]
+    fn missing_a_required_section_fails_to_parse() {
+        assert!(parse_metadata("TITLE: Only a title\nHOOK: and a hook").is_none());
+        assert!(parse_metadata("just some prose with no labels at all").is_none());
     }
 
     // start()/available() need a real AppHandle (for app_data_dir), which
