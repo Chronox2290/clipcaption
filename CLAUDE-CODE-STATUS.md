@@ -129,8 +129,17 @@ retroactively; see the note there for what's real vs. what was stale. The montag
 gap (no watch-folder/batch pipeline hookup) is what "end-of-session digest" above actually closes, just
 via a lighter-weight plain concat rather than routing through montage.rs's per-clip re-render pipeline
 (unnecessary here — a batch run's outputs are already captioned/exported and share one preset's codec
-settings, so there's nothing to re-render). The montage builder's other named gap — no target-file-size
-limit on the final joined output — is still open, next up.
+settings, so there's nothing to re-render). The montage builder's other named gap — target-file-size
+limit on the final joined output — is now also closed: each clip still renders at quality (CRF)
+independently, but a size cap on the whole joined file runs one more pass through export.rs's existing
+2-pass x264/VBV size-target machinery (reused, not reimplemented). Verified with the actual
+join-then-2-pass-encode ffmpeg chain run for real against synthetic clips, not just type-checked.
+
+With both named montage-builder gaps closed and the death detector being the one item left with real
+work (see `CLAUDE-CODE-BRIEF.md`), the numbered priority list from 2026-08-27 is now fully resolved.
+Next: picking through the backlog's "genuinely new" and "catching up to competitors" sections for
+what's still actually missing (confirmed absent from the code, not just assumed from the docs, given
+how far those had drifted before this session's correction).
 
 ## What ClipCaption is
 
