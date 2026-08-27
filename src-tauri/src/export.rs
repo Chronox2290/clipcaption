@@ -9,7 +9,7 @@ use crate::encoders;
 use crate::jobs::{emit_done, emit_error, emit_progress, JobHandle};
 use crate::sidecar;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportRequest {
     pub input_path: String,
@@ -62,15 +62,13 @@ impl ExportRequest {
         }
     }
 
-    /// ffmpeg input args. With cut_ranges, trimming happens per-segment in the
-    /// filtergraph instead, so this is just a plain input. Otherwise implements
-    /// the single trim (-ss before -i, -t after).
+    /// ffmpeg input args: the single trim (-ss before -i, -t after). Never
+    /// called with cut_ranges present - run_inner resolves those into a
+    /// joined temp file first and neutralizes cut_ranges before this or
+    /// filter_and_map_args ever sees the request (see prepare_ranges_source).
     fn input_args(&self) -> Vec<String> {
+        debug_assert!(self.ranges().is_none(), "input_args called with unresolved cut_ranges");
         let mut args: Vec<String> = vec!["-y".into()];
-        if self.ranges().is_some() {
-            args.extend(["-i".into(), self.input_path.clone()]);
-            return args;
-        }
         if let Some(s) = self.trim_start {
             if s > 0.0 {
                 args.extend(["-ss".into(), format!("{s:.3}")]);
@@ -84,49 +82,20 @@ impl ExportRequest {
     }
 
     /// Builds the full "-filter_complex ... -map ... [-map ...]" args for this
-    /// request. Always goes through filter_complex — even for the common
-    /// single-source case — so multi-segment concat, crop/"fit" letterboxing,
-    /// the resolution cap, and subtitle burn-in are all one code path instead
-    /// of a `-vf`/`-filter_complex` split that has to duplicate each stage.
+    /// request: crop/"fit" letterboxing, the resolution cap, and subtitle
+    /// burn-in as one filtergraph. Never called with cut_ranges present -
+    /// see input_args's own doc comment for why.
     ///
     /// `include_audio`: false for the audio-less first pass of a 2-pass x264
     /// encode (run with -an) — a filtergraph output pad that's never consumed
     /// by a -map is a hard ffmpeg error, not a harmless no-op, so the audio
     /// stages must not be built at all in that case, not just left unmapped.
     fn filter_and_map_args(&self, ass_path: Option<&Path>, include_audio: bool) -> Vec<String> {
+        debug_assert!(self.ranges().is_none(), "filter_and_map_args called with unresolved cut_ranges");
         let mut fc = String::new();
-        // 1) Video source: either the concat of several trimmed ranges, or
-        // (when there's nothing else to do) the plain input stream.
         let mut v_label = "0:v".to_string();
-        if let Some(ranges) = self.ranges() {
-            for (i, (s, e)) in ranges.iter().enumerate() {
-                fc.push_str(&format!(
-                    "[0:v]trim=start={s:.3}:end={e:.3},setpts=PTS-STARTPTS[v{i}];"
-                ));
-                if include_audio {
-                    fc.push_str(&format!(
-                        "[0:a]atrim=start={s:.3}:end={e:.3},asetpts=PTS-STARTPTS[a{i}];"
-                    ));
-                }
-            }
-            for i in 0..ranges.len() {
-                fc.push_str(&format!("[v{i}]"));
-                if include_audio {
-                    fc.push_str(&format!("[a{i}]"));
-                }
-            }
-            fc.push_str(&format!(
-                "concat=n={}:v=1:a={}[vcat]",
-                ranges.len(),
-                if include_audio { 1 } else { 0 }
-            ));
-            if include_audio {
-                fc.push_str("[acat]");
-            }
-            v_label = "vcat".to_string();
-        }
 
-        // 2) Crop/fit into a forced target size, or just cap the resolution.
+        // 1) Crop/fit into a forced target size, or just cap the resolution.
         if let (Some(w), Some(h)) = (self.target_w, self.target_h) {
             if !fc.is_empty() {
                 fc.push(';');
@@ -155,7 +124,7 @@ impl ExportRequest {
             v_label = "vres".to_string();
         }
 
-        // 3) Burn in subtitles last, after any crop/scale.
+        // 2) Burn in subtitles last, after any crop/scale.
         if let Some(ass) = ass_path {
             if !fc.is_empty() {
                 fc.push(';');
@@ -174,10 +143,8 @@ impl ExportRequest {
         }
         let mut args = vec!["-filter_complex".into(), fc, "-map".into(), format!("[{v_label}]")];
         if include_audio {
-            // Audio was only pulled into the filtergraph by the concat stage
-            // (cut_ranges); otherwise it's untouched, so map the raw stream.
-            let a_label = if self.ranges().is_some() { "[acat]".to_string() } else { "0:a".to_string() };
-            args.extend(["-map".into(), a_label]);
+            // Audio is untouched by anything in this filtergraph - map the raw stream.
+            args.extend(["-map".into(), "0:a".into()]);
         }
         args
     }
@@ -213,6 +180,56 @@ pub(crate) fn run_inner(
         .join("export");
     std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
 
+    // Multi-range requests (compiling several highlights into one file, a
+    // reel) get their ranges resolved into one joined temp file FIRST, fast
+    // and independent of the source's total length - see
+    // prepare_ranges_source's own doc comment for why this replaced a
+    // single-filtergraph approach that decoded almost the whole source for
+    // a handful of short clips. Once resolved, everything below runs
+    // exactly the single-source path it always has, just pointed at the
+    // joined file instead of the original.
+    let joined_source: Option<PathBuf> = if req.ranges().is_some() {
+        Some(prepare_ranges_source(app, job_id, handle, req, &cache)?)
+    } else {
+        None
+    };
+    let owned_req;
+    let req: &ExportRequest = if let Some(joined) = &joined_source {
+        owned_req = ExportRequest {
+            input_path: joined.to_string_lossy().into_owned(),
+            // duration_sec must become the JOINED file's own duration, not
+            // the original (possibly much longer) source's - effective_duration()
+            // on the neutralized request below falls through to duration_sec
+            // once cut_ranges is None, and the final pass's progress tracking
+            // depends on this being right.
+            duration_sec: req.effective_duration(),
+            cut_ranges: None,
+            ..req.clone()
+        };
+        &owned_req
+    } else {
+        req
+    };
+    let result = run_single_source(app, job_id, handle, req, &cache);
+
+    if let Some(joined) = &joined_source {
+        let _ = std::fs::remove_file(joined);
+    }
+    result
+}
+
+/// The single-source encode pipeline (crop/scale, resolution cap,
+/// subtitle burn-in, quality- or size-targeted encode) - split out from
+/// run_inner so the joined-temp-file cleanup above can run unconditionally
+/// (success or error) without every early return inside here needing to
+/// remember it separately.
+fn run_single_source(
+    app: &AppHandle,
+    job_id: &str,
+    handle: &Arc<JobHandle>,
+    req: &ExportRequest,
+    cache: &Path,
+) -> Result<(), String> {
     // Write the .ass subtitle file if captions are being burned
     let ass_path: Option<PathBuf> = if req.ass_content.trim().is_empty() {
         None
@@ -336,6 +353,133 @@ pub(crate) fn run_inner(
     Ok(())
 }
 
+/// Extracts each of req's cut_ranges to its own fast, frame-accurate temp
+/// file (keyframe-accelerated seek + a short re-encode, NOT a filtergraph
+/// trim off the original source), then joins them with the concat
+/// demuxer. Returns the joined file's path.
+///
+/// Replaces an earlier approach that built one filter_complex trimming N
+/// ranges out of a single decode of the ORIGINAL source - correct in
+/// principle, but a real, reproduced problem in practice: ffmpeg's
+/// filtergraph has to decode the source from frame 0 through the LAST cut
+/// point in one sequential pass, so compiling a few short clips from late
+/// in a long recording (a ~3-minute reel pulled from an 83-minute session,
+/// in the case that surfaced this) forced it to decode nearly the whole
+/// recording - confirmed to eventually stall outright (0% CPU, no
+/// progress, for a full 15 seconds straight and almost certainly longer)
+/// rather than just being slow. This approach's total work instead scales
+/// with the SUM of the ranges' own durations, which is what a
+/// reel/compilation actually needs.
+fn prepare_ranges_source(
+    app: &AppHandle,
+    job_id: &str,
+    handle: &Arc<JobHandle>,
+    req: &ExportRequest,
+    cache: &Path,
+) -> Result<PathBuf, String> {
+    let ranges = req
+        .ranges()
+        .ok_or("prepare_ranges_source called with no cut_ranges")?;
+    let encoder = encoders::resolve(req.encoder.as_deref());
+    let n = ranges.len();
+
+    let mut part_paths: Vec<PathBuf> = Vec::with_capacity(n);
+    let cleanup = |paths: &[PathBuf]| {
+        for p in paths {
+            let _ = std::fs::remove_file(p);
+        }
+    };
+
+    for (i, &(start, end)) in ranges.iter().enumerate() {
+        if handle.is_cancelled() {
+            cleanup(&part_paths);
+            return Err("Cancelled".into());
+        }
+        let part = cache.join(format!("{job_id}_range{i}.mp4"));
+        let dur = (end - start).max(0.1);
+        let args = range_extract_args(&req.input_path, start, dur, &encoder, &part.to_string_lossy());
+        let p_from = i as f32 / n as f32 * 0.5; // extraction fills the first half of progress
+        let p_to = (i + 1) as f32 / n as f32 * 0.5;
+        if let Err(e) = run_ffmpeg(app, job_id, handle, &args, dur, p_from, p_to, "preparing clips") {
+            cleanup(&part_paths);
+            return Err(format!("Preparing clip {}/{} failed: {e}", i + 1, n));
+        }
+        part_paths.push(part);
+    }
+
+    let list_path = cache.join(format!("{job_id}_ranges_list.txt"));
+    std::fs::write(&list_path, concat_list_content(&part_paths)).map_err(|e| e.to_string())?;
+
+    let joined = cache.join(format!("{job_id}_joined.mp4"));
+    let join_args = vec![
+        "-y".to_string(),
+        "-f".to_string(),
+        "concat".to_string(),
+        "-safe".to_string(),
+        "0".to_string(),
+        "-i".to_string(),
+        list_path.to_string_lossy().into_owned(),
+        "-c".to_string(),
+        "copy".to_string(),
+        joined.to_string_lossy().into_owned(),
+    ];
+    // A stream copy - fast enough not to need its own progress slice;
+    // report it as the extraction half finishing out to completion.
+    let join_result = run_ffmpeg(app, job_id, handle, &join_args, 0.0, 0.5, 0.5, "joining clips");
+
+    cleanup(&part_paths);
+    let _ = std::fs::remove_file(&list_path);
+    join_result?;
+
+    Ok(joined)
+}
+
+/// ffmpeg args for extracting one frame-accurate range: `-ss` before `-i`
+/// for fast keyframe-accelerated seeking, then a short re-encode (not
+/// `-c copy`) because stream-copy trimming can only cut on keyframes -
+/// close enough for a rough preview, not for word-synced captions, which
+/// need the cut to land exactly where the caller asked. CRF 16 keeps this
+/// intermediate step visually lossless; the actual requested quality/
+/// bitrate is applied once, in the final pass over the (short) joined
+/// result, not duplicated here.
+fn range_extract_args(input_path: &str, start: f64, dur: f64, encoder: &str, out_path: &str) -> Vec<String> {
+    let mut args = vec![
+        "-y".to_string(),
+        "-ss".to_string(),
+        format!("{start:.3}"),
+        "-i".to_string(),
+        input_path.to_string(),
+        "-t".to_string(),
+        format!("{dur:.3}"),
+        "-avoid_negative_ts".to_string(),
+        "make_zero".to_string(),
+    ];
+    args.extend(encoders::quality_args(encoder, 16));
+    args.extend([
+        "-pix_fmt".to_string(),
+        "yuv420p".to_string(),
+        "-c:a".to_string(),
+        "aac".to_string(),
+        "-b:a".to_string(),
+        "192k".to_string(),
+        out_path.to_string(),
+    ]);
+    args
+}
+
+/// ffmpeg concat-demuxer list file content: single-quoted paths, with an
+/// embedded single quote escaped as '\'' - the format ffmpeg's own docs
+/// specify for `-f concat`. Same escaping montage.rs already uses for the
+/// same format.
+fn concat_list_content(paths: &[PathBuf]) -> String {
+    let mut out = String::new();
+    for p in paths {
+        let escaped = p.to_string_lossy().replace('\'', r"'\''");
+        out.push_str(&format!("file '{escaped}'\n"));
+    }
+    out
+}
+
 /// Escape a path for use inside an ffmpeg filter argument.
 fn escape_filter_path(path: &str) -> String {
     path.replace('\\', "/").replace(':', "\\:").replace('\'', "\\'")
@@ -454,60 +598,12 @@ mod tests {
     }
 
     #[test]
-    fn cut_ranges_input_args_has_no_seek() {
-        let mut req = base_req();
-        req.cut_ranges = Some(vec![(10.0, 20.0), (50.0, 63.5)]);
-        let args = req.input_args();
-        assert_eq!(args, vec!["-y", "-i", "in.mp4"]);
-    }
-
-    #[test]
     fn single_trim_still_uses_ss_and_t() {
         let mut req = base_req();
         req.trim_start = Some(5.0);
         req.trim_end = Some(15.0);
         let args = req.input_args();
         assert_eq!(args, vec!["-y", "-ss", "5.000", "-i", "in.mp4", "-t", "10.000"]);
-    }
-
-    #[test]
-    fn cut_ranges_filtergraph_concats_and_maps_both_streams() {
-        let mut req = base_req();
-        req.cut_ranges = Some(vec![(10.0, 20.0), (50.0, 63.5)]);
-        let args = req.filter_and_map_args(None, true);
-        assert_eq!(args[0], "-filter_complex");
-        let fc = &args[1];
-        assert!(fc.contains("[0:v]trim=start=10.000:end=20.000"));
-        assert!(fc.contains("[0:v]trim=start=50.000:end=63.500"));
-        assert!(fc.contains("[v0][a0][v1][a1]concat=n=2:v=1:a=1[vcat][acat]"));
-        assert!(!fc.contains("[vout]")); // no crop/subtitles => output pad is [vcat] directly
-        assert_eq!(&args[2..], &["-map", "[vcat]", "-map", "[acat]"]);
-    }
-
-    #[test]
-    fn cut_ranges_filtergraph_chains_subtitles_after_concat() {
-        let mut req = base_req();
-        req.cut_ranges = Some(vec![(0.0, 5.0)]);
-        let args = req.filter_and_map_args(Some(Path::new("x.ass")), true);
-        let fc = &args[1];
-        assert!(fc.ends_with(";[vcat]subtitles=filename='x.ass'[vout]"));
-        assert_eq!(&args[2..], &["-map", "[vout]", "-map", "[acat]"]);
-    }
-
-    #[test]
-    fn cut_ranges_video_only_pass_omits_audio_map() {
-        let mut req = base_req();
-        req.cut_ranges = Some(vec![(0.0, 5.0), (5.0, 9.0)]);
-        let args = req.filter_and_map_args(None, false);
-        assert_eq!(&args[2..], &["-map", "[vcat]"]);
-        // Regression guard: a filtergraph output pad that's never consumed by
-        // a -map is a hard ffmpeg error ("Filter concat has an unconnected
-        // output"), so when audio is excluded, the atrim/acat stages must not
-        // be emitted into the graph at all — not just left unmapped.
-        let fc = &args[1];
-        assert!(!fc.contains("atrim"), "video-only pass must not build atrim stages: {fc}");
-        assert!(!fc.contains("[acat]"), "video-only pass must not declare an [acat] pad: {fc}");
-        assert!(fc.contains("concat=n=2:v=1:a=0[vcat]"), "concat must declare a=0: {fc}");
     }
 
     #[test]
@@ -582,5 +678,58 @@ mod tests {
         req.max_height = Some(480); // sanity: chains after an earlier stage too
         let args2 = req.filter_and_map_args(Some(Path::new("cap.ass")), true);
         assert_eq!(&args2[1], "[0:v]scale=-2:min(ih\\,480)[vres];[vres]subtitles=filename='cap.ass'[vout]");
+    }
+
+    // ---- cut_ranges resolution (prepare_ranges_source and its pure helpers) ----
+    //
+    // prepare_ranges_source itself spawns real ffmpeg processes, so it isn't
+    // unit-tested directly (same reasoning as run_ffmpeg above) - these cover
+    // the pure argument/list-building it depends on, which is where a real
+    // regression (a wrong seek, a malformed concat list) would actually show up.
+
+    #[test]
+    fn range_extract_args_seeks_before_input_for_fast_keyframe_seeking() {
+        let args = range_extract_args("in.mp4", 12.5, 8.25, "x264", "part0.mp4");
+        // -ss before -i, not after — this is what makes the seek fast
+        // (keyframe-accelerated) instead of decoding from the start.
+        let ss_pos = args.iter().position(|a| a == "-ss").unwrap();
+        let i_pos = args.iter().position(|a| a == "-i").unwrap();
+        assert!(ss_pos < i_pos, "-ss must come before -i: {args:?}");
+        assert_eq!(args[ss_pos + 1], "12.500");
+        assert_eq!(args[i_pos + 1], "in.mp4");
+        let t_pos = args.iter().position(|a| a == "-t").unwrap();
+        assert_eq!(args[t_pos + 1], "8.250");
+        assert!(args.contains(&"part0.mp4".to_string()));
+        // Not a stream copy: -c copy can only cut on keyframes, which would
+        // desync word-synced captions at the cut point.
+        assert!(!args.iter().any(|a| a == "copy"), "range extraction must re-encode, not stream-copy: {args:?}");
+    }
+
+    #[test]
+    fn concat_list_content_quotes_paths_and_escapes_embedded_quotes() {
+        let paths = vec![PathBuf::from("a.mp4"), PathBuf::from("it's a clip.mp4")];
+        let content = concat_list_content(&paths);
+        assert_eq!(content, "file 'a.mp4'\nfile 'it'\\''s a clip.mp4'\n");
+    }
+
+    #[test]
+    fn neutralized_request_after_range_resolution_uses_joined_duration() {
+        // Mirrors exactly what run_inner builds once prepare_ranges_source
+        // hands back a joined file - the regression this guards: duration_sec
+        // silently staying the ORIGINAL (much longer) source's length would
+        // make the final pass's progress bar wildly wrong (jump to ~100%
+        // almost immediately, or crawl at a tiny fraction of real progress).
+        let mut req = base_req();
+        req.duration_sec = 5000.0; // the original, long source
+        req.cut_ranges = Some(vec![(10.0, 20.0), (50.0, 63.5)]);
+        let joined_duration = req.effective_duration();
+        let neutralized = ExportRequest {
+            input_path: "joined.mp4".into(),
+            duration_sec: joined_duration,
+            cut_ranges: None,
+            ..req.clone()
+        };
+        assert!((neutralized.effective_duration() - 23.5).abs() < 1e-6);
+        assert!(neutralized.ranges().is_none());
     }
 }
