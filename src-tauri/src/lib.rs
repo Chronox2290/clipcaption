@@ -2,6 +2,7 @@ mod align;
 mod analyze;
 mod diarize;
 mod discord;
+mod demo;
 mod encoders;
 mod export;
 mod jobs;
@@ -206,6 +207,20 @@ fn build_montage(
 }
 
 #[tauri::command]
+fn build_demo(
+    app: AppHandle,
+    jobs: State<Jobs>,
+    req: demo::DemoRequest,
+) -> Result<String, String> {
+    let (id, handle) = jobs.create("demo");
+    let job_id = id.clone();
+    std::thread::spawn(move || {
+        demo::run(app, job_id, handle, req);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
 fn cancel_job(jobs: State<Jobs>, id: String) -> Result<(), String> {
     if let Some(handle) = jobs.get(&id) {
         handle.cancel();
@@ -283,6 +298,7 @@ pub fn run() {
             transcribe,
             export_video,
             build_montage,
+            build_demo,
             post_to_discord,
             cancel_job,
             write_text_file,

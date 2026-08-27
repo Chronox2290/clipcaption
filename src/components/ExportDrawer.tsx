@@ -6,6 +6,7 @@ import { addEmojis } from "../lib/emojis";
 import { pickSavePath } from "../lib/tauri";
 import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
 import EncodingOptions from "./EncodingOptions";
+import { Icon } from "./Icon";
 
 export default function ExportDrawer() {
   const {
@@ -32,6 +33,8 @@ export default function ExportDrawer() {
     generateMetadata,
     metadataJob,
     clipMetadata,
+    demoJob,
+    buildDemo,
   } = useApp();
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const copy = (field: string, text: string) => {
@@ -50,6 +53,13 @@ export default function ExportDrawer() {
   const [burn, setBurn] = useState(true);
   const [resolutionId, setResolutionId] = useState("source");
   const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
+
+  const demo = async () => {
+    if (!videoPath) return;
+    const base = videoPath.replace(/\.[^./\\]+$/, "");
+    const out = await pickSavePath(`${base}.before-after.mp4`);
+    if (out) void buildDemo(out);
+  };
 
   const preset = PRESETS.find((p) => p.id === presetId)!;
   const isCropped = !!(preset.targetW && preset.targetH);
@@ -271,6 +281,37 @@ export default function ExportDrawer() {
                   {copiedField === "hashtags" ? "Copied" : "Copy"}
                 </button>
               </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {segments.length > 0 && (
+        <>
+          <h4>Show it off</h4>
+          <button
+            className="btn btn-small"
+            title="One shareable clip: your raw footage on the left, captioned + compressed on the right - side by side"
+            onClick={() => void demo()}
+            disabled={!!demoJob || !videoPath}
+          >
+            {demoJob ? (
+              "Rendering…"
+            ) : (
+              <>
+                <Icon name="film" size={14} /> Before/after demo
+              </>
+            )}
+          </button>
+          {demoJob && (
+            <div className="progress-wrap" style={{ marginTop: 6 }}>
+              <div className="progress-bar">
+                <div
+                  className="progress-fill"
+                  style={{ width: `${Math.max(0, demoJob.progress * 100)}%` }}
+                />
+              </div>
+              <span className="muted small">{demoJob.message ?? capitalize(demoJob.stage)}</span>
             </div>
           )}
         </>

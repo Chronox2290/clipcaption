@@ -192,6 +192,11 @@ interface AppState {
    * user to copy. */
   clipMetadata: ClipMetadata | null;
   generateMetadata: () => Promise<void>;
+  demoJob: JobState | null;
+  /** One-click shareable before/after (raw vs. captioned+compressed) clip,
+   * side by side - see src-tauri/src/demo.rs. Caller resolves the save path
+   * (same division of labor as buildMontage/compileSelectedHighlights). */
+  buildDemo: (outputPath: string) => Promise<void>;
   /** Persisted webhook URL for "post finished export to Discord" - a
    * channel's own Integrations settings gives you one, no bot setup. Empty
    * means the feature is simply unused (Export never shows the checkbox). */
@@ -693,6 +698,7 @@ export const useApp = create<AppState>((set, get) => ({
   discordJob: null,
   metadataJob: null,
   clipMetadata: null,
+  demoJob: null,
   discordWebhook: localStorage.getItem("cc.discordWebhook") ?? "",
   autoPostToDiscord: localStorage.getItem("cc.autoPostDiscord") === "1",
   models: [],
@@ -759,7 +765,7 @@ export const useApp = create<AppState>((set, get) => ({
       }
 
       // 2) jobs tracked in UI state
-      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob, montageJob, discordJob, metadataJob } = get();
+      const { transcribeJob, exportJob, modelJob, analyzeJob, polishJob, polishModelJob, alignJob, montageJob, discordJob, metadataJob, demoJob } = get();
       const patch = (
         job: JobState | null,
         key:
@@ -773,6 +779,7 @@ export const useApp = create<AppState>((set, get) => ({
           | "montageJob"
           | "discordJob"
           | "metadataJob"
+          | "demoJob"
       ) => {
         if (!job || job.id !== p.id) return false;
         if (p.error) {
@@ -808,6 +815,8 @@ export const useApp = create<AppState>((set, get) => ({
             }
           } else if (key === "discordJob") {
             set({ discordJob: null });
+          } else if (key === "demoJob") {
+            set({ demoJob: null, exportDone: p.result ?? null });
           } else if (key === "metadataJob" && p.result) {
             try {
               const clipMetadata = JSON.parse(p.result) as ClipMetadata;
@@ -916,6 +925,7 @@ export const useApp = create<AppState>((set, get) => ({
         patch(montageJob, "montageJob") ||
         patch(discordJob, "discordJob") ||
         patch(metadataJob, "metadataJob") ||
+        patch(demoJob, "demoJob") ||
         patch(modelJob, "modelJob");
     });
     await get().refreshModels();
@@ -1690,6 +1700,57 @@ export const useApp = create<AppState>((set, get) => ({
       set({ error: null, clipMetadata: null });
       const id = await invoke<string>("generate_metadata", { req: { transcript } });
       set({ metadataJob: { id, stage: "metadata", progress: 0 } });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  buildDemo: async (outputPath) => {
+    const { videoPath, mediaInfo, segments, style, censor, activeRange, encoder } = get();
+    if (!videoPath || !mediaInfo) return;
+
+    // Each half keeps the source's own aspect ratio (no crop needed, since
+    // fit_mode is irrelevant when the target already matches source AR),
+    // capped to a sane size - this is a shareable teaser, not a full-res
+    // deliverable.
+    const aspect = mediaInfo.width / mediaInfo.height;
+    let halfWidth = Math.min(640, mediaInfo.width);
+    halfWidth -= halfWidth % 2;
+    let height = Math.round(halfWidth / aspect);
+    height -= height % 2;
+
+    let segs = censor ? applyCensor(segments) : segments;
+    if (style.emojis) segs = addEmojis(segs);
+    let pages = paginate(segs, style.maxWordsPerPage);
+    const start = activeRange?.start ?? 0;
+    const end = activeRange?.end ?? mediaInfo.durationSec;
+    pages = shiftPages(
+      pages.filter((p) => p.end > start && p.start < end),
+      start
+    );
+    pages = layoutRows(pages);
+    const ass = pages.length ? buildAss(pages, style, { playResX: halfWidth, playResY: height }) : "";
+
+    try {
+      set({ error: null, exportDone: null });
+      const id = await invoke<string>("build_demo", {
+        req: {
+          inputPath: videoPath,
+          outputPath,
+          assContent: ass,
+          trimStart: activeRange?.start ?? null,
+          trimEnd: activeRange?.end ?? null,
+          durationSec: mediaInfo.durationSec,
+          halfWidth,
+          height,
+          crf: null,
+          fps: null,
+          audioKbps: 128,
+          encoder,
+          fitMode: null,
+        },
+      });
+      set({ demoJob: { id, stage: "demo", progress: 0 } });
     } catch (e) {
       set({ error: String(e) });
     }
