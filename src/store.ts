@@ -24,8 +24,10 @@ import {
   isTauri,
   pickProjectSavePath,
   pickProjectOpenPath,
+  pickStyleSavePath,
+  pickStyleOpenPath,
 } from "./lib/tauri";
-import { getPreset } from "./lib/styles";
+import { getPreset, isValidCaptionStyle } from "./lib/styles";
 import {
   applyCensor,
   distributeWordTimes,
@@ -136,6 +138,16 @@ interface AppState {
 
   // style
   style: CaptionStyle;
+  /** User-imported or user-saved presets, persisted to localStorage and
+   * shown alongside the built-in STYLE_PRESETS - see saveCustomStylePreset
+   * /importStylePreset/exportStylePreset. Plain files, not a marketplace:
+   * exporting one just writes JSON to a .ccstyle the user picks where to
+   * put, and anyone can hand you one back the same way. */
+  customStylePresets: CaptionStyle[];
+  saveCustomStylePreset: (name: string) => void;
+  removeCustomStylePreset: (id: string) => void;
+  exportStylePreset: (style: CaptionStyle) => Promise<void>;
+  importStylePreset: () => Promise<void>;
 
   // highlights
   highlights: Highlight[];
@@ -450,6 +462,15 @@ function loadRecent(): string[] {
   }
 }
 
+function loadCustomStylePresets(): CaptionStyle[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem("cc.customStylePresets") ?? "[]");
+    return Array.isArray(raw) ? raw.filter(isValidCaptionStyle) : [];
+  } catch {
+    return [];
+  }
+}
+
 
 // ---------------- undo / redo ----------------
 //
@@ -673,6 +694,7 @@ export const useApp = create<AppState>((set, get) => ({
   speakerProfiles: [],
   tuningWord: null,
   style: getPreset("beast"),
+  customStylePresets: loadCustomStylePresets(),
   highlights: [],
   highlightVotes: {},
   analyzeJob: null,
@@ -1081,6 +1103,53 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   setStyle: (style) => set({ style }),
+
+  saveCustomStylePreset: (name) => {
+    const { style, customStylePresets } = get();
+    const saved: CaptionStyle = { ...style, id: nextId("style"), name: name.trim() || "Untitled" };
+    const next = [...customStylePresets, saved];
+    localStorage.setItem("cc.customStylePresets", JSON.stringify(next));
+    set({ customStylePresets: next, style: saved });
+  },
+
+  removeCustomStylePreset: (id) => {
+    const next = get().customStylePresets.filter((p) => p.id !== id);
+    localStorage.setItem("cc.customStylePresets", JSON.stringify(next));
+    set({ customStylePresets: next });
+  },
+
+  exportStylePreset: async (style) => {
+    const safeName = style.name.replace(/[\\/:*?"<>|]+/g, "_").trim() || "style";
+    const path = await pickStyleSavePath(`${safeName}.ccstyle`);
+    if (!path) return;
+    try {
+      await invoke("write_text_file", { path, content: JSON.stringify(style, null, 2) });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  importStylePreset: async () => {
+    const path = await pickStyleOpenPath();
+    if (!path) return;
+    try {
+      const raw = await invoke<string>("read_text_file", { path });
+      const parsed: unknown = JSON.parse(raw);
+      if (!isValidCaptionStyle(parsed)) {
+        set({ error: "That file doesn't look like a ClipCaption style preset." });
+        return;
+      }
+      // A fresh id/name pair so importing the same file twice (or a file
+      // that happens to reuse a built-in preset's id) can't collide with
+      // an existing preset in the list.
+      const imported: CaptionStyle = { ...parsed, id: nextId("style") };
+      const next = [...get().customStylePresets, imported];
+      localStorage.setItem("cc.customStylePresets", JSON.stringify(next));
+      set({ customStylePresets: next, style: imported });
+    } catch (e) {
+      set({ error: `Could not read that style file: ${String(e)}` });
+    }
+  },
   setCensor: (censor) => set({ censor }),
 
   updateWord: (segId, wordIdx, text) => {

@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useApp, type AppTheme } from "../store";
 import { STYLE_PRESETS } from "../lib/styles";
+import { Icon } from "./Icon";
 import type { AnimationKind } from "../types";
 
 const APP_THEMES: { id: AppTheme; name: string; blurb: string; a: string; b: string }[] = [
@@ -13,8 +15,21 @@ export default function StylePanel() {
   const setStyle = useApp((s) => s.setStyle);
   const theme = useApp((s) => s.theme);
   const setTheme = useApp((s) => s.setTheme);
+  const customStylePresets = useApp((s) => s.customStylePresets);
+  const saveCustomStylePreset = useApp((s) => s.saveCustomStylePreset);
+  const removeCustomStylePreset = useApp((s) => s.removeCustomStylePreset);
+  const exportStylePreset = useApp((s) => s.exportStylePreset);
+  const importStylePreset = useApp((s) => s.importStylePreset);
+
+  const [newPresetName, setNewPresetName] = useState("");
 
   const set = (patch: Partial<typeof style>) => setStyle({ ...style, ...patch });
+
+  const saveAsPreset = () => {
+    if (!newPresetName.trim()) return;
+    saveCustomStylePreset(newPresetName);
+    setNewPresetName("");
+  };
 
   return (
     <div className="style-panel">
@@ -63,6 +78,66 @@ export default function StylePanel() {
           </button>
         ))}
       </div>
+
+      {/* Plain export/import files, not a walled marketplace - a .ccstyle
+          is just this style's own fields as JSON, shareable however people
+          already share files (Discord, email, a USB stick). */}
+      <h4>Your presets</h4>
+      {customStylePresets.length > 0 && (
+        <div className="preset-grid">
+          {customStylePresets.map((p) => (
+            <div key={p.id} className={`preset-card custom ${style.id === p.id ? "sel" : ""}`}>
+              <button className="preset-card-main" onClick={() => setStyle({ ...p })}>
+                <span
+                  className="preset-sample"
+                  style={{
+                    fontFamily: `"${p.font}", sans-serif`,
+                    fontWeight: p.fontWeight,
+                    color: p.fill,
+                    background: p.boxColor ? "rgba(0,0,0,0.7)" : undefined,
+                    WebkitTextStroke: p.outlineWidthPct > 0 ? `1px ${p.outline}` : undefined,
+                    textTransform: p.uppercase ? "uppercase" : "none",
+                  }}
+                >
+                  Nice <em style={{ color: p.activeFill, fontStyle: "normal" }}>shot!</em>
+                </span>
+                <span className="preset-name">{p.name}</span>
+              </button>
+              <span className="preset-card-actions">
+                <button
+                  className="btn btn-ghost btn-small"
+                  title="Export this preset as a .ccstyle file to share"
+                  onClick={() => void exportStylePreset(p)}
+                >
+                  <Icon name="download" size={12} />
+                </button>
+                <button
+                  className="btn btn-ghost btn-small"
+                  title="Remove this preset"
+                  onClick={() => removeCustomStylePreset(p.id)}
+                >
+                  <Icon name="close" size={12} />
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="field preset-save-row">
+        <input
+          type="text"
+          placeholder="Name this look…"
+          value={newPresetName}
+          onChange={(e) => setNewPresetName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && saveAsPreset()}
+        />
+        <button className="btn btn-small" onClick={saveAsPreset} disabled={!newPresetName.trim()}>
+          Save current look
+        </button>
+      </div>
+      <button className="btn btn-ghost btn-small" onClick={() => void importStylePreset()}>
+        Import a .ccstyle file…
+      </button>
 
       <h4>Tweak</h4>
       <div className="field">

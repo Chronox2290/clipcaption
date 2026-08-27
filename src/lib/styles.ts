@@ -149,6 +149,39 @@ export function getPreset(id: string): CaptionStyle {
   return STYLE_PRESETS.find((s) => s.id === id) ?? STYLE_PRESETS[0];
 }
 
+/** Guards against a malformed or hand-edited .ccstyle file crashing the
+ * import (see importStylePreset in store.ts) - checked field-by-field
+ * rather than trusting JSON.parse's output shape, since this file can come
+ * from anyone, not just this app's own export. Not exhaustive (doesn't
+ * check every array element's type) - just enough that a genuinely broken
+ * file gets rejected with a clear message instead of rendering garbage. */
+export function isValidCaptionStyle(v: unknown): v is CaptionStyle {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  return (
+    typeof s.id === "string" &&
+    typeof s.name === "string" &&
+    typeof s.font === "string" &&
+    typeof s.uppercase === "boolean" &&
+    typeof s.fontSizePct === "number" &&
+    typeof s.fill === "string" &&
+    typeof s.activeFill === "string" &&
+    typeof s.outline === "string" &&
+    typeof s.outlineWidthPct === "number" &&
+    typeof s.fontWeight === "number" &&
+    typeof s.shadow === "boolean" &&
+    (s.boxColor === null || typeof s.boxColor === "string") &&
+    typeof s.animation === "string" &&
+    typeof s.positionPct === "number" &&
+    typeof s.maxWordsPerPage === "number" &&
+    Array.isArray(s.speakerColors) &&
+    typeof s.emojis === "boolean" &&
+    typeof s.dynamic === "boolean" &&
+    typeof s.dynamicAmountPct === "number" &&
+    typeof s.showSpeakerNames === "boolean"
+  );
+}
+
 /** The container holding every caption live at this moment.
  *
  * Simultaneous captions are laid out by flexbox rather than positioned by

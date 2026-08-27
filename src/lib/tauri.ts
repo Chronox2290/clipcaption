@@ -101,3 +101,26 @@ export async function pickProjectOpenPaths(): Promise<string[]> {
   if (Array.isArray(res)) return res;
   return typeof res === "string" ? [res] : [];
 }
+
+/** A caption style saved to its own plain file - the "shareable preset" the
+ * brief asked for: send a .ccstyle to a friend, they import it, no walled
+ * marketplace involved. Same shape as the project pickers above. */
+export async function pickStyleSavePath(defaultName: string): Promise<string | null> {
+  if (!isTauri) return null;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const res = await save({
+    defaultPath: defaultName,
+    filters: [{ name: "ClipCaption style", extensions: ["ccstyle"] }],
+  });
+  return res ?? null;
+}
+
+export async function pickStyleOpenPath(): Promise<string | null> {
+  if (!isTauri) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({
+    multiple: false,
+    filters: [{ name: "ClipCaption style", extensions: ["ccstyle"] }],
+  });
+  return typeof res === "string" ? res : null;
+}
