@@ -50,16 +50,17 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const translateTranscript = useApp((s) => s.translateTranscript);
   const activeRange = useApp((s) => s.activeRange);
   const [translateLanguage, setTranslateLanguage] = useState("Spanish");
-  // Mirrors translateTranscript's own scoping in store.ts - purely for an
-  // accurate "line N/M" and button label here, not a second source of
-  // truth for what actually gets sent.
-  const translateScope = activeRange
+  // Mirrors translateTranscript/reviewTranscript/alignTranscript's own
+  // scoping in store.ts - purely for accurate "line N/M" text and disabled
+  // states here, not a second source of truth for what actually gets sent.
+  const activeScope = activeRange
     ? segments.filter((s) => {
         const s0 = s.words[0]?.start ?? 0;
         const e0 = s.words[s.words.length - 1]?.end ?? s0;
         return e0 > activeRange.start && s0 < activeRange.end;
       })
     : segments;
+  const translateScope = activeScope;
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);
   const setSpeakerName = useApp((s) => s.setSpeakerName);
@@ -398,10 +399,12 @@ export default function TranscriptPanel({ videoRef }: Props) {
           <button
             className="btn btn-ghost"
             onClick={() => void reviewTranscript()}
-            disabled={!!polishJob || segments.length === 0}
+            disabled={!!polishJob || activeScope.length === 0}
             title={
               activeRange
-                ? "Checks this clip's words whisper wasn't confident about against an offline AI model - names, mishearings. Nothing is changed until you review and accept each fix."
+                ? activeScope.length === 0
+                  ? "This clip has no transcribed words yet, so there's nothing to check."
+                  : "Checks this clip's words whisper wasn't confident about against an offline AI model - names, mishearings. Nothing is changed until you review and accept each fix."
                 : "No clip range is active, so this checks the WHOLE loaded transcript - open a specific clip/highlight first to check just that instead. Nothing is changed until you review and accept each fix."
             }
           >
@@ -427,10 +430,12 @@ export default function TranscriptPanel({ videoRef }: Props) {
           <button
             className="btn btn-ghost"
             onClick={() => void alignTranscript()}
-            disabled={!!alignJob || segments.length === 0}
+            disabled={!!alignJob || activeScope.length === 0}
             title={
               activeRange
-                ? "Re-times this clip's words against the actual audio using the transcript's own text, instead of trusting whisper's original guess - fixes mistimed and missed-entirely words. Undoable."
+                ? activeScope.length === 0
+                  ? "This clip has no transcribed words yet, so there's nothing to align."
+                  : "Re-times this clip's words against the actual audio using the transcript's own text, instead of trusting whisper's original guess - fixes mistimed and missed-entirely words. Undoable."
                 : "No clip range is active, so this re-times the WHOLE loaded transcript - open a specific clip/highlight first to align just that instead (much faster). Undoable."
             }
           >
