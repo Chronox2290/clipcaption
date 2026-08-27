@@ -23,6 +23,18 @@ try {
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
+# Unauthenticated api.github.com calls are capped at 60/hour per IP - plenty
+# for a local run, but GitHub Actions runners share IP ranges with thousands
+# of other jobs and can burn through that before this script even gets to
+# run (confirmed: a real CI failure, "403 Forbidden" fetching whisper.cpp's
+# latest release, not a hypothetical). GITHUB_TOKEN raises that to 5000/hour
+# and is already injected into every Actions job automatically - use it when
+# present, fall back to unauthenticated for a plain local run where it isn't.
+$ghHeaders = @{ "User-Agent" = "clipcaption-setup" }
+if ($env:GITHUB_TOKEN) {
+    $ghHeaders["Authorization"] = "Bearer $env:GITHUB_TOKEN"
+}
+
 function Done($name) {
     Test-Path (Join-Path $binDir "$name-$triple.exe")
 }
@@ -93,7 +105,7 @@ if (Done "whisper-cli") {
     Write-Host "whisper-cli already present, skipping."
 } else {
     Write-Host "Finding latest whisper.cpp Windows build..."
-    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest" -Headers @{ "User-Agent" = "clipcaption-setup" }
+    $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest" -Headers $ghHeaders
     $asset = $rel.assets | Where-Object { $_.name -match "bin-x64" -and $_.name -match "\.zip$" } | Select-Object -First 1
     if (-not $asset) {
         # fall back: any windows x64 zip
@@ -201,7 +213,7 @@ if (Test-Path $llamaExe) {
 } else {
     New-Item -ItemType Directory -Force -Path $llamaDir | Out-Null
     Write-Host "Finding latest llama.cpp Windows CPU build..."
-    $lrel = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases" -Headers @{ "User-Agent" = "clipcaption-setup" } |
+    $lrel = Invoke-RestMethod -Uri "https://api.github.com/repos/ggml-org/llama.cpp/releases" -Headers $ghHeaders |
         Where-Object { $_.assets | Where-Object { $_.name -match "^llama-.*-bin-win-cpu-x64\.zip$" } } |
         Select-Object -First 1
     if (-not $lrel) {

@@ -50,6 +50,8 @@ jobs:
           key: sidecars-v1-${{ runner.os }}-${{ hashFiles('scripts/get-sidecars.ps1', 'scripts/build-embed-tool.ps1') }}
 
       - name: Fetch sidecar binaries (ffmpeg, ffprobe, whisper-cli)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: powershell -ExecutionPolicy Bypass -File scripts/get-sidecars.ps1
 
       # Compiles src-tauri/embed-tool (the speaker-embedding extractor) with
