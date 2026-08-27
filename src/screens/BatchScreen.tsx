@@ -150,6 +150,9 @@ export default function BatchScreen() {
                     {item.status === "done" && item.output && (
                       <span className="muted small">{item.output}</span>
                     )}
+                    {item.status === "done" && item.note && (
+                      <span className="batch-err">{item.note}</span>
+                    )}
                     {item.status === "needs_review" && (
                       <span className="muted small">
                         AI cleanup found a word it wasn't sure about - held back from export.

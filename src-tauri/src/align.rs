@@ -307,6 +307,19 @@ pub struct AlignRequest {
     pub segments: Vec<AlignSegment>,
 }
 
+/// What the frontend gets back - not just the (possibly partially-updated)
+/// segments, but a plain count of what the aligner couldn't place, so a run
+/// that leaves some words untouched says so instead of looking identical to
+/// one that touched everything.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AlignResult {
+    segments: Vec<AlignSegment>,
+    total_turns: usize,
+    failed_turns: usize,
+    failed_words: usize,
+}
+
 /// One contiguous same-speaker stretch to align as a unit, with the search
 /// window (already padded, not yet clamped to the clip's real bounds)
 /// computed from its own words' current timing.
@@ -434,7 +447,13 @@ fn run_inner(
 
     let turns = group_turns(&req.segments);
     if turns.is_empty() {
-        return serde_json::to_string(&req.segments).map_err(|e| e.to_string());
+        let result = AlignResult {
+            segments: req.segments.clone(),
+            total_turns: 0,
+            failed_turns: 0,
+            failed_words: 0,
+        };
+        return serde_json::to_string(&result).map_err(|e| e.to_string());
     }
 
     let global_lo = turns.iter().map(|t| t.window_lo).fold(f64::MAX, f64::min);
@@ -455,6 +474,13 @@ fn run_inner(
     let mut aligner = Aligner::load(&model_path).map_err(|e| e.to_string())?;
     let mut segments = req.segments.clone();
     let n_turns = turns.len();
+    // Which turns/words the model couldn't place, tracked so the caller can
+    // say so plainly instead of the run just going quiet - a turn whose
+    // window turned out too short for its own text, or an individual word
+    // the aligner had no confident answer for, both silently kept their
+    // existing timing before this, with nothing surfaced anywhere.
+    let mut failed_turns = 0usize;
+    let mut failed_words = 0usize;
 
     for (ti, turn) in turns.iter().enumerate() {
         if handle.is_cancelled() {
@@ -471,6 +497,7 @@ fn run_inner(
         let lo_i = ((turn.window_lo - global_lo) * 16000.0).round().max(0.0) as usize;
         let hi_i = (((turn.window_hi - global_lo) * 16000.0).round() as usize).min(samples.len());
         if lo_i >= hi_i {
+            failed_turns += 1;
             continue;
         }
         let window = &samples[lo_i..hi_i];
@@ -483,22 +510,34 @@ fn run_inner(
 
         let aligned = match aligner.align(window, &words) {
             Ok(a) => a,
-            Err(_) => continue, // leave this turn's words at their existing timing
+            Err(_) => {
+                failed_turns += 1;
+                continue; // leave this turn's words at their existing timing
+            }
         };
 
         let mut wi = 0usize;
         for &si in &turn.seg_indices {
             for w in segments[si].words.iter_mut() {
-                if let Some(Some((s, e))) = aligned.get(wi) {
-                    w.start = turn.window_lo + s;
-                    w.end = turn.window_lo + e;
+                match aligned.get(wi) {
+                    Some(Some((s, e))) => {
+                        w.start = turn.window_lo + s;
+                        w.end = turn.window_lo + e;
+                    }
+                    _ => failed_words += 1,
                 }
                 wi += 1;
             }
         }
     }
 
-    serde_json::to_string(&segments).map_err(|e| e.to_string())
+    let result = AlignResult {
+        segments,
+        total_turns: n_turns,
+        failed_turns,
+        failed_words,
+    };
+    serde_json::to_string(&result).map_err(|e| e.to_string())
 }
 
 pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: AlignRequest) {

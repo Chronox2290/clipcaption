@@ -260,6 +260,11 @@ export interface BatchItem {
   progress: number; // 0..1 within the current stage, -1 indeterminate
   output?: string;
   error?: string;
+  /** A non-fatal caveat on an otherwise-successful item (e.g. the cleanup
+   * pass itself failed, so this exported without an AI review pass) -
+   * shown alongside a "done" item rather than only ever having a hard
+   * error state or silence. */
+  note?: string;
   /** Set only when status is "needs_review" - carries this item's own
    * transcribe result forward so reviewBatchItem can load it straight into
    * the editor without re-transcribing. */

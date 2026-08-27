@@ -795,8 +795,23 @@ export const useApp = create<AppState>((set, get) => ({
             set({ polishModelJob: null, polishAvailable: true });
           } else if (key === "alignJob" && p.result) {
             try {
-              const segments = JSON.parse(p.result) as Segment[];
-              set({ segments, alignJob: null });
+              const { segments, totalTurns, failedTurns, failedWords } = JSON.parse(p.result) as {
+                segments: Segment[];
+                totalTurns: number;
+                failedTurns: number;
+                failedWords: number;
+              };
+              set({
+                segments,
+                alignJob: null,
+                // A partial run says so plainly rather than looking
+                // identical to a clean one - error is the only toast
+                // channel that exists, worded as a heads-up, not a failure.
+                error:
+                  failedTurns > 0 || failedWords > 0
+                    ? `Aligned most of the transcript, but ${failedTurns} of ${totalTurns} turns and ${failedWords} individual words couldn't be placed and were left at their existing timing.`
+                    : null,
+              });
             } catch {
               set({ alignJob: null, error: "Failed to parse aligned transcript" });
             }
@@ -1768,6 +1783,7 @@ export const useApp = create<AppState>((set, get) => ({
         // than exporting an unreviewed guess - status "needs_review", picked
         // up later via reviewBatchItem instead of blocking the rest of the
         // batch behind it.
+        let cleanupFailed = false;
         if (get().polishAvailable) {
           setItem(item.id, { status: "transcribing", progress: -1 });
           try {
@@ -1808,8 +1824,11 @@ export const useApp = create<AppState>((set, get) => ({
             }
           } catch {
             // Cleanup pass failing shouldn't block export - carry on with
-            // the unreviewed transcript exactly like before this existed.
+            // the unreviewed transcript exactly like before this existed,
+            // but say so rather than exporting silently as if cleanup had
+            // simply found nothing to fix.
             currentBatchJobId = null;
+            cleanupFailed = true;
           }
         }
 
@@ -1859,7 +1878,12 @@ export const useApp = create<AppState>((set, get) => ({
         await waitForJob(eid, (p) => setItem(item.id, { progress: p.progress }));
         currentBatchJobId = null;
 
-        setItem(item.id, { status: "done", progress: 1, output: outputPath });
+        setItem(item.id, {
+          status: "done",
+          progress: 1,
+          output: outputPath,
+          note: cleanupFailed ? "AI cleanup pass failed for this clip - exported without review" : undefined,
+        });
       } catch (e) {
         currentBatchJobId = null;
         const msg = e instanceof Error ? e.message : String(e);
