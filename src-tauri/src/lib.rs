@@ -28,6 +28,11 @@ fn prepare_preview(app: AppHandle, path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn extract_thumbnail(app: AppHandle, video_path: String, time_sec: f64) -> Result<String, String> {
+    media::extract_thumbnail(&app, &video_path, time_sec)
+}
+
+#[tauri::command]
 fn detect_encoders() -> Vec<String> {
     encoders::available()
 }
@@ -249,6 +254,16 @@ fn read_text_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("Could not read {path}: {e}"))
 }
 
+/// Generic binary-safe file copy - used to save a cached thumbnail (see
+/// extract_thumbnail) to wherever the user picked, since write_text_file
+/// above is String-only and a JPEG isn't valid UTF-8.
+#[tauri::command]
+fn copy_file(src: String, dst: String) -> Result<(), String> {
+    std::fs::copy(&src, &dst)
+        .map(|_| ())
+        .map_err(|e| format!("Could not save to {dst}: {e}"))
+}
+
 /// Where the autosaved working state for one video lives.
 ///
 /// Opening a video used to reset the editor to a clean slate, so anything not
@@ -295,6 +310,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             probe_video,
             prepare_preview,
+            extract_thumbnail,
             analyze_highlights,
             record_highlight_feedback,
             list_videos,
@@ -309,6 +325,7 @@ pub fn run() {
             cancel_job,
             write_text_file,
             read_text_file,
+            copy_file,
             session_file,
             polish_available,
             download_polish_model,

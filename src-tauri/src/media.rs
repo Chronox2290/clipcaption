@@ -193,6 +193,57 @@ pub fn prepare_preview(app: &tauri::AppHandle, path: &str) -> Result<String, Str
     }
 }
 
+/// Grabs one JPEG frame at `time_sec` - the auto-picked thumbnail for a
+/// highlight. "Auto-picked" here means the CALLER already chose a
+/// meaningful timestamp (the loudness scan's own peak-excitement moment,
+/// see analyze::Highlight.peak) rather than a lazy midpoint guess; this
+/// function's only job is turning that timestamp into an actual image.
+/// Cached by (path, timestamp) so re-opening a highlight's edit panel
+/// doesn't re-run ffmpeg for a frame already grabbed this session.
+pub fn extract_thumbnail(
+    app: &tauri::AppHandle,
+    video_path: &str,
+    time_sec: f64,
+) -> Result<String, String> {
+    let cache = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("thumbnails");
+    std::fs::create_dir_all(&cache).map_err(|e| e.to_string())?;
+
+    let hash = simple_hash(video_path);
+    let out: PathBuf = cache.join(format!("{hash}_{:.2}.jpg", time_sec.max(0.0)));
+    if out.exists() {
+        return Ok(out.to_string_lossy().to_string());
+    }
+
+    // -ss before -i: fast input-side seek, exactly the same shape used
+    // elsewhere in this app for trimming (see export.rs).
+    let out_arg = out.to_string_lossy().to_string();
+    let status = sidecar::command("ffmpeg")
+        .args([
+            "-y",
+            "-ss",
+            &time_sec.max(0.0).to_string(),
+            "-i",
+            video_path,
+            "-frames:v",
+            "1",
+            "-q:v",
+            "3",
+            &out_arg,
+        ])
+        .status()
+        .map_err(|e| format!("Could not run ffmpeg: {e}"))?;
+
+    if status.success() && out.exists() {
+        Ok(out_arg)
+    } else {
+        Err("Could not extract a thumbnail frame at that timestamp".into())
+    }
+}
+
 fn simple_hash(s: &str) -> String {
     let mut h: u64 = 1469598103934665603;
     for b in s.as_bytes() {

@@ -40,6 +40,10 @@ export default function HighlightsPanel({ videoRef }: Props) {
     setClipName,
     highlightVotes,
     rateHighlight,
+    thumbnails,
+    thumbnailBusy,
+    pickThumbnail,
+    saveThumbnail,
     batch,
     exportSelectedHighlights,
     compileSelectedHighlights,
@@ -442,10 +446,30 @@ export default function HighlightsPanel({ videoRef }: Props) {
                     <button className="btn btn-small" onClick={() => captionThisRange(h)}>
                       <Icon name="sparkle" size={12} /> Caption this range
                     </button>
+                    <button
+                      className="btn btn-ghost btn-small"
+                      title="Auto-picks the frame at this clip's loudest moment as a thumbnail"
+                      disabled={!!thumbnailBusy[h.rank]}
+                      onClick={() => void pickThumbnail(h.rank)}
+                    >
+                      <Icon name="film" size={12} />{" "}
+                      {thumbnailBusy[h.rank] ? "Grabbing…" : thumbnails[h.rank] ? "Regrab" : "Thumbnail"}
+                    </button>
                     <button className="btn btn-ghost btn-small" onClick={stopEditingHighlight}>
                       Done
                     </button>
                   </div>
+                  {thumbnails[h.rank] && (
+                    <div className="hl-thumb-row">
+                      <img src={thumbnails[h.rank]} alt="Auto-picked thumbnail" className="hl-thumb-img" />
+                      <button
+                        className="btn btn-ghost btn-small"
+                        onClick={() => void saveThumbnail(h.rank)}
+                      >
+                        <Icon name="download" size={12} /> Save as…
+                      </button>
+                    </div>
+                  )}
                   {capturing && (
                     <div className="hl-cap-status">
                       <div className="progress-wrap" style={{ width: "100%" }}>

@@ -1714,6 +1714,18 @@ kbd {
 .hl-cap-status.ok {
   color: var(--accent2);
 }
+.hl-thumb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+.hl-thumb-img {
+  height: 64px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  object-fit: cover;
+}
 .hl-mode-toggle {
   display: flex;
   flex-wrap: wrap;

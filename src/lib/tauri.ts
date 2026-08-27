@@ -124,3 +124,13 @@ export async function pickStyleOpenPath(): Promise<string | null> {
   });
   return typeof res === "string" ? res : null;
 }
+
+export async function pickThumbnailSavePath(defaultName: string): Promise<string | null> {
+  if (!isTauri) return null;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const res = await save({
+    defaultPath: defaultName,
+    filters: [{ name: "JPEG image", extensions: ["jpg", "jpeg"] }],
+  });
+  return res ?? null;
+}

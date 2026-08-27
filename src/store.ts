@@ -26,6 +26,7 @@ import {
   pickProjectOpenPath,
   pickStyleSavePath,
   pickStyleOpenPath,
+  pickThumbnailSavePath,
 } from "./lib/tauri";
 import { getPreset, isValidCaptionStyle } from "./lib/styles";
 import {
@@ -458,6 +459,18 @@ interface AppState {
    * a visual editing aid, never touches the exported video. */
   safeZonePreset: string | null;
   setSafeZonePreset: (id: string | null) => void;
+  /** Auto-picked thumbnail preview per highlight rank (a displayable src,
+   * see fileSrc) - the frame at the loudness scan's own peak-excitement
+   * moment (Highlight.peak), not a manual scrub. Session-only; not saved
+   * anywhere until pickThumbnail's caller explicitly exports one. */
+  thumbnails: Record<number, string>;
+  /** Real filesystem path behind each thumbnails[rank] src - fileSrc's
+   * conversion isn't reversible, so this is what saveThumbnail actually
+   * copies from. */
+  thumbnailPaths: Record<number, string>;
+  thumbnailBusy: Record<number, boolean>;
+  pickThumbnail: (rank: number) => Promise<void>;
+  saveThumbnail: (rank: number) => Promise<void>;
   dismissRestoredNotice: () => void;
   /** Throws away the autosaved working state for the current video and resets
    * the editor to a clean slate for it. */
@@ -716,6 +729,9 @@ export const useApp = create<AppState>((set, get) => ({
   })(),
   highlightGenre: (localStorage.getItem("cc.highlightGenre") as HighlightGenre | null) ?? "general",
   safeZonePreset: localStorage.getItem("cc.safeZonePreset") || null,
+  thumbnails: {},
+  thumbnailPaths: {},
+  thumbnailBusy: {},
   segments: [],
   censor: false,
   transcriptSourceRank: null,
@@ -1429,6 +1445,51 @@ export const useApp = create<AppState>((set, get) => ({
         durationSec: h.end - h.start,
         vote,
       });
+    } catch (e) {
+      set({ error: String(e) });
+    }
+  },
+
+  /** Grabs the frame at this highlight's own peak-excitement moment
+   * (Highlight.peak, from the loudness scan - see analyze.rs) as its
+   * thumbnail - "auto-picked" in the sense that a meaningful frame is
+   * chosen for you, not that several candidates are compared. Clamped into
+   * whatever range is currently active (a manual trim moves the window;
+   * the peak timestamp doesn't follow it automatically). */
+  pickThumbnail: async (rank) => {
+    const { highlights, videoPath, clipOverrides, thumbnailBusy } = get();
+    if (thumbnailBusy[rank]) return;
+    const h = highlights.find((x) => x.rank === rank);
+    if (!h || !videoPath) return;
+    const range = clipOverrides[rank] ?? { start: h.start, end: h.end };
+    const t = Math.min(Math.max(h.peak, range.start), range.end);
+    set({ thumbnailBusy: { ...get().thumbnailBusy, [rank]: true }, error: null });
+    try {
+      const path = await invoke<string>("extract_thumbnail", { videoPath, timeSec: t });
+      const src = await fileSrc(path);
+      set({
+        thumbnails: { ...get().thumbnails, [rank]: src },
+        thumbnailPaths: { ...get().thumbnailPaths, [rank]: path },
+      });
+    } catch (e) {
+      set({ error: String(e) });
+    } finally {
+      set({ thumbnailBusy: { ...get().thumbnailBusy, [rank]: false } });
+    }
+  },
+
+  saveThumbnail: async (rank) => {
+    const path = get().thumbnailPaths[rank];
+    if (!path) return;
+    const base =
+      get()
+        .videoPath?.split(/[/\\]/)
+        .pop()
+        ?.replace(/\.[^.]+$/, "") ?? "clip";
+    const out = await pickThumbnailSavePath(`${base}_thumb.jpg`);
+    if (!out) return;
+    try {
+      await invoke("copy_file", { src: path, dst: out });
     } catch (e) {
       set({ error: String(e) });
     }
