@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store";
 import CaptionOverlay from "../components/CaptionOverlay";
+import SafeZoneOverlay from "../components/SafeZoneOverlay";
 import MainWaveform from "../components/MainWaveform";
 import { useSplitter } from "../lib/useSplitter";
 import TranscriptPanel from "../components/TranscriptPanel";
@@ -8,6 +9,7 @@ import StylePanel from "../components/StylePanel";
 import ExportDrawer from "../components/ExportDrawer";
 import HighlightsPanel from "../components/HighlightsPanel";
 import { fmtTime, resolveSpeakerNames } from "../lib/captions";
+import { SAFE_ZONE_PRESETS, getSafeZonePreset } from "../lib/safeZones";
 
 
 export default function Editor() {
@@ -33,8 +35,11 @@ export default function Editor() {
     loadProject,
     speakerEmbeddings,
     speakerProfiles,
+    safeZonePreset,
+    setSafeZonePreset,
   } = useApp();
   const speakerNames = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
+  const activeSafeZone = getSafeZonePreset(safeZonePreset);
   const [savedFlash, setSavedFlash] = useState(false);
 
   // The timeline is the workspace; the preview is a reference you glance at.
@@ -253,8 +258,31 @@ export default function Editor() {
                   stageHeight={stage.h}
                   speakerNames={speakerNames}
                 />
+                {activeSafeZone && (
+                  <SafeZoneOverlay stageW={stage.w} stageH={stage.h} preset={activeSafeZone} />
+                )}
               </div>
               {!playing && <div className="play-badge">▶</div>}
+            </div>
+
+            <div className="preview-toolbar">
+              <label
+                className="hl-count"
+                title="Shows where TikTok/Reels/Shorts' own UI (profile, captions, like/share buttons) typically sits on a vertical export - approximate creator-tool guideline percentages, not a pixel-exact spec. Editing aid only, never affects the exported video."
+              >
+                <span className="muted small">Safe zones</span>
+                <select
+                  value={safeZonePreset ?? "off"}
+                  onChange={(e) => setSafeZonePreset(e.target.value === "off" ? null : e.target.value)}
+                >
+                  <option value="off">Off</option>
+                  {SAFE_ZONE_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             <div className="transport">

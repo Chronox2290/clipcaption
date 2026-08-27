@@ -453,6 +453,11 @@ interface AppState {
    * caption FPS clips"), not a per-project setting. */
   highlightGenre: HighlightGenre;
   setHighlightGenre: (g: HighlightGenre) => void;
+  /** Which platform's UI safe-zone guide to overlay on the preview while
+   * editing (see components/SafeZoneOverlay.tsx) - null shows none. Purely
+   * a visual editing aid, never touches the exported video. */
+  safeZonePreset: string | null;
+  setSafeZonePreset: (id: string | null) => void;
   dismissRestoredNotice: () => void;
   /** Throws away the autosaved working state for the current video and resets
    * the editor to a clean slate for it. */
@@ -710,6 +715,7 @@ export const useApp = create<AppState>((set, get) => ({
     return v == null || v === "auto" ? null : Number(v);
   })(),
   highlightGenre: (localStorage.getItem("cc.highlightGenre") as HighlightGenre | null) ?? "general",
+  safeZonePreset: localStorage.getItem("cc.safeZonePreset") || null,
   segments: [],
   censor: false,
   transcriptSourceRank: null,
@@ -2237,6 +2243,11 @@ export const useApp = create<AppState>((set, get) => ({
   setHighlightGenre: (g) => {
     localStorage.setItem("cc.highlightGenre", g);
     set({ highlightGenre: g });
+  },
+
+  setSafeZonePreset: (id) => {
+    localStorage.setItem("cc.safeZonePreset", id ?? "");
+    set({ safeZonePreset: id });
   },
 
   scanForDeaths: () => {

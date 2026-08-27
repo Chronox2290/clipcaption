@@ -608,6 +608,28 @@ select {
   transform: translate(-50%, -50%);
   pointer-events: none;
 }
+.preview-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 2px;
+}
+.safezone-frame {
+  position: absolute;
+  inset: 0;
+  border: 1.5px dashed rgba(255, 90, 90, 0.6);
+  pointer-events: none;
+}
+.safezone-label {
+  position: absolute;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(200, 40, 40, 0.75);
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.02em;
+  pointer-events: none;
+}
 .play-badge {
   position: absolute;
   left: 50%;
