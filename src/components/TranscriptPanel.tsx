@@ -52,6 +52,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);
   const setSpeakerName = useApp((s) => s.setSpeakerName);
+  const cancelJob = useApp((s) => s.cancelJob);
 
   const model = models.find((m) => m.name === selectedModel);
 
@@ -434,7 +435,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
               value={translateLanguage}
               onChange={(e) => setTranslateLanguage(e.target.value)}
               disabled={!!translateJob}
-              title="Replaces the transcript's text with a machine translation, re-timed evenly across each line's original span. Fully undoable - Undo gets the original language back."
+              title="Replaces the transcript's text with a machine translation, re-timed evenly across each line's original span. Fully undoable - Undo gets the original language back. One AI call per line, so a long recording's transcript can take a while - the count below tracks real progress, it isn't stuck."
             >
               {[
                 "Spanish",
@@ -454,15 +455,28 @@ export default function TranscriptPanel({ videoRef }: Props) {
                 </option>
               ))}
             </select>
-            <button
-              className="btn btn-ghost"
-              onClick={() => void translateTranscript(translateLanguage)}
-              disabled={!!translateJob || segments.length === 0}
-            >
-              {translateJob
-                ? `🌐 Translating… ${Math.round((translateJob.progress ?? 0) * 100)}%`
-                : "🌐 Translate captions"}
-            </button>
+            {translateJob ? (
+              <>
+                <span className="muted small translate-progress">
+                  🌐 Translating line {Math.min(
+                    segments.length,
+                    Math.round((translateJob.progress ?? 0) * segments.length)
+                  )}
+                  /{segments.length}…
+                </span>
+                <button className="btn btn-ghost btn-small" onClick={() => cancelJob(translateJob.id)}>
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                className="btn btn-ghost"
+                onClick={() => void translateTranscript(translateLanguage)}
+                disabled={segments.length === 0}
+              >
+                🌐 Translate captions
+              </button>
+            )}
           </span>
         )}
       </div>

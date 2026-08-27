@@ -32,7 +32,11 @@ use crate::sidecar;
 
 const SUBDIR: &str = "llama";
 const MODEL_FILE: &str = "qwen2.5-3b-instruct-q4_k_m.gguf";
-const HEALTH_TIMEOUT: Duration = Duration::from_secs(30);
+/// Real, confirmed failure mode this needed raising for: a background
+/// compile saturating every CPU core made a cold model load take longer
+/// than the original 30s, timing this out even though the model was right
+/// there and would have come up fine a few seconds later.
+const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
 /// ~1.96GB (q4_k_m). Named explicitly rather than computed so a stale
 /// partial download from an interrupted run can never be mistaken for a
 /// complete one - see download() below.
@@ -131,19 +135,29 @@ impl Drop for Server {
     }
 }
 
+/// Shown by every caller when the sidecar/model files genuinely aren't
+/// there - the one case where "download it" is the actually correct fix.
+const NOT_INSTALLED_MSG: &str = "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it.";
+
 /// Starts llama-server if the sidecar and model are both present, and waits
-/// for it to report healthy. Returns None - never an error - when either is
-/// missing, matching the "enhancement, not a requirement" pattern used for
-/// diarization and stereo pan: a machine without the ~2GB model still gets a
-/// full transcript, just without the polish pass.
-pub fn start(app: &AppHandle) -> Option<Server> {
+/// for it to report healthy.
+///
+/// Returns a specific error per failure mode rather than a single generic
+/// one - confirmed as a real, user-visible bug: files present but the
+/// machine busy (a background compile hogging every core, in the case that
+/// surfaced this) made the health check below time out, and every caller
+/// was showing NOT_INSTALLED_MSG regardless, telling someone to "download
+/// the model" when it was already sitting right there. Only the
+/// files-missing case gets that message now; a slow/failed start gets a
+/// message that actually points at what happened.
+pub fn start(app: &AppHandle) -> Result<Server, String> {
     let exe = sidecar::resolve_in(SUBDIR, "llama-server");
-    let model = model_path(app).ok()?;
+    let model = model_path(app).map_err(|_| NOT_INSTALLED_MSG.to_string())?;
     if !exe.exists() || !model.exists() {
-        return None;
+        return Err(NOT_INSTALLED_MSG.to_string());
     }
 
-    let port = free_port()?;
+    let port = free_port().ok_or("Could not find a free port to start the local AI model on.")?;
     let threads = std::thread::available_parallelism()
         .map(|n| n.get().saturating_sub(1).max(1))
         .unwrap_or(4)
@@ -168,7 +182,7 @@ pub fn start(app: &AppHandle) -> Option<Server> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
+        .map_err(|e| format!("Could not start the local AI model: {e}"))?;
 
     let mut server = Server {
         child,
@@ -176,13 +190,13 @@ pub fn start(app: &AppHandle) -> Option<Server> {
         client: reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(20))
             .build()
-            .ok()?,
+            .map_err(|e| format!("Could not set up a connection to the local AI model: {e}"))?,
     };
 
     if !server.wait_healthy() {
-        return None;
+        return Err("The local AI model didn't start in time - the machine may be busy (another heavy task using every CPU core can slow this down). Try again in a moment.".to_string());
     }
-    Some(server)
+    Ok(server)
 }
 
 /// Finds a free localhost port by asking the OS for one and releasing it
@@ -281,10 +295,7 @@ fn generate_metadata_inner(
     if req.transcript.trim().is_empty() {
         return Err("No transcript to work from - caption this clip first.".into());
     }
-    let server = start(app).ok_or_else(|| {
-        "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it."
-            .to_string()
-    })?;
+    let server = start(app)?;
     if handle.is_cancelled() {
         return Err("Cancelled".into());
     }
@@ -389,10 +400,7 @@ fn translate_inner(
     if req.segments.is_empty() {
         return serde_json::to_string(&Vec::<TranslatedSegment>::new()).map_err(|e| e.to_string());
     }
-    let server = start(app).ok_or_else(|| {
-        "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it."
-            .to_string()
-    })?;
+    let server = start(app)?;
 
     let total = req.segments.len();
     let mut out = Vec::with_capacity(total);
@@ -620,14 +628,7 @@ fn run_inner(
         .iter()
         .any(|c| dictionary_hit(&dictionary, &c.original).is_none());
 
-    let server = if needs_model {
-        Some(start(app).ok_or_else(|| {
-            "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it."
-                .to_string()
-        })?)
-    } else {
-        None
-    };
+    let server = if needs_model { Some(start(app)?) } else { None };
 
     let total = candidates.len();
     let mut out = Vec::with_capacity(total);
