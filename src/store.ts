@@ -387,6 +387,12 @@ interface AppState {
    * Correcting diarization is usually a word or two at a boundary, not a
    * whole line, so this is what dragging one word vertically does. */
   moveWordToSpeaker: (segId: string, wordIdx: number, speaker: number | null) => void;
+  /** Same idea as moveWordToSpeaker, batched for a multi-selected group drag
+   * (MainWaveform's Ctrl/Cmd+click group) so reassigning several words to a
+   * different speaker's lane is one undo step, not one per word - and so
+   * several selected words from the very same segment extract together as
+   * one new segment instead of each other's index shifting mid-loop. */
+  moveWordsToSpeaker: (updates: { segId: string; idx: number }[], speaker: number | null) => void;
   canUndo: boolean;
   canRedo: boolean;
   /** Snapshots the current edit state so the next mutation can be undone.
@@ -2039,6 +2045,40 @@ export const useApp = create<AppState>((set, get) => ({
       .filter((sg) => sg.words.length > 0)
       .concat(moved)
       .sort((a, b) => (a.words[0]?.start ?? 0) - (b.words[0]?.start ?? 0));
+    set({ segments, tuningWord: null });
+  },
+
+  moveWordsToSpeaker: (updates, speaker) => {
+    if (updates.length === 0) return;
+    get().pushHistory();
+    const bySeg = new Map<string, Set<number>>();
+    for (const u of updates) {
+      if (!bySeg.has(u.segId)) bySeg.set(u.segId, new Set());
+      bySeg.get(u.segId)!.add(u.idx);
+    }
+
+    const newSegments: Segment[] = [];
+    let segments = get().segments.flatMap((sg) => {
+      const idxSet = bySeg.get(sg.id);
+      if (!idxSet) return [sg];
+      // Every word in this segment is part of the move - no split needed.
+      if (idxSet.size === sg.words.length) {
+        return [{ ...sg, speaker }];
+      }
+      const remaining = sg.words.filter((_, i) => !idxSet.has(i));
+      const moved = sg.words.filter((_, i) => idxSet.has(i));
+      newSegments.push({
+        id: nextId("useg"),
+        words: moved,
+        speaker,
+        pan: sg.pan,
+        intensity: sg.intensity,
+      });
+      return remaining.length > 0 ? [{ ...sg, words: remaining }] : [];
+    });
+    segments = [...segments, ...newSegments].sort(
+      (a, b) => (a.words[0]?.start ?? 0) - (b.words[0]?.start ?? 0)
+    );
     set({ segments, tuningWord: null });
   },
 

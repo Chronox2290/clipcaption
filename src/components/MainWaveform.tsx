@@ -60,11 +60,19 @@ type Drag =
        * relative spacing exact no matter how many frames the drag runs for. */
       words: { segId: string; idx: number; origStart: number; origEnd: number }[];
       startPointerTime: number;
+      startLane: number | null;
+      /** Set once the pointer is over a DIFFERENT lane than the group
+       * started in - dropping there reassigns the whole group to that
+       * speaker instead of retiming it (recomputing a time-collision budget
+       * against a lane the group doesn't belong to yet isn't worth the
+       * complexity when reassignment is clearly what's wanted here). */
+      dropLane: number | null;
       moved: boolean;
       /** How far the whole group may shift in either direction before some
        * member would cross its nearest UNselected same-lane neighbour -
        * computed once at drag start from words not in the selection, so the
-       * group can't collide with anything outside itself. */
+       * group can't collide with anything outside itself. Only applied when
+       * the group is dropped back in its own starting lane. */
       minDelta: number;
       maxDelta: number;
     }
@@ -114,6 +122,7 @@ export default function MainWaveform({ videoRef }: Props) {
   const removeWord = useApp((s) => s.removeWord);
   const setSegmentSpeaker = useApp((s) => s.setSegmentSpeaker);
   const moveWordToSpeaker = useApp((s) => s.moveWordToSpeaker);
+  const moveWordsToSpeaker = useApp((s) => s.moveWordsToSpeaker);
   const style = useApp((s) => s.style);
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);
@@ -653,6 +662,8 @@ export default function MainWaveform({ videoRef }: Props) {
           kind: "group",
           words: members.map((f) => ({ segId: f.segId, idx: f.idx, origStart: f.w.start, origEnd: f.w.end })),
           startPointerTime: t,
+          startLane: flat[hit.flatIdx].lane,
+          dropLane: null,
           moved: false,
           minDelta,
           maxDelta,
@@ -735,16 +746,28 @@ export default function MainWaveform({ videoRef }: Props) {
         setWordTime(drag.segId, drag.idx, "end", newEnd);
       }
     } else if (drag.kind === "group") {
-      const delta = clamp(t - drag.startPointerTime, drag.minDelta, drag.maxDelta);
+      const over = laneAtY(e.clientY - rect.top);
+      const next = over != null && over !== drag.startLane ? over : null;
+      if (next !== drag.dropLane) {
+        drag.dropLane = next;
+        setDropLane(next); // redraw so the target track highlights
+      }
       if (Math.abs(t - drag.startPointerTime) > 0.005) drag.moved = true;
-      setWordTimesBatch(
-        drag.words.map((w) => ({
-          segId: w.segId,
-          idx: w.idx,
-          start: w.origStart + delta,
-          end: w.origEnd + delta,
-        }))
-      );
+      // Hovering a different lane means "reassign speaker" (applied on
+      // drop) rather than "retime" - skip the time-shift preview so the
+      // group doesn't also drift out from under the pointer while the user
+      // is aiming for a different speaker's track.
+      if (drag.dropLane == null) {
+        const delta = clamp(t - drag.startPointerTime, drag.minDelta, drag.maxDelta);
+        setWordTimesBatch(
+          drag.words.map((w) => ({
+            segId: w.segId,
+            idx: w.idx,
+            start: w.origStart + delta,
+            end: w.origEnd + delta,
+          }))
+        );
+      }
     } else {
       if (Math.abs(t - drag.startPointerTime) > 0.01) drag.moved = true;
       const a = Math.max(drag.gapStart, Math.min(drag.startPointerTime, t));
@@ -777,6 +800,16 @@ export default function MainWaveform({ videoRef }: Props) {
         // word onto a third speaker's track. Shift takes the whole line.
         if (drag.wholeLine) setSegmentSpeaker(drag.segId, speaker);
         else moveWordToSpeaker(drag.segId, drag.idx, speaker);
+      }
+      setDropLane(null);
+    } else if (drag?.kind === "group") {
+      if (drag.dropLane != null) {
+        const speaker = lanes[drag.dropLane] ?? null;
+        moveWordsToSpeaker(
+          drag.words.map((w) => ({ segId: w.segId, idx: w.idx })),
+          speaker
+        );
+        setSelectedWords(new Set());
       }
       setDropLane(null);
     } else if (drag?.kind === "create") {
@@ -814,9 +847,9 @@ export default function MainWaveform({ videoRef }: Props) {
       <div className="mw-toolbar">
         <span className="muted small">
           {activeRange
-            ? "Editing the selected clip range — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing (Esc clears). With a word selected: Alt+←/→ steps, [ ] nudges (Shift = bigger), Z zooms, Del removes, drag up/down moves it to another speaker."
+            ? "Editing the selected clip range — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing, or drag the group up/down onto another speaker's track to reassign all of them at once (Esc clears). With a word selected: Alt+←/→ steps, [ ] nudges (Shift = bigger), Z zooms, Del removes, drag up/down moves it to another speaker."
             : segments.length
-            ? "Editing the full transcript — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing (Esc clears)."
+            ? "Editing the full transcript — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing, or drag the group up/down onto another speaker's track to reassign all of them at once (Esc clears)."
             : "No captions yet — drag on the waveform below to add one by hand."}
         </span>
         <span className="mw-zoom">
