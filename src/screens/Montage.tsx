@@ -23,6 +23,8 @@ export default function Montage() {
   const [resolutionId, setResolutionId] = useState("1080");
   const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
   const [dragId, setDragId] = useState<string | null>(null);
+  const [sizeLimitEnabled, setSizeLimitEnabled] = useState(false);
+  const [sizeLimitMb, setSizeLimitMb] = useState(25);
 
   const preset = EXPORT_PRESETS.find((p) => p.id === presetId) ?? EXPORT_PRESETS[0];
   const isCropped = !!(preset.targetW && preset.targetH);
@@ -112,7 +114,14 @@ export default function Montage() {
     if (selectedClips.length === 0) return;
     const out = await pickSavePath("montage.mp4");
     if (!out) return;
-    void buildMontage(selectedClips, out, presetId, resolutionId, fitMode);
+    void buildMontage(
+      selectedClips,
+      out,
+      presetId,
+      resolutionId,
+      fitMode,
+      sizeLimitEnabled ? sizeLimitMb : null
+    );
   };
 
   return (
@@ -250,12 +259,31 @@ export default function Montage() {
             </div>
           )}
 
+          <div className="field">
+            <label title="Each clip still renders at quality (CRF) individually - this caps the FINAL joined file with one extra compression pass, same as a single export's own size limit.">
+              Limit file size
+            </label>
+            <input
+              type="checkbox"
+              checked={sizeLimitEnabled}
+              onChange={(e) => setSizeLimitEnabled(e.target.checked)}
+            />
+            {sizeLimitEnabled && (
+              <input
+                type="number"
+                min={1}
+                max={2000}
+                value={sizeLimitMb}
+                onChange={(e) => setSizeLimitMb(Number(e.target.value))}
+              />
+            )}
+            {sizeLimitEnabled && <span className="field-val">MB</span>}
+          </div>
+
           <p className="muted small">
             Every clip is rendered at this same resolution regardless of its own source video's
-            size, so they join into one file cleanly. A file-size limit isn't supported for
-            montages yet — pick a resolution that keeps the whole thing a sane size. If you've
-            turned on "Post to Discord automatically" in the Export tab, the finished montage
-            posts there too.
+            size, so they join into one file cleanly. If you've turned on "Post to Discord
+            automatically" in the Export tab, the finished montage posts there too.
           </p>
 
           {montageJob ? (

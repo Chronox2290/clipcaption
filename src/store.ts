@@ -402,15 +402,19 @@ interface AppState {
   openMontage: () => void;
   /** Renders and joins clips pulled from one or more saved .ccproj files
    * (src/screens/Montage.tsx) into one file, in the given order. Every clip
-   * is rendered at the same resolution/fps/encoder so the final join is a
-   * fast, lossless `-c copy` concat - only quality (CRF) encoding is
-   * supported per clip today, not a file-size target (see montage.rs). */
+   * is rendered at the same resolution/fps/encoder so the join is a fast,
+   * lossless `-c copy` concat; targetSizeMb (optional) caps the FINAL
+   * joined file's size via one extra size-targeted re-encode pass
+   * (montage.rs), same machinery a single clip's "custom size" export
+   * already uses - each clip itself still always renders at quality (CRF),
+   * only the whole-montage output can be size-capped. */
   buildMontage: (
     clips: MontageClip[],
     outputPath: string,
     presetId: string,
     resolutionId: string,
-    fitMode: "fill" | "fit"
+    fitMode: "fill" | "fit",
+    targetSizeMb?: number | null
   ) => Promise<void>;
   addBatchPaths: (paths: string[]) => void;
   addBatchFolder: (dir: string) => Promise<void>;
@@ -2158,7 +2162,7 @@ export const useApp = create<AppState>((set, get) => ({
     void get().postToDiscord(reelPath, parts.join(", ") + ".");
   },
 
-  buildMontage: async (clips, outputPath, presetId, resolutionId, fitMode) => {
+  buildMontage: async (clips, outputPath, presetId, resolutionId, fitMode, targetSizeMb) => {
     if (clips.length === 0) return;
     const preset = getExportPreset(presetId);
     // Resolved once and applied identically to every clip - the whole point
@@ -2199,7 +2203,9 @@ export const useApp = create<AppState>((set, get) => ({
 
     try {
       set({ error: null, exportDone: null });
-      const id = await invoke<string>("build_montage", { req: { items, outputPath } });
+      const id = await invoke<string>("build_montage", {
+        req: { items, outputPath, targetSizeMb: targetSizeMb ?? null },
+      });
       set({ montageJob: { id, stage: "montage", progress: 0 } });
     } catch (e) {
       set({ error: String(e) });

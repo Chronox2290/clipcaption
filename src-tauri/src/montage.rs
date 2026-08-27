@@ -47,6 +47,14 @@ pub struct MontageItem {
 pub struct MontageRequest {
     pub items: Vec<MontageItem>,
     pub output_path: String,
+    /// Optional cap on the FINAL joined file's size, in MB. `None` keeps the
+    /// old v1 behavior (each clip quality-encoded, plain -c copy join, no
+    /// size targeting at all). When set, the join instead lands in a scratch
+    /// temp file and gets one more pass through export.rs's own size-target
+    /// machinery (2-pass x264 / VBV) - reused rather than re-implemented,
+    /// same reasoning as reusing run_inner per-clip above.
+    #[serde(default)]
+    pub target_size_mb: Option<f64>,
 }
 
 pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, req: MontageRequest) {
@@ -83,6 +91,7 @@ fn run_inner(
 
     let n = req.items.len();
     let mut temp_paths: Vec<std::path::PathBuf> = Vec::with_capacity(n);
+    let mut total_duration = 0.0_f64;
     let cleanup = |paths: &[std::path::PathBuf]| {
         for p in paths {
             let _ = std::fs::remove_file(p);
@@ -132,14 +141,55 @@ fn run_inner(
             cleanup(&temp_paths);
             return Err(format!("Clip {}/{} failed: {e}", i + 1, n));
         }
+        total_duration += item.duration_sec;
         temp_paths.push(temp_path);
     }
 
-    emit_progress(app, job_id, stage, 0.95, Some("Joining clips".into()));
+    emit_progress(app, job_id, stage, 0.9, Some("Joining clips".into()));
 
-    let join_result = join_via_concat_demuxer(&temp_paths, &req.output_path, &cache, job_id);
+    // With no size target, join straight to the real output - same as
+    // before this option existed. With one, the join is just an
+    // intermediate: land it in scratch and run it through one more pass of
+    // export.rs's own size-target machinery (2-pass x264 / VBV), same as a
+    // single clip's "custom size" export already does - not re-implemented
+    // here. `-c copy` join first (not fed straight into the size-target
+    // pass as N separate -i inputs) because it's what lets all the earlier
+    // per-clip renders share one instant, lossless combine step regardless
+    // of how many clips there are.
+    let join_target = match req.target_size_mb {
+        Some(_) => cache.join(format!("{job_id}_joined.mp4")),
+        None => std::path::PathBuf::from(&req.output_path),
+    };
+    let join_result = join_via_concat_demuxer(&temp_paths, &join_target.to_string_lossy(), &cache, job_id);
     cleanup(&temp_paths);
-    join_result
+    join_result?;
+
+    if let Some(target_mb) = req.target_size_mb {
+        emit_progress(app, job_id, stage, 0.95, Some("Compressing to target size".into()));
+        let first = &req.items[0];
+        let final_req = ExportRequest {
+            input_path: join_target.to_string_lossy().into_owned(),
+            output_path: req.output_path.clone(),
+            ass_content: String::new(), // already burned into each clip
+            target_w: None,             // already cropped/scaled per clip
+            target_h: None,
+            target_size_mb: Some(target_mb),
+            crf: None,
+            fps: None, // already applied per clip
+            audio_kbps: first.audio_kbps,
+            duration_sec: total_duration,
+            trim_start: None,
+            trim_end: None,
+            cut_ranges: None,
+            encoder: first.encoder.clone(),
+            fit_mode: None,
+            max_height: None,
+        };
+        let result = export::run_inner(app, job_id, handle, &final_req);
+        let _ = std::fs::remove_file(&join_target);
+        result?;
+    }
+    Ok(())
 }
 
 /// Shared concat-demuxer join, used both by the per-project montage builder
