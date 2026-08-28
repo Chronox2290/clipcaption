@@ -84,6 +84,27 @@ effort-to-payoff:
     raw word-level accuracy — reuse it to measure before/after on each change above, the same way the
     DTW fix and the VAD rejection were measured rather than assumed.
 
+**Decoding parameters — re-measured fresh 2026-08-28, checkpoint per the user's request before
+touching anything more invasive.** Ran the actual bundled `whisper-cli` against the ground-truth clip
+today, using the exact flags `transcribe.rs` currently builds (`large-v3-turbo`, `-l en`, `-dtw
+large.v3.turbo`, `-nfa`, no explicit temperature/best-of/beam-size flags) - not a cached number, a
+fresh run through the real harness (`scratch_align/score_lib.py`) this session. Result, tracked as two
+separate numbers as asked:
+  - **Word accuracy: 68.4%** (104/152 ground-truth words text-matched, 137 words emitted).
+  - **Timing accuracy: median word-start error 123ms** (40% within 100ms, 89% within 250ms; word-end
+    error runs looser - median 153ms, 73% within 250ms - words tend to get cut short more than they
+    start late).
+  - **Confirmed the decoding-parameter lever has nothing left to pull, checked against the actual
+    binary's own `--help` today, not assumed:** `best-of` defaults to 5, `beam-size` defaults to 5,
+    `temperature` defaults to 0.00, `max-context` defaults to -1 (already carrying full context) - all
+    already whisper-cli's own out-of-the-box defaults, and `language=en` is already passed explicitly
+    in code. Running "with decoding params" vs. "without" would be two byte-identical invocations. This
+    matches the exact same conclusion an earlier pass reached (recorded before this file got reset) -
+    re-verified today rather than just trusted from a stale note, and it still holds: **before and
+    after are the same number, because there was nothing to change.**
+  - **Stopping here per instruction** - not proceeding to vocabulary/prompt biasing, model size, or
+    voice separation without a go-ahead. Reported to the user; awaiting direction.
+
 **Export bug — investigated 2026-08-28, confirmed already fixed, with fresh real proof.** The lead in
 the paragraph this replaced was exactly right: `layoutRows()` (the function that assigns each caption
 page a `row` so concurrent pages from different speakers get their own vertical offset) needed to run
