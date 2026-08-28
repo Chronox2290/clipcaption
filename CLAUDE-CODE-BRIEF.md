@@ -190,6 +190,18 @@ it doesn't get chased as a bug later.
 
 ## Priority build order after that
 
+**2026-08-29: re-verified fresh against the actual current code (not the docs, not memory) — all
+four items below are genuinely done, in real code, right now.** Grepped for each one's real
+implementation rather than trusting an earlier claim: `AUTO_APPLY_CONFIDENCE`/tiered auto-apply
+splitting logic (#2) is live in both the single-clip and batch flows, `needs_review` confidence-gating
+(#5) holds ambiguous batch items back from export, `watchfolder.rs` (164 lines) and `montage.rs` (296
+lines, grown today with the digest-hookup and size-limit work) both exist and compile clean. Tier 0 is
+complete. Tier 1's own items (real correctness bugs, death-detector refinement, Discord webhook,
+pipeline resilience) are also all done - see `CLAUDE-CODE-STATUS.md`. What's left in the backlog below
+is genuinely blocked on real-world access (a Discord bot token, a second device, a bundled-model
+decision, real API credentials) - see this file's own "blocked on real-world access" note further
+down, not a to-do list still waiting on more code.
+
 The north star: the whole pipeline — record → find the good moments → transcribe → collate →
 share — should need as close to zero manual editing as possible. Manual editing should be the
 override you reach for occasionally, not the default path every clip goes through.
