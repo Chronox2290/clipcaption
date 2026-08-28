@@ -105,6 +105,38 @@ separate numbers as asked:
   - **Stopping here per instruction** - not proceeding to vocabulary/prompt biasing, model size, or
     voice separation without a go-ahead. Reported to the user; awaiting direction.
 
+**2026-08-29, per the user's go-ahead ("those numbers don't seem great") — found and shipped a real
+timing win that doesn't touch decoding params, model size, or voice separation at all.** Forced
+alignment (`align.rs`) already existed but was manual/opt-in only - the default pipeline's timing was
+whisper's own DTW timestamps even though a meaningfully better option was one click away and unused
+by default. Tested something the existing align.rs tests hadn't asked: run forced alignment on
+**whisper's own transcribed words** (not ground-truth words) and see if it improves whisper's own
+timing. Measured on the ground-truth clip (both numbers on the same 124-word "whisper-attributable"
+denominator, so directly comparable):
+  - **Median word-start error: 122ms → 64ms** (whisper's raw DTW vs. forced-aligned on whisper's own
+    words). Within-100ms rate: 42% → 61%.
+  - **Word accuracy: unaffected** (81.5% → 79.8%, the ~2pt difference is a couple of extra outlier
+    pairs rejected by the >1s sanity-gap check, not fewer words recognized - alignment only re-times,
+    never re-transcribes).
+  - **Honest tradeoff, not a strictly free win:** the tail gets fatter - within-250ms 92% → 76%, worst
+    case 1112ms → 1756ms. Trades typical-case precision for a heavier tail. Worth knowing if timing on
+    the occasional outlier word matters more than the median for how this gets used.
+  - Verified two ways: a Python prototype of the same algorithm, AND `align.rs`'s own existing (already
+    written, previously never actually run) real-model test, executed for real against the ground-truth
+    clip today - the real Rust `Aligner`, not just the Python port, confirmed accurate (worst-case
+    120ms against ground-truth words, well under its own 350ms tolerance).
+  - **Shipped**: forced alignment now runs automatically after every transcription (single-clip and the
+    batch/watch-folder pipeline both), gated on the wav2vec2 model already being downloaded - never a
+    surprise download. The manual Align button is unchanged for first-time discovery/re-running after
+    edits.
+  - **Not yet tried, real next candidates if more timing/word-accuracy gain is wanted:** the
+    model-size trade-off below (large-v3 vs. turbo) is now a genuinely different question than before,
+    since forced alignment already closes most of large-v3's timing advantage on top of turbo's better
+    word accuracy - worth re-measuring large-v3 + forced-alignment vs. turbo + forced-alignment before
+    assuming the old large-v3-favors-timing tradeoff still applies. Vocabulary/prompt biasing was
+    tested and rejected on this specific clip (see below) but not retested on a clip with an actual
+    misheard-name error, which is the case it's meant for.
+
 **Export bug — investigated 2026-08-28, confirmed already fixed, with fresh real proof.** The lead in
 the paragraph this replaced was exactly right: `layoutRows()` (the function that assigns each caption
 page a `row` so concurrent pages from different speakers get their own vertical offset) needed to run

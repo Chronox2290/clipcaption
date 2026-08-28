@@ -1,9 +1,22 @@
 # ClipCaption — status summary
 
 Plain-language write-up of what's changed recently and where things stand. Current as of
-**2026-08-28**, commit `3b91d58`. Everything below "New since v0.2.10" was built in one long session
+**2026-08-29**, commit `28d4a36`. Everything below "New since v0.2.10" was built in one long session
 after the v0.2.10 draft release described further down — that release note is kept as-is since it's
 still an accurate record of what shipped in it, not because it's the latest state.
+
+**2026-08-29 — forced alignment now runs automatically, real measured timing win.** Per the user
+flagging the accuracy numbers as not great: found that forced alignment (built earlier, `align.rs`)
+was sitting there manual/opt-in only, never applied by default. Tested running it on **whisper's own
+transcribed words** (not ground-truth words, a question the existing tests hadn't asked) against the
+ground-truth clip: **median word-start timing error drops from 122ms to 64ms**, within-100ms rate
+42% → 61%, with **word accuracy unaffected** (alignment only re-times, never re-transcribes) - real
+honest tradeoff, the worst-case tail gets fatter (within-250ms 92% → 76%). Verified against both a
+Python prototype and the actual Rust `Aligner` (ran `align.rs`'s own existing real-model test for the
+first time, not just written and left `#[ignore]`d - passed, worst-case 120ms against ground truth).
+Shipped: forced alignment now auto-runs after every transcription, both the single-clip flow and the
+batch/watch-folder pipeline, gated on the model already being downloaded so it's never a surprise
+download. Full detail and the exact numbers in `CLAUDE-CODE-BRIEF.md`'s 2026-08-29 entry.
 
 **2026-08-28 correction — the "New since v0.2.10" list below is missing a whole chunk of already-shipped
 work.** Picking this session back up, `CLAUDE-CODE-BRIEF.md`'s "Priority build order" section (montage
