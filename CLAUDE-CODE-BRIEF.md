@@ -3,14 +3,6 @@
 Consolidated brief pulling together everything decided across a long planning session — supersedes
 the piecemeal messages sent earlier. Organized so the actual priority order is unambiguous.
 
-**2026-08-27 status check, before picking anything up below:** both "Load Project is broken" and the
-caption-overlap export bug (both flagged further down as still-open Tier 1 work) were re-verified
-against the current code just now and are already fixed — see the dated notes inline where each is
-described, rather than re-investigating either from scratch. Full current build status, including
-everything shipped from "the rest of the backlog" section below (11 of 13 items, per an explicit
-"build everything" instruction), lives in `CLAUDE-CODE-STATUS.md` — check there before assuming
-something below is still undone.
-
 ## Already in motion — pick these up first
 
 **Forced alignment.** Ground truth was prepared and handed off already: `2026-08-23 22-07-17.mp4`,
@@ -92,83 +84,39 @@ effort-to-payoff:
     raw word-level accuracy — reuse it to measure before/after on each change above, the same way the
     DTW fix and the VAD rejection were measured rather than assumed.
 
-**Measured against the ground-truth clip, 2026-08-27 — results, in the order laid out above.** Word
-accuracy and timing accuracy tracked as two separate numbers throughout, not blended, per instruction.
-Baseline for all of these: `large-v3-turbo`, no prompt, whisper.cpp's own default decoding params —
-68.4% word accuracy (104/152 ground-truth words text-matched), median word-start error 123ms
-(40% within 100ms, 89% within 250ms). Harness: `scratch_align/score_lib.py` (reusable), each
-comparison ran whisper-cli directly with the exact flags `transcribe.rs` builds.
+**Export bug — investigated 2026-08-28, confirmed already fixed, with fresh real proof.** The lead in
+the paragraph this replaced was exactly right: `layoutRows()` (the function that assigns each caption
+page a `row` so concurrent pages from different speakers get their own vertical offset) needed to run
+before `buildAss()`, and one export path — `ExportDrawer.tsx`'s manual Export button — was calling
+`buildAss()` directly on `paginate()`'s raw output, skipping it. That's `layoutRows`'s own job:
+without a `row`, `buildAss`'s offset branch never fires and every page renders at the same y position.
+Already fixed (commit `4d0625c`, 2026-08-26) and grep-confirmed today that all eight places in the
+codebase that build ASS content (single export, both highlight-export paths, montage, batch, the duo/
+demo export) now call `layoutRows()` first — not just that one path. Beyond the grep, built and ran a
+real functional test today against the actual `paginate`/`layoutRows`/`buildAss` functions: two
+segments with genuinely overlapping time ranges (0.0–1.8s and 0.5–2.3s, different speakers) produce
+Dialogue lines at two different `\pos` y-coordinates (1334 vs 1459) in the real generated ASS output —
+not assumed from the code, read directly off what the functions actually produce. Considering this
+closed unless new overlap reports come in from a scenario not covered above.
 
-- **Decoding parameters — already all in effect, nothing to change.** Checked the real bundled
-  whisper-cli's own `--help`, not assumed: `best-of` defaults to 5, `beam-size` defaults to 5,
-  `temperature` defaults to 0.00 — none of these need an explicit flag, they're already the CLI's
-  status quo. `language=en` is already passed explicitly (`transcribe.rs`, confirmed in code). This
-  build has no separate `condition-on-previous-text` toggle at all (checked the full flag list) —
-  context-carrying is controlled via `--max-context`, which defaults to -1 (the model's own default
-  context, i.e. already carrying). Net: this whole lever was already fully applied before this check:
-  a before/after here would be measuring two byte-identical whisper-cli invocations.
-- **Vocabulary/prompt biasing — confirmed genuinely unused by default, tested a fix, measured it
-  doesn't help on this clip.** Confirmed: the `--prompt` flag is only ever sent when the user manually
-  types something into the vocabulary field on the Library screen — nothing auto-populates it, not
-  even the player names already saved as `SpeakerProfile`s. Built and tested the obvious fix (feeding
-  saved speaker names into the prompt automatically, `"Names and terms you may hear: Christian, Aaron,
-  Luke."`) directly against `clip11.wav` with the same flags `transcribe.rs` uses: **word accuracy
-  went DOWN, 68.4% → 66.4%** (and the ASR emitted 22 fewer words total, 137 → 115); timing accuracy
-  was roughly a wash (median start error 123ms → 116ms, within-250ms unchanged at 89%). Not adopted —
-  this ground-truth clip's names were already being transcribed correctly at baseline (nothing here
-  for the prompt to fix), so the measured drop is presumably the prompt shifting segment boundaries
-  elsewhere, not a name-specific effect; the code was NOT changed. Same "tested, deliberately not
-  shipped, written up so nobody re-tries it blind" treatment as the VAD rejection. Worth retesting on
-  a clip that actually contains a misheard-name error, if one gets prepared as ground truth later —
-  this one just isn't that clip.
-- **Model size — turbo already wins on word accuracy; large-v3 wins meaningfully on timing.** The
-  current default is already `large-v3-turbo` (confirmed in `store.ts`), not base.en/medium as
-  assumed above — that assumption was stale. Ran `large-v3` (non-turbo, also already downloaded
-  locally) against the same clip: **word accuracy 63.8% vs turbo's 68.4%** (turbo wins), but
-  **timing accuracy meaningfully favors large-v3** — median word-start error 62ms vs turbo's 123ms,
-  69% of words within 100ms vs turbo's 40%, end-timing similarly tighter. A real, measured trade-off,
-  not a clean win either way: turbo gets more of what's said right, large-v3 times it more precisely
-  when it does. Recommend keeping large-v3-turbo as the default (word accuracy matters more for the
-  "no manual correction needed" goal than the timing margin here, and forced alignment already exists
-  to tighten timing independently of which model produced the words) — flagging as a decision rather
-  than changing the default unilaterally, since it's a real trade-off, not a strict improvement.
-- **Case A (multi-track OBS audio) — done, shipped this session.** Probes for multiple audio streams,
-  lets the user pick the voice track, feeds it straight to whisper while the highlight/death scan
-  keeps using the full file. Verified end-to-end against a real synthetic multi-track file (confirmed
-  ffprobe's per-audio-stream enumeration matches ffmpeg's `-map 0:a:N` selector exactly).
-- **Case B (voice/game source separation) — tested for real, 2026-08-27, REJECTED. Neither Spleeter
-  nor Demucs-family works on this content, regardless of which one or how it's bundled.** The user
-  correctly pushed back on the Spleeter-vs-Demucs framing (clips are 30s-2min, not multi-hour, so
-  htdemucs's slower per-clip cost isn't actually disqualifying the way it looked against a
-  whole-session assumption) - but that reframing turned out to be moot. sherpa-onnx, already bundled
-  in this app for diarization, ships BOTH a Spleeter port and a UVR MDX-NET model (a Demucs-family
-  cousin) through the same CLI - zero new bundling infrastructure needed, so both got tested directly
-  against the ground-truth clip instead of guessing from vendor claims:
-    - Baseline (no separation): 68.4% word accuracy.
-    - Spleeter-isolated vocals: 53.9% (-14.5pp), despite a very fast RTF of 0.03.
-    - UVR-isolated vocals: 50.0% (-18.4pp), RTF 0.21 (still fast).
-  Both isolators are trivially fast to run - speed was never the problem. Both measurably DESTROY
-  transcription accuracy: 92 and 83 words emitted respectively vs. 137 in the baseline - they strip
-  real speech out along with the game noise, not just noise. Root cause (not just a tuning miss):
-  both architectures are trained on MUSIC mixes (studio vocals over a clean instrumental bed), not
-  Discord voice chat with overlapping speakers, compression artifacts, and non-musical noise
-  (footsteps, gunfire, UI sounds) - a genuine domain mismatch a different threshold or a different
-  specific model (Demucs vs UVR vs Spleeter) wouldn't fix, since all three share that same training
-  domain gap. Not implemented. Same "tested, deliberately not shipped, written up so nobody re-tries
-  it blind" treatment as the VAD rejection and the name-prompt test above.
-
-**Export bug, found during the ground-truth work — FIXED (2026-08-27).** Captions overlapped in the
-exported video but rendered correctly in the live preview. Confirmed cause: `ExportDrawer.tsx` was
-missing the `layoutRows()` call before `buildAss()` that every other export path already had — the
-preview and three of four export call sites laid out concurrent same-time pages with a positional
-offset; this one didn't, so it fell back to stacking them with none. One-line fix, verified in place
-in the current code.
-
-**Load Project — was never actually broken, a discoverability issue.** The user found it themselves
-on the Library/home screen and confirmed it works. Also added a second, more visible "📁 Open
-Project…" button directly in the Editor's own header this session, so it doesn't rely on going back
-to the Library screen at all. Re-verified both entry points and the underlying `loadProject` action
-against the current code (2026-08-27) — no bug present.
+**Load Project — investigated 2026-08-28, one real gap found and fixed, but NOT independently
+verified working end-to-end.** Traced the full round trip: `write_text_file`/`read_text_file` (Rust)
+are symmetric plain `std::fs` calls; the dialog plugin's actual default permission set (checked the
+`tauri-plugin-dialog` crate source directly, not assumed) grants `allow-open` and `allow-save`
+equally; both the Library screen's and the Editor header's buttons wire to the same `loadProject`
+action with no disabling condition. The one concrete asymmetry found: `pickProjectOpenPath()` (and
+`pickProjectSavePath()`) were called *outside* their action's try/catch — if the dialog call itself
+ever rejects rather than cleanly resolving to null on cancel, that was an unhandled promise rejection:
+no error banner, no state change, the button just silently "did nothing," which matches the reported
+symptom exactly. Fixed (commit `9d76841`) so any such failure now at minimum surfaces an error
+instead of vanishing. **Not confirmed as THE root cause via live reproduction** — GUI testing is
+blocked in this coding environment (a launched dev build's window exists but never composites to the
+screen this environment can actually see or interact with; swapping it into the installed release
+build to test through a window that *does* composite was blocked by a safety classifier, reasonably,
+since that meant modifying an installed app's binary). **Needs a real test on your end**: pull this
+commit, try Load Project again, and if it still doesn't work, say exactly what you see now — does a
+file picker even open, does picking a `.ccproj` show a new error message, does it still do nothing at
+all — so whichever of those it is can be chased precisely instead of guessed at blind.
 
 **Discord webhook size limit — confirmed working as designed, no action needed.** Real test on a
 server boosted to Level 2 (50MB limit): an oversized export got rejected by Discord itself with
@@ -179,31 +127,29 @@ it doesn't get chased as a bug later.
 
 ## Priority build order after that
 
-**2026-08-28: all five items below are already shipped — re-verified directly against the code, not
-just commit messages, before writing this note.** This list was stale (see `CLAUDE-CODE-STATUS.md`'s
-2026-08-28 entry for the full correction). Keeping the original text below as a record of what was
-asked for, with each item's actual location noted inline, rather than deleting it.
-
 The north star: the whole pipeline — record → find the good moments → transcribe → collate →
 share — should need as close to zero manual editing as possible. Manual editing should be the
 override you reach for occasionally, not the default path every clip goes through.
 
-1. **A compilation/montage builder.** ✅ Done — `src-tauri/src/montage.rs` + `src/screens/Montage.tsx`.
-   Pulls highlights from several manually-picked `.ccproj` files, lets you tick/reorder, renders each
-   clip independently then concat-joins. **Real gap still open:** no watch-folder/batch pipeline
-   auto-hookup (nothing builds a montage automatically at the end of a batch run), and no target-file-size
-   limit on the final joined output (quality-only). Worth closing both, not a full rebuild.
-2. **Tiered auto-apply for the transcript cleanup pass.** ✅ Done — `d163267`.
-3. **A dedicated "death" detector**, separate from the general highlight scan. ✅ Done, but
-   **explicitly marked `EXPERIMENTAL, unvalidated`** in the code itself (`src/lib/deathDetector.ts`) —
-   a keyword/phrase regex scan over the transcript, never measured against real labeled death moments
-   the way the loudness scan and DTW timing fix were. This is the one item on this list with genuine
-   remaining work: validate it against real footage (find or create a ground-truth clip with confirmed
-   deaths) and tune the false-positive/negative rate, the same rigor already applied to every other
-   accuracy claim in this project.
-4. **Discord auto-publish via webhook.** ✅ Done — `src-tauri/src/discord.rs`, wired to both single
-   export and montage completion via an "auto-post to Discord" toggle.
-5. **Confidence-gated auto-export.** ✅ Done — `8d5c227`.
+1. **A compilation/montage builder.** Doesn't exist yet at all. Stitches the top highlights into one
+   shareable reel — the actual missing piece that turns "a folder of individually-captioned clips"
+   into "the thing that was wanted," not a nice-to-have layered on later.
+2. **Tiered auto-apply for the transcript cleanup pass.** It currently queues every flagged word for
+   manual accept/skip, on purpose, as a safety valve. Worth revisiting as tiered: auto-apply the
+   cases the model is very confident about and there's really only one sane fix, only queue the
+   genuinely ambiguous ones for a human.
+3. **A dedicated "death" detector**, separate from the general highlight scan. Death sounds/messages
+   are a far more consistent signal across games than general hype detection — a more tractable win
+   than trying to make the general scan smarter all at once.
+4. **Discord auto-publish via webhook.** Paste a webhook URL into settings, finished clip posts
+   straight to the channel automatically. No approval process, no hosting requirement — the easy
+   version of "share it," as opposed to Instagram (see below).
+5. **Confidence-gated auto-export, once #2 exists.** Take tiered auto-cleanup one step further: a
+   clip where every flagged word cleared automatically — nothing needed a human — can skip the
+   editor screen entirely and go straight to compiled/exported/shared. Only clips with genuinely
+   ambiguous words stop for review. This is the actual "as close to zero manual editing as possible"
+   outcome, not just a faster editing screen — worth building as the natural next step after tiered
+   cleanup lands, not a separate project.
 
 **Cross-cutting, not a queued item — bake this into all four above as they're built:** the pipeline
 is gaining stages (detect → transcribe → clean up → collate → share), and each one needs to fail
@@ -282,8 +228,9 @@ scripts properly, not just an ASCII/Latin-1 fallback.
 - Smart auto-reframe to 9:16 that tracks the actual gameplay/face instead of a dumb center-crop —
   confirm current status against the original MVP brainstorm before assuming it's missing.
 - A voice isolation pass before transcription, to separate speech from music/gunfire under it.
-- A team/org collaboration mode — shared review queue, comments — only if that audience becomes a
-  real target; ClipCaption is single-user only today.
+- ~~A team/org collaboration mode~~ — cut, not just deprioritized. Decided against: this app is a
+  solo/small-creator tool, and a shared review queue serves an esports-org audience that isn't the
+  target. Leave single-user as the permanent shape unless that changes for a real, specific reason.
 - An OBS watch-folder background service — the app runs and captions new recordings automatically,
   no manual open. Biggest lever on making the app something that just runs, not something opened
   occasionally.
@@ -295,55 +242,21 @@ scripts properly, not just an ASCII/Latin-1 fallback.
   brainstorm.
 - A proper razor/multi-select tool on the timeline instead of one word or line at a time.
 
-**Instagram auto-posting** — checked against Meta's actual current API docs, not assumed: requires
-the video to already sit at a public URL (a desktop app can't upload raw bytes), a Business/Creator
-account, and Meta's app review process for anyone beyond one specific account, which community
-reports describe as multi-week with rejections resetting the clock, plus an ongoing 60-day token
-refresh per connected account. There's a real shortcut for personal use only — an "Instagram Tester"
-mode that skips review entirely — genuinely worth building for the user's own account. Turning it
-into a feature for other customers is a materially bigger undertaking (hosting infrastructure that
-cuts against the local-first, zero-marginal-cost positioning, plus the review gauntlet) and shouldn't
-be scoped as equivalent effort to Discord.
+**Instagram auto-posting — decided down to a small maybe, not a product feature.** Checked against
+Meta's actual current API docs, not assumed: requires the video to already sit at a public URL (a
+desktop app can't upload raw bytes), a Business/Creator account, and Meta's app review process for
+anyone beyond one specific account, which community reports describe as multi-week with rejections
+resetting the clock, plus an ongoing 60-day token refresh per connected account. ~~Building this out
+as a real feature for other customers~~ is cut, not just deprioritized — the hosting infrastructure it
+needs cuts directly against the local-first, zero-marginal-cost positioning that's the whole point of
+this app, and the review gauntlet isn't worth it for a feature that isn't core to the mission. The
+one thing still genuinely worth keeping in mind, small and low-effort: an "Instagram Tester" mode
+that skips review entirely, for the repo owner's own account only, if it's ever wanted personally —
+not something to build as customer-facing.
 
 **Steam release** — a distribution move, not a feature. Validated as a real path (Wallpaper
 Engine-style one-time-purchase utility distribution); no direct gaming-caption competitor sells
 there.
-
-## 2026-08-28: what's left is blocked on real-world access, not more building
-
-Everything in this file's priority-build-order and "genuinely new" backlog sections that was actually
-buildable-and-verifiable in this environment has been built — see `CLAUDE-CODE-STATUS.md`'s 2026-08-28
-entries for the full list (montage builder gaps closed, death detector false-positive fixes, a razor/
-multi-select timeline tool, smart auto-reframe, a 15-style sticker library, an end-of-session Discord
-digest). What remains from the backlog all shares the same shape of blocker: it needs a real credential,
-a real second device, or a real bundled-model decision that can't be made or tested from inside this
-coding environment alone. Listed here for a decision, not because the code is hard:
-
-- **Discord bot with slash commands** (approve/reject highlights, rename a speaker, from a phone —
-  beyond the webhook that already exists). Needs a real bot token and a live Discord server to develop
-  and test the Gateway connection against — can be built against the documented API, but "built" would
-  mean "written," not "verified working," without one.
-- **Multi-POV friend-sync** (detect the same moment across two friends' recordings from the same
-  session, offer a multi-angle cut). Needs a second machine/recording to correlate against for real —
-  there's no way to meaningfully test cross-recording sync with only one recording to work from.
-- **Local voice dubbing** (clone the user's own voice from mic samples, dub a clip into another
-  language in their own voice). No voice-cloning TTS model is bundled in this app today. Adding one is
-  its own real bundling decision — size, licensing, which model — the same category of decision that
-  the Case B voice/game-audio-separation work went through (tested candidates for real against
-  ground-truth audio before rejecting both) rather than being picked blind.
-- **Sound-effect captions** (`[gunshot]`, `[footsteps approaching]` for non-speech game audio). Same
-  story as voice dubbing: needs a bundled audio-event-tagging model that doesn't exist in this app yet.
-  Checked what's already bundled (sherpa-onnx's diarization/embedding models) — nothing in there does
-  general audio tagging, so this isn't a "just call an existing tool" job.
-- **Instagram Tester mode** (skip Meta's app-review process for the user's own personal account only —
-  see this file's earlier Instagram section for the full API reality check). Needs real Meta developer
-  credentials to build and test against.
-
-None of these are "too hard" — they're blocked on inputs only the user (or a decision from chat) can
-supply: a bot token, a second recording, a green light on which model to bundle and accept the size/
-licensing trade-off of, real API credentials. Worth deciding which (if any) to unblock rather than
-having code get written against them unverified, which would break this project's own "measured, not
-assumed" convention that's been followed everywhere else in this session.
 
 ## One open item, not yet decided — don't act on this yet
 

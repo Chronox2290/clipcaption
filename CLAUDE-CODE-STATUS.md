@@ -262,6 +262,20 @@ Also per the user: Korean was only ever the smoke-test language for the sticker 
 priority - Portuguese, Japanese, and Spanish matter more for real non-Latin/accented coverage going
 forward.
 
+**Note on this whole "New, 2026-08-28" section:** `CLAUDE-CODE-BRIEF.md` got reset externally partway
+through the day (by the coordinating chat session) back to an earlier state that didn't carry forward
+several of the "already done" corrections made earlier in this file - notably, it re-listed the
+caption-overlap export bug and Load Project as open/unconfirmed again. Re-investigated both fresh
+rather than assuming either this file's own earlier claims or the reset brief's framing - see
+`CLAUDE-CODE-BRIEF.md`'s own 2026-08-28 entries for the full detail. Short version: the export bug is
+confirmed genuinely fixed with a fresh real functional test today (not just re-reading old notes);
+Load Project had one real, concrete gap (an unhandled dialog-rejection that failed completely
+silently) found and fixed, but this fix is NOT independently confirmed as the full root cause - GUI
+testing is blocked in this coding environment (confirmed twice today: a launched dev-build window
+never composites to the screen this environment can see, and swapping the installed release build for
+testing was correctly blocked by a safety classifier since it meant modifying an installed app's
+binary). Needs a real test on the user's end before being called fully closed.
+
 ## What ClipCaption is
 
 A Windows desktop app that auto-captions and compresses game clips — built for recording co-op
