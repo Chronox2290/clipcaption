@@ -188,6 +188,64 @@ The app doesn't hardcode a limit — it attempts the upload and relays Discord's
 is the right behavior since the limit depends on the destination server's boost tier. Noting this so
 it doesn't get chased as a bug later.
 
+## 2026-08-29: online/cloud transcription as an option - real research, genuinely open question
+
+Raised by the user after seeing the local-model ceiling below: given local whisper.cpp appears to have
+hit a real ceiling on hard overlapping audio, is there serious traction in offering an **optional
+online transcription mode** (offline stays the default/only mode for the core positioning; online as
+an opt-in for people who want to trade privacy/cost for accuracy)? Explicitly framed as possibly
+changing scope - CLAUDE.md's current positioning is "runs entirely offline: no cloud, no subscription,
+your footage never leaves your machine," stated as a real differentiator, not an incidental detail. An
+online mode is a product/positioning decision as much as a technical one - researched what's real,
+not deciding it here.
+
+**What the research actually shows (web search, several independent 2026 sources - not vendor claims
+taken at face value):**
+- On *clean* English benchmark audio, the current top cloud models (Deepgram Nova-3, AssemblyAI
+  Universal-3.5 Pro, OpenAI gpt-4o-transcribe, NVIDIA Canary Qwen, ElevenLabs Scribe v2) all cluster
+  within about 5-9% WER (91-95% word accuracy) of each other - genuinely not much daylight between
+  them at the top.
+- **The real, consistently-repeated caveat across every source**: that clean-benchmark number does not
+  transfer to real-world audio. Multiple independent sources describe the same rough pattern - "a
+  provider showing 5% WER on benchmarks might deliver 15-20% WER on challenging production audio."
+  15-20% WER would land around 80-85% word accuracy on hard audio - a real, meaningful jump over local
+  whisper.cpp's measured 68.4% (roughly 32% WER) on clip11, IF that pattern holds for audio as hard as
+  clip11 specifically (three-way overlapping proximity chat, game music/SFX under speech, yelling).
+  **Not verified against this app's actual hard case** - see below for why and what it'd take to
+  actually know.
+- Batch (non-realtime) pricing is genuinely cheap in isolation: roughly $0.15-0.46 per hour of audio
+  across AssemblyAI/Deepgram's current tiers - a full 4-5 hour recording session would cost roughly
+  $1-2. Scales with usage, though, which cuts directly against "no subscription, zero marginal cost"
+  as a positioning claim once someone's processing hours of footage regularly - a real tension with the
+  current pricing/positioning model, not just a technical add-on.
+- One benchmark claim (a specific vendor's blog citing their own model beating ElevenLabs/GPT-4o-
+  transcribe by 40-70% fewer errors on the AMI Meeting Corpus, the closest published benchmark to
+  overlapping-speech audio) is **not treated as reliable evidence here** - it's marketing copy from the
+  company being favorably compared, not an independently-audited leaderboard. Flagging that it exists
+  without endorsing the number.
+
+**What would actually settle this - not done, needs a real decision first:** the only way to know
+whether a cloud model genuinely beats 68.4% on audio this hard is the same thing every other lever
+this session got measured with - run a real cloud API against clip11's actual audio and score it with
+the same harness (`scratch_align/score_lib.py`) that's produced every other number in this file. Not
+done because (a) it needs real API credentials this environment doesn't have and can't create itself,
+and (b) sending even a short test clip to a third-party cloud service is exactly the kind of action
+this project's own safety conventions flag for explicit permission first, especially since clip11
+contains real identifiable voices of real people who haven't consented to a cloud upload. **If this
+gets a go-ahead**: cheapest real test would be one clip (clip11 itself, already prepared, already has
+ground truth to score against) through 1-2 candidate APIs (AssemblyAI and Deepgram both come up as
+current leaders with accessible batch pricing) - a few dollars and one API key away from a real,
+measured answer instead of an inferred one from general benchmarks.
+
+**Scope note if this moves forward**: this wouldn't be a wholesale pivot away from offline - the local
+pipeline (forced alignment, diarization, highlight detection, AI cleanup, the whole batch/watch-folder
+pipeline) stays fully offline and is the app's actual differentiator against cloud-first competitors
+(Submagic, Captions.ai, Opus Clip, etc. all already require an upload). An online transcription mode
+would slot in as one more option alongside the existing model picker, not a replacement for it - closer
+to "offer a faster car" than "change what kind of vehicle this is." Worth deciding deliberately rather
+than drifting into it, given how central "your footage never leaves your machine" is to the current
+pitch.
+
 ## 2026-08-29: pushing word accuracy further - what was tried, real numbers, an honest ceiling
 
 Per the user's ask to keep pushing accuracy toward 85-90%. Tested the one lever left unmeasured: the
