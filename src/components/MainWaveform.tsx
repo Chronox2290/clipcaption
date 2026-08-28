@@ -120,6 +120,8 @@ export default function MainWaveform({ videoRef }: Props) {
   const setWordTimesBatch = useApp((s) => s.setWordTimesBatch);
   const insertSegment = useApp((s) => s.insertSegment);
   const removeWord = useApp((s) => s.removeWord);
+  const removeWords = useApp((s) => s.removeWords);
+  const toggleManualBreak = useApp((s) => s.toggleManualBreak);
   const setSegmentSpeaker = useApp((s) => s.setSegmentSpeaker);
   const moveWordToSpeaker = useApp((s) => s.moveWordToSpeaker);
   const moveWordsToSpeaker = useApp((s) => s.moveWordsToSpeaker);
@@ -222,16 +224,34 @@ export default function MainWaveform({ videoRef }: Props) {
     setSelectedWords(new Set());
   }, [range.start, range.end]);
 
-  // Escape clears a multi-selection - deliberately its own small handler
+  // Escape/Delete for a multi-selection - deliberately its own small handler
   // rather than folded into the tuningWord-gated one below, which returns
-  // early with nothing selected for tuning.
+  // early with nothing selected for tuning (Ctrl/Cmd+click builds up
+  // selectedWords without ever setting tuningWord).
   useEffect(() => {
-    const onEscape = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelectedWords(new Set());
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSelectedWords(new Set());
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedWords.size > 0) {
+        const el = document.activeElement;
+        const tag = el?.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (el as HTMLElement)?.isContentEditable) {
+          return;
+        }
+        e.preventDefault();
+        const updates = flat
+          .filter((f) => selectedWords.has(wordKey(f.segId, f.idx)))
+          .map((f) => ({ segId: f.segId, idx: f.idx }));
+        removeWords(updates);
+        setSelectedWords(new Set());
+      }
     };
-    window.addEventListener("keydown", onEscape);
-    return () => window.removeEventListener("keydown", onEscape);
-  }, []);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWords, removeWords, flat]);
 
   let pxPerSec = clamp(zoomOverride ?? clamp(viewW / totalDur, MIN_PXSEC, AUTO_PXSEC_CAP), MIN_PXSEC, MAX_PXSEC);
   if (pxPerSec * totalDur > MAX_CANVAS_W) pxPerSec = MAX_CANVAS_W / totalDur;
@@ -377,6 +397,17 @@ export default function MainWaveform({ videoRef }: Props) {
         return;
       }
 
+      // The razor tool: force a caption page break right after the tuned
+      // word, overriding paginate()'s automatic word-count/gap/sentence-end
+      // heuristics at a point the user actually wants a cut. Pressing it
+      // again on the same word undoes the split (toggleManualBreak flips
+      // the flag) rather than needing a separate "undo the razor" action.
+      if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        toggleManualBreak(tuningWord.segId, tuningWord.idx);
+        return;
+      }
+
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         removeWord(tuningWord.segId, tuningWord.idx);
@@ -386,7 +417,7 @@ export default function MainWaveform({ videoRef }: Props) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tuningWord, flat, removeWord, setTuningWord, setWordTime, pxPerSec, range.start]);
+  }, [tuningWord, flat, removeWord, toggleManualBreak, setTuningWord, setWordTime, pxPerSec, range.start]);
 
   // Draw.
   useEffect(() => {
@@ -505,6 +536,21 @@ export default function MainWaveform({ videoRef }: Props) {
       if (isUnsure(w)) {
         ctx.fillStyle = "rgba(255, 196, 84, 0.95)";
         ctx.fillRect(x1, top + LANE_H - 3, bw, 2);
+      }
+
+      // Razor mark: a solid cyan divider right after this word, so a forced
+      // caption-page break is as visible on the timeline as the cut itself -
+      // otherwise the only sign it exists is the preview flashing to a new
+      // page one word earlier than the word count would predict.
+      if (w.manualBreakAfter) {
+        ctx.save();
+        ctx.strokeStyle = "#38e0ff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x2 + 1, top - 2);
+        ctx.lineTo(x2 + 1, top + LANE_H + 2);
+        ctx.stroke();
+        ctx.restore();
       }
 
       const label = w.text.length > 18 ? w.text.slice(0, 17) + "…" : w.text;
@@ -847,9 +893,9 @@ export default function MainWaveform({ videoRef }: Props) {
       <div className="mw-toolbar">
         <span className="muted small">
           {activeRange
-            ? "Editing the selected clip range — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing, or drag the group up/down onto another speaker's track to reassign all of them at once (Esc clears). With a word selected: Alt+←/→ steps, [ ] nudges (Shift = bigger), Z zooms, Del removes, drag up/down moves it to another speaker."
+            ? "Editing the selected clip range — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing, drag the group up/down onto another speaker's track to reassign all of them at once, or Del/Backspace to delete the whole group (Esc clears). With a word selected: Alt+←/→ steps, [ ] nudges (Shift = bigger), Z zooms, R forces a caption-page break right after it (press again to undo), Del removes, drag up/down moves it to another speaker."
             : segments.length
-            ? "Editing the full transcript — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing, or drag the group up/down onto another speaker's track to reassign all of them at once (Esc clears)."
+            ? "Editing the full transcript — drag a word to retime it, or drag empty space to add a missed line. Ctrl/Cmd+click several words to move them together, keeping their spacing, drag the group up/down onto another speaker's track to reassign all of them at once, or Del/Backspace to delete the whole group (Esc clears)."
             : "No captions yet — drag on the waveform below to add one by hand."}
         </span>
         <span className="mw-zoom">

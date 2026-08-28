@@ -334,6 +334,17 @@ interface AppState {
   /** Inserts a new word box at `atIndex` (0 = before the first word, words.length = append). */
   insertWord: (segId: string, atIndex: number) => void;
   removeWord: (segId: string, wordIdx: number) => void;
+  /** Deletes several words in one atomic update - the multi-select group's
+   * "razor" bulk delete, mirroring setWordTimesBatch/moveWordsToSpeaker's
+   * "one undo step for the whole group" treatment rather than one per
+   * word. Drops a segment entirely once it's left with no words, same as
+   * removeWord already does for a single deletion. */
+  removeWords: (updates: { segId: string; idx: number }[]) => void;
+  /** Toggles a forced caption-page break right after this word - the razor
+   * tool's split, overriding paginate()'s automatic word-count/gap/
+   * sentence-end breaks at a point the user wants a cut. See
+   * WordSpan.manualBreakAfter. */
+  toggleManualBreak: (segId: string, wordIdx: number) => void;
   setWordTime: (segId: string, wordIdx: number, field: "start" | "end", time: number) => void;
   /** Re-times several words in one atomic update — used for dragging a
    * multi-selected group of caption boxes together on the timeline, so the
@@ -1442,6 +1453,41 @@ export const useApp = create<AppState>((set, get) => ({
           s.id !== segId ? s : { ...s, words: s.words.filter((_, i) => i !== wordIdx) }
         )
         .filter((s) => s.words.length > 0),
+    });
+  },
+
+  removeWords: (updates) => {
+    if (updates.length === 0) return;
+    get().pushHistory();
+    const bySeg = new Map<string, Set<number>>();
+    for (const u of updates) {
+      if (!bySeg.has(u.segId)) bySeg.set(u.segId, new Set());
+      bySeg.get(u.segId)!.add(u.idx);
+    }
+    set({
+      segments: get()
+        .segments.map((s) => {
+          const idxs = bySeg.get(s.id);
+          if (!idxs) return s;
+          return { ...s, words: s.words.filter((_, i) => !idxs.has(i)) };
+        })
+        .filter((s) => s.words.length > 0),
+    });
+  },
+
+  toggleManualBreak: (segId, wordIdx) => {
+    get().pushHistory();
+    set({
+      segments: get().segments.map((s) =>
+        s.id !== segId
+          ? s
+          : {
+              ...s,
+              words: s.words.map((w, i) =>
+                i === wordIdx ? { ...w, manualBreakAfter: !w.manualBreakAfter } : w
+              ),
+            }
+      ),
     });
   },
 

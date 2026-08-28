@@ -189,6 +189,28 @@ not a reuse.
   (Latin text and Korean) - confirmed the box and text stay correctly centered and rotated together,
   per-letter rainbow renders correctly, drop shadow renders, and Korean falls back to a readable font
   with no missing-glyph boxes. Screenshots reviewed directly, not assumed from the math.
+**Razor/multi-select tool on the timeline — built (2026-08-28).** The backlog's last-remaining
+timeline-editing gap: multi-select already existed for moving/reassigning a group of words, but there
+was no way to force a caption-page split at a chosen point, and no way to delete a multi-selected group
+in one action - both were still "one word or line at a time."
+- **Razor split**: new `WordSpan.manualBreakAfter` flag, carried on the word itself (survives
+  insert/remove/retime/speaker-reassignment-splits for free, since those already pass `WordSpan`
+  objects through directly rather than reconstructing them - confirmed by reading `moveWordsToSpeaker`,
+  not assumed). One new line in `paginate()`'s existing break-decision loop (`lib/captions.ts`) - a
+  manual break always wins over the word-count/gap/sentence-end heuristics, same "explicit beats
+  guessed" precedent already used for sentence-end. Press `R` on a tuned word to toggle it (press again
+  to undo); shows as a solid cyan divider on the timeline so the cut is visible without opening the
+  preview. Real functional test (not just type-checked): confirmed a run of words that would NOT have
+  naturally broken (short, no gaps, no punctuation) DOES split exactly where the flag is placed, that a
+  break placed on a word that ALSO ends a sentence doesn't double-push an empty page, and that a break
+  on the very last word is a harmless no-op.
+- **Bulk delete**: new `removeWords(updates)` action, mirroring `moveWordsToSpeaker`'s "one undo step
+  for the whole group" batching. Del/Backspace now deletes an entire Ctrl/Cmd+click multi-selection at
+  once instead of only working on a single tuned word.
+- Researched the actual pagination/selection code before writing anything (confirmed no prior "manual
+  break" concept existed anywhere, confirmed the exact selection-state shape to reuse) rather than
+  guessing at the design - see the session's own reasoning for why a per-word flag beats a separate
+  timestamp list (immune to going stale when words are inserted/removed/retimed nearby).
 - **Follow-up, per the user (2026-08-28): the shipped rainbow/Comic-Sans look was just a reference,
   not the spec.** Real want is a library of roughly 15 selectable sticker styles, same picker-card
   pattern `STYLE_PRESETS`/`StylePanel.tsx` already uses for dialogue captions. Not built yet - v1

@@ -68,6 +68,17 @@ export function paginate(
         pages.push(toPageMulti(current));
         current = [];
       }
+
+      // The razor tool (MainWaveform.tsx) - a manual break always wins,
+      // regardless of word count or sentence-end, since it's an explicit
+      // "no, split here" from the user rather than a heuristic guess. Safe
+      // to check unconditionally after the sentence-end block above: if
+      // that block already pushed+reset this same word, `current` is empty
+      // here and this becomes a no-op rather than a duplicate empty page.
+      if (entry.w.manualBreakAfter && current.length) {
+        pages.push(toPageMulti(current));
+        current = [];
+      }
     }
     if (current.length) pages.push(toPageMulti(current));
   }

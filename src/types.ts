@@ -9,6 +9,14 @@ export interface WordSpan {
    * you typed yourself and on transcripts made before this existed, both of
    * which are treated as certain. */
   confidence?: number;
+  /** Forces a caption page break immediately after this word - the "razor"
+   * tool (MainWaveform.tsx) overriding paginate()'s automatic word-count/
+   * gap/sentence-end breaks at a point the user actually wants a cut, the
+   * same way a video editor's razor splits a clip at the playhead. Carried
+   * on the word itself (not a separate timestamp list) so it survives
+   * insertWord/removeWord/retiming without needing to be re-matched against
+   * a moving target - see lib/captions.ts's paginate(). */
+  manualBreakAfter?: boolean;
 }
 
 /** One proposed fix from the local-LLM cleanup pass (see
