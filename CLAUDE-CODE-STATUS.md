@@ -18,6 +18,30 @@ Shipped: forced alignment now auto-runs after every transcription, both the sing
 batch/watch-folder pipeline, gated on the model already being downloaded so it's never a surprise
 download. Full detail and the exact numbers in `CLAUDE-CODE-BRIEF.md`'s 2026-08-29 entry.
 
+**2026-08-29 — 10-clip real-footage test, and a real hallucination bug it caught.** Per the user's
+request to test broader than the one ground-truth clip. Only `clip11` has real human-verified ground
+truth, so per the user's explicit choice (asked directly rather than guessed), this used **large-v3 as
+an independent second model** to cross-check turbo's output on 10 real ~2-minute clips pulled from an
+actual recording session (`E:\27-8-2026\`, real proximity-chat gameplay, not synthetic) - honestly
+framed as a proxy signal (cross-model agreement, not verified accuracy), not equivalent to clip11's
+rigor. Numbers: **82.4% mean cross-model word agreement**, **214ms mean forced-alignment shift**
+(9 of 10 clips; see below for the 10th). Full methodology and per-clip numbers in
+`CLAUDE-CODE-BRIEF.md`'s 2026-08-29 entry.
+
+**Real bug found, not previously confirmed on actual gameplay audio: whisper.cpp's repetition-loop
+hallucination.** One clip (of 10) came back at 37.2% agreement and a 1680ms median alignment shift -
+both wildly outside the other nine. Read the actual transcript rather than just the number: turbo
+had decoded **"Good evening." fourteen times in a row** over a 30-second span where large-v3 (same
+audio) only produced it twice. This is whisper's known repetition-loop failure mode, already flagged
+in this file's own "What's still open" list ("collapsing whisper's occasional stuttering repeats...
+not done") but never confirmed against real footage before - this is that confirmation, with a
+concrete example. Distinguished from a second clip with heavy repetition (`It's just a fucking room`
+x4, `I'm in the door!` x3) that both models produced similarly - that one reads as the player
+genuinely repeating themselves for comedic emphasis, not a hallucination, and wasn't treated as the
+same problem. Not fixed yet - flagging for a decision on approach, since collapsing repeats safely
+means telling a hallucination loop apart from real repeated speech, which the two examples above show
+isn't always obvious from the repeat count alone.
+
 **2026-08-28 correction — the "New since v0.2.10" list below is missing a whole chunk of already-shipped
 work.** Picking this session back up, `CLAUDE-CODE-BRIEF.md`'s "Priority build order" section (montage
 builder, tiered auto-apply, death detector, Discord webhook, confidence-gated auto-export) was listed

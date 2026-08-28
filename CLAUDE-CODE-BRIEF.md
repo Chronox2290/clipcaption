@@ -188,6 +188,49 @@ The app doesn't hardcode a limit — it attempts the upload and relays Discord's
 is the right behavior since the limit depends on the destination server's boost tier. Noting this so
 it doesn't get chased as a bug later.
 
+## 2026-08-29: 10-clip real-footage test (word + timing accuracy, broader than one ground-truth clip)
+
+Only `clip11` has real human-verified ground truth (the painstaking correction pass this whole
+session's numbers are built on). Asked the user directly how to handle the other 9 rather than
+guessing or fabricating ground truth: chosen approach was **large-v3 as an independent second model**,
+cross-checking turbo's output - explicitly a proxy signal, not equivalent rigor to clip11's real
+ground truth, and reported as such throughout.
+
+**Source material**: 10 real clips pulled from an actual recording session on disk
+(`E:\27-8-2026\Replay *.mp4`, real proximity-chat gameplay - the exact workflow this app is built
+for), mostly ~2-minute clips matching the "pile of pre-cut clips" case CLAUDE.md describes, a couple
+shorter. Ran the *exact* real pipeline: same ffmpeg audio-extraction filter chain `transcribe.rs`
+uses (`highpass=f=80,dynaudnorm=f=150:g=15:p=0.9`, 16kHz mono), same whisper-cli flags, turbo as the
+shipped default plus large-v3 as the cross-check, then forced alignment (the new default, see above)
+on turbo's own output.
+
+**Results, two signals per clip:**
+- **Cross-model word agreement** (turbo vs. large-v3, text-matched via the same difflib technique
+  used against real ground truth all session): mean 82.4%, median 86.7%, range 58.0%-100.0% across 9
+  of the 10 clips (10th excluded from this average - see the hallucination finding below, it's not a
+  representative "typical accuracy" data point).
+- **Forced-alignment shift** (how far alignment moves each of turbo's own words from its raw DTW
+  timestamp - a consistency signal, not an accuracy number, since there's no ground truth here to
+  compare against): mean 214ms, median 180ms, range 120-520ms across the same 9 clips. Roughly
+  consistent with the correction magnitude already measured against real ground truth on clip11 (122ms
+  raw error → 64ms aligned).
+- Full per-clip numbers: `scratch_align/analyze_10clip.py` (kept, gitignored like the rest of
+  `scratch_align/`) reproduces this against the same 10 source files if rerun.
+
+**Real bug found, not a measurement artifact - confirmed whisper.cpp's repetition-loop hallucination
+happens on real gameplay audio.** One clip came back at 37.2% agreement and a 1680ms median shift, both
+wildly outside the other nine - read the actual transcript rather than trusting the outlier number:
+turbo decoded **"Good evening." fourteen times in a row** over 30 seconds of audio where large-v3 (same
+audio) only produced it twice. This is whisper's known stuttering-repeat failure mode, already named as
+an unfixed gap in `CLAUDE-CODE-STATUS.md`'s "What's still open" list, but never confirmed against real
+footage before now. Deliberately checked this wasn't just flagging genuine repeated speech: a *different*
+clip had real heavy repetition ("It's just a fucking room" x4, "I'm in the door!" x3) that both models
+produced similarly - read as the player actually repeating themselves for comedic emphasis, not
+hallucination, and NOT counted as the same problem. The two side by side show why a fix here can't be
+"collapse any 3+ repeat" - that would eat real intentional repetition along with the hallucinated kind.
+**Not fixed yet - this needs a decision on approach before building anything**, flagged here rather than
+guessed at.
+
 ## Priority build order after that
 
 **2026-08-29: re-verified fresh against the actual current code (not the docs, not memory) — all
