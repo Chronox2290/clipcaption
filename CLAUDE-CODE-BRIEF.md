@@ -207,8 +207,8 @@ on turbo's own output.
 **Results, two signals per clip:**
 - **Cross-model word agreement** (turbo vs. large-v3, text-matched via the same difflib technique
   used against real ground truth all session): mean 82.4%, median 86.7%, range 58.0%-100.0% across 9
-  of the 10 clips (10th excluded from this average - see the hallucination finding below, it's not a
-  representative "typical accuracy" data point).
+  of the 10 clips (10th excluded from this average - see the correction below; it's a real clip with
+  a lot of genuine repeated speech, not a representative "typical accuracy" data point either way).
 - **Forced-alignment shift** (how far alignment moves each of turbo's own words from its raw DTW
   timestamp - a consistency signal, not an accuracy number, since there's no ground truth here to
   compare against): mean 214ms, median 180ms, range 120-520ms across the same 9 clips. Roughly
@@ -217,19 +217,20 @@ on turbo's own output.
 - Full per-clip numbers: `scratch_align/analyze_10clip.py` (kept, gitignored like the rest of
   `scratch_align/`) reproduces this against the same 10 source files if rerun.
 
-**Real bug found, not a measurement artifact - confirmed whisper.cpp's repetition-loop hallucination
-happens on real gameplay audio.** One clip came back at 37.2% agreement and a 1680ms median shift, both
-wildly outside the other nine - read the actual transcript rather than trusting the outlier number:
-turbo decoded **"Good evening." fourteen times in a row** over 30 seconds of audio where large-v3 (same
-audio) only produced it twice. This is whisper's known stuttering-repeat failure mode, already named as
-an unfixed gap in `CLAUDE-CODE-STATUS.md`'s "What's still open" list, but never confirmed against real
-footage before now. Deliberately checked this wasn't just flagging genuine repeated speech: a *different*
-clip had real heavy repetition ("It's just a fucking room" x4, "I'm in the door!" x3) that both models
-produced similarly - read as the player actually repeating themselves for comedic emphasis, not
-hallucination, and NOT counted as the same problem. The two side by side show why a fix here can't be
-"collapse any 3+ repeat" - that would eat real intentional repetition along with the hallucinated kind.
-**Not fixed yet - this needs a decision on approach before building anything**, flagged here rather than
-guessed at.
+**Retracted same day - the "Good evening" x14 outlier was real speech, not a hallucination.** Original
+write-up here called this a confirmed whisper repetition-loop bug, reasoning from the transcript alone
+that fourteen repeats couldn't be real. Wrong - the user was actually in that recording and confirmed
+it: a genuine inside joke, saying "good evening" back and forth many times while bobbing up and down
+in-game. Turbo's fourteen repeats were the more accurate transcription; large-v3's two undercounted
+the real speech. **The finding flips**: turbo was more accurate on this clip, not less, and the low
+cross-model-agreement score meant "the two models handle extended real repetition very differently,"
+not "error." Real lesson for the methodology above: cross-model agreement can't tell "both models are
+right and just disagree on how much of a repeat to transcribe" apart from "one hallucinated" without
+knowing what was actually said - which is exactly the ground-truth gap this whole test was built to
+work around in the first place, and this is a case where it couldn't. Whisper's general repetition-
+loop failure mode is still a real, independently-documented phenomenon (referenced elsewhere in this
+project's history) - just not something this specific clip is valid evidence of. No code change
+needed after all; correcting the record rather than building a fix for a bug that wasn't there.
 
 ## Priority build order after that
 

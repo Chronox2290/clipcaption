@@ -18,7 +18,8 @@ Shipped: forced alignment now auto-runs after every transcription, both the sing
 batch/watch-folder pipeline, gated on the model already being downloaded so it's never a surprise
 download. Full detail and the exact numbers in `CLAUDE-CODE-BRIEF.md`'s 2026-08-29 entry.
 
-**2026-08-29 — 10-clip real-footage test, and a real hallucination bug it caught.** Per the user's
+**2026-08-29 — 10-clip real-footage test (see the correction right below it - one finding was wrong).**
+Per the user's
 request to test broader than the one ground-truth clip. Only `clip11` has real human-verified ground
 truth, so per the user's explicit choice (asked directly rather than guessed), this used **large-v3 as
 an independent second model** to cross-check turbo's output on 10 real ~2-minute clips pulled from an
@@ -28,19 +29,25 @@ rigor. Numbers: **82.4% mean cross-model word agreement**, **214ms mean forced-a
 (9 of 10 clips; see below for the 10th). Full methodology and per-clip numbers in
 `CLAUDE-CODE-BRIEF.md`'s 2026-08-29 entry.
 
-**Real bug found, not previously confirmed on actual gameplay audio: whisper.cpp's repetition-loop
-hallucination.** One clip (of 10) came back at 37.2% agreement and a 1680ms median alignment shift -
-both wildly outside the other nine. Read the actual transcript rather than just the number: turbo
-had decoded **"Good evening." fourteen times in a row** over a 30-second span where large-v3 (same
-audio) only produced it twice. This is whisper's known repetition-loop failure mode, already flagged
-in this file's own "What's still open" list ("collapsing whisper's occasional stuttering repeats...
-not done") but never confirmed against real footage before - this is that confirmation, with a
-concrete example. Distinguished from a second clip with heavy repetition (`It's just a fucking room`
-x4, `I'm in the door!` x3) that both models produced similarly - that one reads as the player
-genuinely repeating themselves for comedic emphasis, not a hallucination, and wasn't treated as the
-same problem. Not fixed yet - flagging for a decision on approach, since collapsing repeats safely
-means telling a hallucination loop apart from real repeated speech, which the two examples above show
-isn't always obvious from the repeat count alone.
+**Correction, same day: the "Good evening" x14 clip was NOT a hallucination - retracting that
+finding.** Wrote up the outlier clip (37.2% agreement, 1680ms shift) as a confirmed whisper
+repetition-loop bug, reasoning from the transcript alone that nobody says "Good evening" fourteen
+times in a row for real. Wrong inference - the user who was actually in that recording confirmed it:
+that was a real, genuine inside joke, saying "good evening" back and forth many times while bobbing
+up and down in-game. Turbo's fourteen repeats were closer to what actually happened; large-v3's two
+were the one that missed most of the real speech. **This flips the finding**: on this clip turbo was
+more accurate, not less, and the low cross-model-agreement score didn't mean "error," it meant "the
+two models handle extended real repetition very differently, and one of them (large-v3) collapses/
+drops real repeated utterances." That's a real, useful methodological lesson about the cross-model-
+agreement proxy's blind spot - it can't distinguish "both models are right and just disagree on how
+much of a repeated phrase to transcribe" from "one model hallucinated" without knowing what was
+actually said, which is exactly the ground-truth problem this whole test was already working around.
+Not treating this as license to assume whisper.cpp's general repetition-loop failure mode (a real,
+independently-known phenomenon, referenced elsewhere in this project's history) doesn't exist - just
+that THIS specific clip isn't valid evidence of it, and shouldn't have been called "confirmed" from
+a transcript read alone without the context only the person who was there could supply. No code
+change needed from this one after all; correcting the record instead of leaving a wrong conclusion
+sitting here uncorrected.
 
 **2026-08-28 correction — the "New since v0.2.10" list below is missing a whole chunk of already-shipped
 work.** Picking this session back up, `CLAUDE-CODE-BRIEF.md`'s "Priority build order" section (montage
