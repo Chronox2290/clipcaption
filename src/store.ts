@@ -2969,7 +2969,17 @@ export const useApp = create<AppState>((set, get) => ({
         .split(/[/\\]/)
         .pop()
         ?.replace(/\.[^.]+$/, "") ?? "project";
-    const path = await pickProjectSavePath(`${base}.ccproj`);
+    let path: string | null;
+    try {
+      path = await pickProjectSavePath(`${base}.ccproj`);
+    } catch (e) {
+      // The dialog call itself throwing (not just the user cancelling,
+      // which resolves to null, not a rejection) used to be an unhandled
+      // rejection here - no error banner, nothing, the button just
+      // silently "did nothing." Same fix as loadProject below.
+      set({ error: String(e) });
+      return false;
+    }
     if (!path) return false;
     return get()._writeProject(path);
   },
@@ -3028,7 +3038,21 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   loadProject: async () => {
-    const path = await pickProjectOpenPath();
+    // The dialog call itself was OUTSIDE this action's try/catch - if
+    // pickProjectOpenPath() ever rejects rather than resolving to null
+    // (an IPC hiccup, a plugin-permission edge case, anything short of a
+    // clean user-cancel), that was an unhandled promise rejection: no
+    // error banner, no state change, the button just silently "did
+    // nothing." Wrapping it here means any such failure is at minimum
+    // visible instead of invisible - the same "fail loudly" standard
+    // applied everywhere else in this pipeline.
+    let path: string | null;
+    try {
+      path = await pickProjectOpenPath();
+    } catch (e) {
+      set({ error: String(e) });
+      return;
+    }
     if (!path) return;
     try {
       const raw = await invoke<string>("read_text_file", { path });
