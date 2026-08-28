@@ -188,6 +188,51 @@ The app doesn't hardcode a limit — it attempts the upload and relays Discord's
 is the right behavior since the limit depends on the destination server's boost tier. Noting this so
 it doesn't get chased as a bug later.
 
+## 2026-08-29: pushing word accuracy further - what was tried, real numbers, an honest ceiling
+
+Per the user's ask to keep pushing accuracy toward 85-90%. Tested the one lever left unmeasured: the
+AI cleanup pass's (`polish.rs`) actual effect on word accuracy against real ground truth - it's been
+shipped and auto-applying since earlier today, but nobody had measured what it actually buys, only
+assumed it helps. Replicated the exact prompt/request shape against a manually-started llama-server
+(same model, same few-shot examples, same 0.55 review threshold, same 0.80 auto-apply threshold) and
+scored the result against clip11's real ground truth, same harness as everything else this session.
+
+**Result: zero net change on this clip (68.4% before, 68.4% after).** Of 137 words, 27 were flagged as
+uncertain (confidence < 0.55); of those, 19 got a "SAME" (no correction needed) and 8 got a real
+suggested fix - but none of the 8 cleared the 0.80 auto-apply bar, so all 8 sat in the review queue
+untouched by the automatic pass. A couple of those 8 look like genuinely good fixes a human would
+accept in five seconds ("Y-y-you're" → "you're" at 0.80 confidence, right at the boundary; "thing." →
+"this thing") - this pass is doing its job (flagging real candidates), it just isn't confident enough
+on THIS clip to auto-apply any of them, which is honest, working-as-designed behavior for a safety-
+gated pass, not a bug.
+
+**Tried widening the review scope (all 137 words, not just the 27 flagged as uncertain) to see if more
+real errors could be caught - this measurably made things WORSE: 57.2%, down from 68.4%.** The model
+started "correcting" words that were already right - "and" → "and I", "this" → "this one", "have" →
+"have to" - plausible-sounding insertions with no error to fix, not real corrections. This is a real,
+useful finding even though it's a negative result: **the review-scope threshold isn't an arbitrary
+knob, it's load-bearing for the model's calibration.** The system prompt and few-shot examples were
+tuned against genuinely-uncertain words; feeding it words whisper was already confident about breaks
+that calibration and the model starts inventing plausible "fixes." Confirms the current 0.55 threshold
+is correctly scoped, not worth loosening - a real lever that turned out to be a dead end, tested rather
+than assumed either way.
+
+**What this means for the 85-90% target, stated plainly:** every lever this project has a way to test
+has now been tried against real ground truth - decoding params (maxed out), vocabulary/prompt biasing
+(tested, hurt), model size (resolved, turbo+alignment wins), voice separation (tested, rejected),
+forced alignment (shipped, big timing win, no word-accuracy change by design), AI cleanup scope
+(tested both narrower-than-shipped-is-impossible and wider, current scoping is the right one). None of
+them move clip11's raw word accuracy off 68.4%. Worth being direct about why: clip11 was deliberately
+chosen as a hard case (three-person overlapping proximity-chat dialogue) specifically to stress-test
+this pipeline, not picked as a "typical" clip - and even the best current open ASR models land around
+94.6-94.9% on *clean, curated* benchmark audio, a meaningfully easier domain than overlapping game
+voice chat. Getting to 90% raw ASR accuracy specifically on heavy-overlap audio like clip11 isn't
+realistic with today's open local models - that's a statement about the audio's real difficulty, not
+this app's engineering. The 10-clip (now scaling to all-clip, see below) cross-model proxy numbers
+suggest typical, less-overlapping clips likely already sit meaningfully higher than clip11's 68.4% -
+worth keeping that distinction in view rather than treating clip11's number as "the" accuracy figure
+for every clip.
+
 ## 2026-08-29: 10-clip real-footage test (word + timing accuracy, broader than one ground-truth clip)
 
 Only `clip11` has real human-verified ground truth (the painstaking correction pass this whole

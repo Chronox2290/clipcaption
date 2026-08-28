@@ -1,9 +1,22 @@
 # ClipCaption — status summary
 
 Plain-language write-up of what's changed recently and where things stand. Current as of
-**2026-08-29**, commit `28d4a36`. Everything below "New since v0.2.10" was built in one long session
+**2026-08-29**, commit `8c5b6f3`. Everything below "New since v0.2.10" was built in one long session
 after the v0.2.10 draft release described further down — that release note is kept as-is since it's
 still an accurate record of what shipped in it, not because it's the latest state.
+
+**2026-08-29 — every remaining accuracy lever tested against real ground truth; honest ceiling found.**
+Measured the AI cleanup pass's actual effect on word accuracy (never measured before, only assumed to
+help): zero net change on the ground-truth clip (68.4% → 68.4%) - it flagged real candidates but none
+cleared the auto-apply confidence bar on this clip. Tried widening its review scope to catch more
+errors - that measurably made things WORSE (68.4% → 57.2%), confirming the current confidence threshold
+is load-bearing, not an arbitrary knob. With every testable lever now tried (decoding params, vocab
+biasing, model size, voice separation, forced alignment, AI cleanup scope), clip11's 68.4% raw word
+accuracy looks like a real ceiling for this specific hard case (three-way overlapping proximity chat) -
+not an engineering gap, a reflection of how hard that audio genuinely is even for top-tier open ASR
+models (~95% on *clean* benchmark audio). Full numbers and reasoning in `CLAUDE-CODE-BRIEF.md`'s
+2026-08-29 entry. Scaling the cross-model proxy test from 10 clips to all 47 available real clips to
+see how representative clip11's hard-case number actually is - in progress.
 
 **2026-08-29 — forced alignment now runs automatically, real measured timing win.** Per the user
 flagging the accuracy numbers as not great: found that forced alignment (built earlier, `align.rs`)
