@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../store";
 import { buildAss } from "../lib/ass";
+import { buildStickerAss, stickersForRange } from "../lib/stickerAss";
 import { paginate, applyCensor, shiftPages, layoutRows, fmtTime, capitalize } from "../lib/captions";
 import { addEmojis } from "../lib/emojis";
 import { pickSavePath } from "../lib/tauri";
@@ -15,6 +16,7 @@ export default function ExportDrawer() {
     segments,
     style,
     censor,
+    stickers,
     activeRange,
     selectedRanks,
     setEditorTab,
@@ -84,7 +86,12 @@ export default function ExportDrawer() {
       );
     }
     pages = layoutRows(pages);
-    const ass = burn && pages.length ? buildAss(pages, style, { playResX: outW, playResY: outH }) : "";
+    const rangeStickers = activeRange
+      ? stickersForRange(stickers, activeRange.start, activeRange.end, activeRange.start)
+      : stickers;
+    const ass =
+      (burn && pages.length ? buildAss(pages, style, { playResX: outW, playResY: outH }) : "") +
+      (burn ? buildStickerAss(rangeStickers, { playResX: outW, playResY: outH }) : "");
 
     void startExport({
       inputPath: videoPath,

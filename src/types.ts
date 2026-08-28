@@ -309,6 +309,28 @@ export interface BatchState {
   outputDir: string;
 }
 
+/** A decorative reaction/sticker text overlay — free-placed, own rotation,
+ * own fixed cartoon look (per-letter rainbow cycling, cream sticker box,
+ * drop shadow). Deliberately separate from CaptionStyle/Segment: this is a
+ * second, opt-in layer alongside the word-synced dialogue captions, not a
+ * replacement or variant of them — see lib/stickerAss.ts's own doc comment
+ * for the full reasoning and what's still an approximation (no true
+ * rounded-rect texture/torn-edge look, just a flat rounded box - libass has
+ * no bitmap-texture fill, only vector shapes/colors). */
+export interface Sticker {
+  id: string;
+  text: string;
+  startSec: number;
+  endSec: number;
+  /** Center position, % of frame width/height (0-100) - free placement, not
+   * locked to a caption-style anchor. */
+  xPct: number;
+  yPct: number;
+  rotationDeg: number;
+  /** Size as % of video height, same convention as CaptionStyle.fontSizePct. */
+  fontSizePct: number;
+}
+
 /** Everything needed to resume editing later — written to a .ccproj file by
  * "Save Project" and restored by "Open Project". Deliberately excludes the
  * things that get regenerated from `videoPath` on load (mediaInfo, the
@@ -337,6 +359,9 @@ export interface ProjectFile {
    * a reloaded project's captions couldn't be matched back against
    * `speakerProfiles` at all (see TranscribeResult.speakerEmbeddings). */
   speakerEmbeddings: Record<string, number[]>;
+  /** Decorative sticker layer (see Sticker) - optional so an older .ccproj
+   * saved before this existed still loads cleanly with no stickers. */
+  stickers?: Sticker[];
 }
 
 /** One highlight pulled in from a .ccproj for the montage builder (see

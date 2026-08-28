@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store";
 import CaptionOverlay from "../components/CaptionOverlay";
+import StickerOverlay from "../components/StickerOverlay";
 import SafeZoneOverlay from "../components/SafeZoneOverlay";
 import MainWaveform from "../components/MainWaveform";
 import { useSplitter } from "../lib/useSplitter";
@@ -37,6 +38,7 @@ export default function Editor() {
     speakerProfiles,
     safeZonePreset,
     setSafeZonePreset,
+    addSticker,
   } = useApp();
   const speakerNames = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
   const activeSafeZone = getSafeZonePreset(safeZonePreset);
@@ -258,6 +260,7 @@ export default function Editor() {
                   stageHeight={stage.h}
                   speakerNames={speakerNames}
                 />
+                <StickerOverlay stageW={stage.w} stageH={stage.h} time={time} />
                 {activeSafeZone && (
                   <SafeZoneOverlay stageW={stage.w} stageH={stage.h} preset={activeSafeZone} />
                 )}
@@ -283,6 +286,13 @@ export default function Editor() {
                   ))}
                 </select>
               </label>
+              <button
+                className="btn btn-ghost btn-small"
+                title="Adds a decorative reaction sticker at the current playhead - drag to place, click to edit text/rotation/size. Separate from the dialogue captions, its own opt-in layer."
+                onClick={() => addSticker(time)}
+              >
+                ✨ Add sticker
+              </button>
             </div>
 
             <div className="transport">

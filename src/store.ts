@@ -17,6 +17,7 @@ import type {
   PolishSuggestion,
   MontageClip,
   ClipMetadata,
+  Sticker,
 } from "./types";
 import {
   invoke,
@@ -47,6 +48,7 @@ import { addEmojis } from "./lib/emojis";
 import { extendHighlightBounds } from "./lib/clipBoundaries";
 import { getExportPreset, resolveResolution } from "./lib/exportPresets";
 import { buildAss } from "./lib/ass";
+import { buildStickerAss, stickersForRange } from "./lib/stickerAss";
 import { sanitizeFilename } from "./lib/naming";
 import { pickReelHighlights } from "./lib/highlights";
 import { findDeathMoments } from "./lib/deathDetector";
@@ -180,6 +182,20 @@ interface AppState {
   removeCustomStylePreset: (id: string) => void;
   exportStylePreset: (style: CaptionStyle) => Promise<void>;
   importStylePreset: () => Promise<void>;
+
+  // stickers - a second, opt-in decorative text layer alongside the
+  // word-synced dialogue captions above (see Sticker in types.ts and
+  // lib/stickerAss.ts). Deliberately its own array/actions, not folded into
+  // the caption style system.
+  stickers: Sticker[];
+  /** Adds a new sticker centered in frame at the current playhead, with a
+   * short default duration - returns its id so the caller can immediately
+   * select it for editing. */
+  addSticker: (atSec: number) => string;
+  updateSticker: (id: string, patch: Partial<Omit<Sticker, "id">>, coalesceKey?: string) => void;
+  removeSticker: (id: string) => void;
+  selectedStickerId: string | null;
+  setSelectedStickerId: (id: string | null) => void;
 
   // highlights
   highlights: Highlight[];
@@ -594,6 +610,7 @@ interface EditSnapshot {
   clipOverrides: Record<number, { start: number; end: number }>;
   clipNames: Record<number, string>;
   selectedRanks: number[];
+  stickers: Sticker[];
 }
 
 /** Deep enough to be correct, shallow enough to be free: every mutating action
@@ -605,6 +622,7 @@ function snapshot(s: AppState): EditSnapshot {
     clipOverrides: s.clipOverrides,
     clipNames: s.clipNames,
     selectedRanks: s.selectedRanks,
+    stickers: s.stickers,
   };
 }
 
@@ -690,6 +708,7 @@ function sessionSlice(s: AppState) {
     // reads as "too short to identify" in the Speakers panel regardless of
     // whether diarization actually found enough audio to name them.
     speakerEmbeddings: s.speakerEmbeddings,
+    stickers: s.stickers,
   };
 }
 
@@ -762,6 +781,7 @@ async function restoreSession(
       style: saved.style ?? get().style,
       censor: saved.censor ?? get().censor,
       speakerEmbeddings: saved.speakerEmbeddings ?? {},
+      stickers: saved.stickers ?? [],
       restoredSession: true,
     });
   } catch {
@@ -810,6 +830,8 @@ export const useApp = create<AppState>((set, get) => ({
   tuningWord: null,
   style: getPreset("beast"),
   customStylePresets: loadCustomStylePresets(),
+  stickers: [],
+  selectedStickerId: null,
   highlights: [],
   highlightVotes: {},
   analyzeJob: null,
@@ -1193,6 +1215,8 @@ export const useApp = create<AppState>((set, get) => ({
         speakerEmbeddings: {},
         speakerProfiles: [],
         tuningWord: null,
+        stickers: [],
+        selectedStickerId: null,
         highlights: [],
         activeRange: null,
         selectedRanks: [],
@@ -1344,6 +1368,40 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
   setCensor: (censor) => set({ censor }),
+
+  addSticker: (atSec) => {
+    get().pushHistory();
+    const id = nextId("sticker");
+    const sticker: Sticker = {
+      id,
+      text: "New sticker",
+      startSec: atSec,
+      endSec: atSec + 3,
+      xPct: 50,
+      yPct: 35,
+      rotationDeg: -6,
+      fontSizePct: 9,
+    };
+    set({ stickers: [...get().stickers, sticker], selectedStickerId: id });
+    return id;
+  },
+
+  updateSticker: (id, patch, coalesceKey) => {
+    get().pushHistory(coalesceKey ? `sticker:${coalesceKey}:${id}` : undefined);
+    set({
+      stickers: get().stickers.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+    });
+  },
+
+  removeSticker: (id) => {
+    get().pushHistory();
+    set({
+      stickers: get().stickers.filter((s) => s.id !== id),
+      selectedStickerId: get().selectedStickerId === id ? null : get().selectedStickerId,
+    });
+  },
+
+  setSelectedStickerId: (id) => set({ selectedStickerId: id }),
 
   updateWord: (segId, wordIdx, text) => {
     get().pushHistory(`text:${segId}:${wordIdx}`);
@@ -1717,6 +1775,7 @@ export const useApp = create<AppState>((set, get) => ({
       clipOverrides,
       clipNames,
       speakerProfiles,
+      stickers,
     } = get();
     const clips = highlights.filter((h) => selectedRanks.includes(h.rank));
     if (!videoPath || !mediaInfo || clips.length === 0) return;
@@ -1766,10 +1825,11 @@ export const useApp = create<AppState>((set, get) => ({
         let segs = censor ? applyCensor(segments) : segments;
         if (style.emojis) segs = addEmojis(segs);
         const pages = layoutRows(shiftPages(paginate(segs, style.maxWordsPerPage), range.start));
+        const rangeStickers = stickersForRange(stickers, range.start, range.end, range.start);
         const ass =
-          pages.length > 0
+          (pages.length > 0
             ? buildAss(pages, style, { playResX: outW, playResY: outH, speakerNames })
-            : "";
+            : "") + buildStickerAss(rangeStickers, { playResX: outW, playResY: outH });
 
         set({
           batch: { current: i + 1, total, stage: "exporting", outputDir },
@@ -1837,6 +1897,7 @@ export const useApp = create<AppState>((set, get) => ({
       selectedRanks,
       clipOverrides,
       speakerProfiles,
+      stickers,
     } = get();
     const ranks = ranksOverride ?? selectedRanks;
     const ordered = highlights
@@ -1850,6 +1911,7 @@ export const useApp = create<AppState>((set, get) => ({
     const total = ordered.length;
     let cumulative = 0;
     let mergedPages: CaptionPage[] = [];
+    let mergedStickers: Sticker[] = [];
     const cutRanges: [number, number][] = [];
 
     // Each highlight below gets its own independent transcribe+diarize pass,
@@ -1915,6 +1977,9 @@ export const useApp = create<AppState>((set, get) => ({
         const pages = layoutRows(paginate(segs, style.maxWordsPerPage));
         // source time t -> (t - range.start) + cumulative on the compiled timeline
         mergedPages = mergedPages.concat(shiftPages(pages, range.start - cumulative));
+        mergedStickers = mergedStickers.concat(
+          stickersForRange(stickers, range.start, range.end, range.start - cumulative)
+        );
         cutRanges.push([range.start, range.end]);
         cumulative += range.end - range.start;
       }
@@ -1924,13 +1989,13 @@ export const useApp = create<AppState>((set, get) => ({
       const outW = targetW ?? mediaInfo.width;
       const outH = targetH ?? mediaInfo.height;
       const ass =
-        mergedPages.length > 0
+        (mergedPages.length > 0
           ? buildAss(layoutRows(mergedPages), style, {
               playResX: outW,
               playResY: outH,
               speakerNames: globalSpeakerNames,
             })
-          : "";
+          : "") + buildStickerAss(mergedStickers, { playResX: outW, playResY: outH });
 
       const eid = await invoke<string>("export_video", {
         req: {
@@ -2880,6 +2945,7 @@ export const useApp = create<AppState>((set, get) => ({
       waveformStep,
       waveformOffset,
       speakerEmbeddings,
+      stickers,
     } = get();
     if (!videoPath) return false;
     const project: ProjectFile = {
@@ -2900,6 +2966,7 @@ export const useApp = create<AppState>((set, get) => ({
       waveformStep,
       waveformOffset,
       speakerEmbeddings,
+      stickers,
     };
     try {
       await invoke("write_text_file", { path, content: JSON.stringify(project, null, 2) });
@@ -2942,6 +3009,7 @@ export const useApp = create<AppState>((set, get) => ({
         waveformStep: project.waveformStep ?? 0.01,
         waveformOffset: project.waveformOffset ?? 0,
         speakerEmbeddings: project.speakerEmbeddings ?? {},
+        stickers: project.stickers ?? [],
         projectPath: path,
       });
     } catch (e) {

@@ -155,6 +155,41 @@ Bottom line: precision on realistic phrasing is now verified; real recall agains
 voice chat is still unmeasured and needs a labeled clip when one exists - not overclaiming "validated"
 here, just narrowing what's actually still unknown.
 
+**Decorative sticker text layer — built.** The reference spec from the brief (per-letter rainbow
+cycling pink→teal→yellow, cartoon font, off-white sticker box, soft drop shadow, free placement +
+rotation, confirmed working on Korean per-character) - a second, opt-in layer alongside the word-synced
+dialogue captions, own data/own style system as specified. Checked the brief's own premise first: it
+described this as reusing an existing "manual free-placement caption" feature - that feature does not
+actually exist anywhere in the codebase (checked thoroughly), so the placement/drag/rotate UI is new,
+not a reuse.
+- New `Sticker` type (`types.ts`) - text, time range, xPct/yPct position, rotation, size - wired into
+  `ProjectFile`, autosave, and undo/redo (all three already generic enough that this was a small,
+  low-risk addition, not new infrastructure).
+- New `src/lib/stickerAss.ts` - renders each sticker as two ASS Dialogue lines (a vector-drawn rounded
+  box on a lower layer, per-letter-colored text on a higher layer, sharing one `\pos`/`\frz` so they
+  move and rotate together) appended to the existing dialogue-caption ASS string. Zero Rust changes
+  needed - `export.rs` treats the whole `.ass` content as an opaque string already, confirmed by
+  reading it before starting rather than assumed.
+- New `StickerOverlay.tsx` - live preview, click to select, drag to reposition, a small inline toolbar
+  for text/rotation/size, matching what actually gets burned in.
+- Wired into the two highest-traffic export paths: the main manual export (`ExportDrawer`/`startExport`,
+  correctly re-based when a highlight sub-range is active) and both Auto Reel paths (`compileSelected
+  Highlights`'s multi-range join, `exportSelectedHighlights`'s per-highlight export) - each range's
+  stickers filtered and time-shifted onto the compiled output's own local timeline, same technique
+  already used for caption pages on those same paths. **Deliberately NOT wired into the montage
+  builder or the batch/watch-folder pipeline** - montage's `MontageClip` doesn't carry stickers yet
+  (no per-clip authoring surface for them there anyway), and batch clips have no editor session to
+  place a sticker in. Noted here rather than silently leaving it inconsistent.
+- **One honest visual simplification vs. the reference spec**: the box is a flat rounded rectangle,
+  not a textured/torn-paper sticker cutout - libass has no bitmap-texture fill, only vector shapes and
+  solid colors, so the crosshatch texture and rough edges from the reference aren't achievable through
+  ASS alone. Documented in `stickerAss.ts`'s own doc comment, not silently dropped.
+- Verified for real, not just type-checked: generated actual ASS content through the real
+  `buildStickerAss` function and burned it into a synthetic frame with the actual bundled ffmpeg twice
+  (Latin text and Korean) - confirmed the box and text stay correctly centered and rotated together,
+  per-letter rainbow renders correctly, drop shadow renders, and Korean falls back to a readable font
+  with no missing-glyph boxes. Screenshots reviewed directly, not assumed from the math.
+
 ## What ClipCaption is
 
 A Windows desktop app that auto-captions and compresses game clips — built for recording co-op
