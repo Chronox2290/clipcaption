@@ -309,6 +309,42 @@ be scoped as equivalent effort to Discord.
 Engine-style one-time-purchase utility distribution); no direct gaming-caption competitor sells
 there.
 
+## 2026-08-28: what's left is blocked on real-world access, not more building
+
+Everything in this file's priority-build-order and "genuinely new" backlog sections that was actually
+buildable-and-verifiable in this environment has been built — see `CLAUDE-CODE-STATUS.md`'s 2026-08-28
+entries for the full list (montage builder gaps closed, death detector false-positive fixes, a razor/
+multi-select timeline tool, smart auto-reframe, a 15-style sticker library, an end-of-session Discord
+digest). What remains from the backlog all shares the same shape of blocker: it needs a real credential,
+a real second device, or a real bundled-model decision that can't be made or tested from inside this
+coding environment alone. Listed here for a decision, not because the code is hard:
+
+- **Discord bot with slash commands** (approve/reject highlights, rename a speaker, from a phone —
+  beyond the webhook that already exists). Needs a real bot token and a live Discord server to develop
+  and test the Gateway connection against — can be built against the documented API, but "built" would
+  mean "written," not "verified working," without one.
+- **Multi-POV friend-sync** (detect the same moment across two friends' recordings from the same
+  session, offer a multi-angle cut). Needs a second machine/recording to correlate against for real —
+  there's no way to meaningfully test cross-recording sync with only one recording to work from.
+- **Local voice dubbing** (clone the user's own voice from mic samples, dub a clip into another
+  language in their own voice). No voice-cloning TTS model is bundled in this app today. Adding one is
+  its own real bundling decision — size, licensing, which model — the same category of decision that
+  the Case B voice/game-audio-separation work went through (tested candidates for real against
+  ground-truth audio before rejecting both) rather than being picked blind.
+- **Sound-effect captions** (`[gunshot]`, `[footsteps approaching]` for non-speech game audio). Same
+  story as voice dubbing: needs a bundled audio-event-tagging model that doesn't exist in this app yet.
+  Checked what's already bundled (sherpa-onnx's diarization/embedding models) — nothing in there does
+  general audio tagging, so this isn't a "just call an existing tool" job.
+- **Instagram Tester mode** (skip Meta's app-review process for the user's own personal account only —
+  see this file's earlier Instagram section for the full API reality check). Needs real Meta developer
+  credentials to build and test against.
+
+None of these are "too hard" — they're blocked on inputs only the user (or a decision from chat) can
+supply: a bot token, a second recording, a green light on which model to bundle and accept the size/
+licensing trade-off of, real API credentials. Worth deciding which (if any) to unblock rather than
+having code get written against them unverified, which would break this project's own "measured, not
+assumed" convention that's been followed everywhere else in this session.
+
 ## One open item, not yet decided — don't act on this yet
 
 A rename is on the table — "ClipCaption" tested well below what it could, and a long naming pass
