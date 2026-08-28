@@ -994,6 +994,18 @@ export const useApp = create<AppState>((set, get) => ({
                   }
                 }
               }
+              // Auto-apply forced alignment when the model's downloaded -
+              // this alone roughly halves median word-timing error (measured
+              // 122ms -> 64ms on the ground-truth clip, 2026-08-29) using the
+              // exact words whisper already decided on, so word accuracy is
+              // unaffected - free timing precision, not a tradeoff against
+              // anything. Silently skipped if the model isn't downloaded yet
+              // - never a surprise several-hundred-MB download the user
+              // didn't ask for mid-transcribe; the manual Align button in
+              // TranscriptPanel still offers it as an opt-in first step.
+              if (get().models.find((m) => m.name === "wav2vec2-base-960h")?.downloaded) {
+                void get().alignTranscript();
+              }
             } catch {
               set({ transcribeJob: null, error: "Failed to parse transcript" });
             }
@@ -2459,6 +2471,43 @@ export const useApp = create<AppState>((set, get) => ({
           : { segments: [], waveform: [], waveformStep: 0.01, waveformOffset: 0, speakerEmbeddings: {} };
         let segments: Segment[] = parsed.segments;
         const speakerEmbeddings = parsed.speakerEmbeddings ?? {};
+
+        // Same auto-forced-alignment as the single-clip transcribe path
+        // (roughly halves median word-timing error for free - see the
+        // 2026-08-29 measurement) - the batch/watch-folder pipeline is the
+        // exact "hands-off, no manual step" case this matters most for.
+        // Silently skipped if the model isn't downloaded, same as there.
+        if (segments.length && get().models.find((m) => m.name === "wav2vec2-base-960h")?.downloaded) {
+          try {
+            const aid = await invoke<string>("align_transcript", {
+              req: {
+                videoPath: item.path,
+                segments: segments.map((s) => ({
+                  id: s.id,
+                  speaker: s.speaker ?? undefined,
+                  pan: s.pan ?? undefined,
+                  intensity: s.intensity ?? undefined,
+                  words: s.words.map((w) => ({
+                    text: w.text,
+                    start: w.start,
+                    end: w.end,
+                    confidence: w.confidence,
+                  })),
+                })),
+              },
+            });
+            currentBatchJobId = aid;
+            const alignResult = await waitForJob(aid);
+            currentBatchJobId = null;
+            if (alignResult) segments = (JSON.parse(alignResult) as { segments: Segment[] }).segments;
+          } catch {
+            // Alignment failing shouldn't block the batch - carry on with
+            // whisper's own DTW timing for this clip, same "don't let an
+            // optional accuracy pass stall the pipeline" treatment cleanup
+            // already gets just below.
+            currentBatchJobId = null;
+          }
+        }
 
         // Confidence-gated cleanup: a clip where every flagged word clears
         // automatically skips straight to export like before this existed.
