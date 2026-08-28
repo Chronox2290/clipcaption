@@ -129,13 +129,23 @@ denominator, so directly comparable):
     batch/watch-folder pipeline both), gated on the wav2vec2 model already being downloaded - never a
     surprise download. The manual Align button is unchanged for first-time discovery/re-running after
     edits.
-  - **Not yet tried, real next candidates if more timing/word-accuracy gain is wanted:** the
-    model-size trade-off below (large-v3 vs. turbo) is now a genuinely different question than before,
-    since forced alignment already closes most of large-v3's timing advantage on top of turbo's better
-    word accuracy - worth re-measuring large-v3 + forced-alignment vs. turbo + forced-alignment before
-    assuming the old large-v3-favors-timing tradeoff still applies. Vocabulary/prompt biasing was
-    tested and rejected on this specific clip (see below) but not retested on a clip with an actual
-    misheard-name error, which is the case it's meant for.
+  - **Model-size question below (large-v3 vs. turbo) — re-measured same day, now resolved.** The old
+    trade-off (turbo wins word accuracy, large-v3 wins timing) was exactly why it was left as an open
+    decision. Ran large-v3 through the same forced-alignment pass and compared, same 124-word
+    denominator as everything above:
+      - large-v3 raw DTW: 70.2% word accuracy (87/124) - turbo's raw 81.5% already wins by a lot.
+      - large-v3 + forced-alignment: 68.5% word accuracy, 67ms median start error.
+      - turbo + forced-alignment (shipped default): 79.8% word accuracy, 64ms median start error.
+    **Turbo + forced-alignment wins on BOTH axes now** - once alignment handles timing precision for
+    either model about equally well (64ms vs. 67ms, basically a wash), the only thing still separating
+    them is word accuracy, and turbo simply transcribes more correctly. The entire reason to consider
+    large-v3 was its timing edge; forced alignment already delivers that same timing for turbo, so
+    there's no remaining case for switching. **Decision: keep large-v3-turbo as the default (already
+    is) - closing this out, not leaving it open any longer.**
+  - **Still open, smaller and lower-priority:** vocabulary/prompt biasing was tested and rejected on
+    this specific clip (see below) but not retested on a clip with an actual misheard-name error,
+    which is the case it's meant for - would need a different ground-truth clip prepared to test
+    properly, not a quick re-run of what exists.
 
 **Export bug — investigated 2026-08-28, confirmed already fixed, with fresh real proof.** The lead in
 the paragraph this replaced was exactly right: `layoutRows()` (the function that assigns each caption

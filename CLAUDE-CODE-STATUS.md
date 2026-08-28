@@ -385,8 +385,11 @@ reassign it, keyboard shortcuts for frame-accurate nudging, and full undo/redo.
 - **Speaker accuracy** beyond just setting the headcount — the top remaining correctness issue.
 - **Forced alignment is now built** (this note was stale — see the dated 2026-08-27 entries in
   `CLAUDE-CODE-BRIEF.md` for the real measured word-timing numbers against the ground-truth clip).
-- **Model-size trade-off (large-v3 vs large-v3-turbo)** — measured, not yet decided; see "New since
-  v0.2.10" above.
+- ~~**Model-size trade-off (large-v3 vs large-v3-turbo)**~~ — resolved 2026-08-29: with forced
+  alignment now auto-applied to either model's output, turbo + alignment beats large-v3 + alignment on
+  both word accuracy AND timing (the timing gap that was large-v3's whole case is gone once alignment
+  handles it for turbo too) — see `CLAUDE-CODE-BRIEF.md`'s 2026-08-29 entry for the numbers. Staying
+  on large-v3-turbo, no longer an open decision.
 - **Voice/game audio separation, Case B** (single mixed-down recording, via Spleeter) — the biggest
   remaining transcription-accuracy lever, needs a bundled-dependency decision before starting.
 - **Multi-select and a "razor" cut tool** on the timeline — currently one word or line at a time.
