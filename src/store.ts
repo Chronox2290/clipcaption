@@ -32,6 +32,7 @@ import {
   pickThumbnailSavePath,
 } from "./lib/tauri";
 import { getPreset, isValidCaptionStyle } from "./lib/styles";
+import { STICKER_STYLES } from "./lib/stickerStyles";
 import {
   applyCensor,
   distributeWordTimes,
@@ -1383,6 +1384,7 @@ export const useApp = create<AppState>((set, get) => ({
   addSticker: (atSec) => {
     get().pushHistory();
     const id = nextId("sticker");
+    const style = STICKER_STYLES[0];
     const sticker: Sticker = {
       id,
       text: "New sticker",
@@ -1390,8 +1392,9 @@ export const useApp = create<AppState>((set, get) => ({
       endSec: atSec + 3,
       xPct: 50,
       yPct: 35,
-      rotationDeg: -6,
+      rotationDeg: style.defaultRotationDeg,
       fontSizePct: 9,
+      styleId: style.id,
     };
     set({ stickers: [...get().stickers, sticker], selectedStickerId: id });
     return id;

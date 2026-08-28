@@ -339,6 +339,11 @@ export interface Sticker {
   rotationDeg: number;
   /** Size as % of video height, same convention as CaptionStyle.fontSizePct. */
   fontSizePct: number;
+  /** Which STICKER_STYLES preset (lib/stickerStyles.ts) this sticker uses -
+   * font, palette, box, outline, glow, shadow all come from there, not
+   * stored per-sticker. Falls back to the first preset if the id doesn't
+   * match anything (e.g. a style removed after a project was saved). */
+  styleId: string;
 }
 
 /** Everything needed to resume editing later — written to a .ccproj file by

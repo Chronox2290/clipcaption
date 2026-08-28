@@ -6,30 +6,22 @@
 // on top of the same "Cap" style already declared there, so plain string
 // concatenation is enough for the two layers to coexist in one .ass file.
 //
-// Visual spec (from a real reference: an Instagram Reel's sticker-style
-// reaction text, confirmed across 5 screenshots incl. two in Korean):
-// per-letter rainbow cycling (pink -> teal -> yellow, repeating, not
-// random), bold cartoon font, an off-white background box, a soft
-// down-right drop shadow, free placement + slight rotation. One thing this
-// deliberately does NOT attempt: the reference's subtle grid/crosshatch
-// TEXTURE and rough/torn paper edges - libass has no bitmap-texture fill,
-// only flat vector shapes and solid colors, so the box below is a flat
-// rounded rectangle, not a textured/torn sticker cutout. Noted here rather
-// than silently shipping a flatter look than the spec called for.
+// Visual look is entirely driven by the sticker's own StickerStyle preset
+// (lib/stickerStyles.ts, ~15 of them) - font, per-letter color palette,
+// outline, glow, box color, shadow. The very first version of this file
+// hardcoded one specific look (rainbow per-letter cycling, Comic Sans, a
+// cream box) built from one Instagram Reel reference screenshot; the user
+// was clear afterward that was just a starting reference, not the whole
+// spec - real want is a real library to pick from, same as dialogue
+// captions already have via STYLE_PRESETS. That original look is still
+// here as the "Rainbow Pop" preset, just parameterized instead of
+// hardcoded. One thing no style here attempts: a textured/torn-paper look -
+// libass has no bitmap-texture fill, only flat vector shapes and solid
+// colors, so every box is a flat rounded rectangle regardless of preset.
 
 import type { Sticker } from "../types";
+import { getStickerStyle } from "./stickerStyles";
 import { assColor, assTime, esc } from "./ass";
-
-const RAINBOW = ["#FF3E9E", "#2EE6D6", "#FFD93D"]; // pink/magenta, teal/cyan, yellow
-
-/** Comic Sans MS ships with every Windows install (same reasoning
- * lib/styles.ts's own preset fonts use) and is the literal, unambiguous
- * "cartoon/comic sans-serif" match the reference spec calls for. Its
- * Unicode fallback for non-Latin scripts (Korean confirmed in the
- * reference) goes through the same libass automatic font-substitution path
- * already verified for the dialogue captions (Segoe UI -> Malgun Gothic) -
- * not re-verified separately here, same underlying mechanism. */
-const STICKER_FONT = "Comic Sans MS";
 
 /** Builds a rounded-rectangle ASS vector drawing path (relative to the
  * shape's own top-left, before \pos moves it), width w / height h / corner
@@ -96,49 +88,61 @@ export function buildStickerAss(stickers: Sticker[], opts: StickerAssOptions): s
   const lines: string[] = [];
 
   for (const s of stickers) {
-    const text = esc(s.text.trim());
-    if (!text) continue;
+    const rawText = s.text.trim();
+    if (!rawText) continue;
+    const style = getStickerStyle(s.styleId);
+    const text = esc(style.uppercase ? rawText.toUpperCase() : rawText);
     const fontSize = Math.max(10, Math.round((s.fontSizePct / 100) * opts.playResY));
     const x = Math.round(opts.playResX * (s.xPct / 100));
     const y = Math.round(opts.playResY * (s.yPct / 100));
-    const w = Math.round(estimateTextWidth(text, fontSize) + fontSize * 1.1);
-    const h = Math.round(fontSize * 1.7);
-    const radius = Math.round(fontSize * 0.35);
+    const shadowTag = style.shadow ? "\\shad3" : "\\shad0";
 
     // Layer 0: the sticker box, drawn first (lower layers render below
-    // higher ones in ASS) - cream fill, soft down-right drop shadow via
-    // \shad. Drawn from its own (0,0) top-left in local shape space; \an5
-    // (same alignment mechanism the dialogue captions already rely on for
-    // \pos centering) tells libass to center the shape's own bounding box
-    // on (x,y), so no manual offset math is needed here.
-    const boxPath = roundedRectPath(w, h, radius);
-    lines.push(
-      dialogue(
-        s.startSec,
-        s.endSec,
-        0,
-        `{\\an5\\pos(${x},${y})\\frz${s.rotationDeg}` +
-          `\\p1\\1c${assColor("#FFF8EC")}\\bord0\\shad4\\4c&H000000&\\4a&H60&}` +
-          `${boxPath}{\\p0}`
-      )
-    );
+    // higher ones in ASS) - only emitted when the style actually has one
+    // (several presets float the text with no box at all). Drawn from its
+    // own (0,0) top-left in local shape space; \an5 (same alignment
+    // mechanism the dialogue captions already rely on for \pos centering)
+    // tells libass to center the shape's own bounding box on (x,y), so no
+    // manual offset math is needed here.
+    if (style.boxColor) {
+      const w = Math.round(estimateTextWidth(text, fontSize) + fontSize * 1.1);
+      const h = Math.round(fontSize * 1.7);
+      const radius = Math.round(fontSize * 0.35);
+      const boxPath = roundedRectPath(w, h, radius);
+      lines.push(
+        dialogue(
+          s.startSec,
+          s.endSec,
+          0,
+          `{\\an5\\pos(${x},${y})\\frz${s.rotationDeg}` +
+            `\\p1\\1c${assColor(style.boxColor)}\\bord0${shadowTag}\\4c&H000000&\\4a&H60&}` +
+            `${boxPath}{\\p0}`
+        )
+      );
+    }
 
     // Layer 1: the text itself, one override block per character so each
-    // letter cycles through the fixed 3-color rainbow palette - confirmed
-    // as a fixed repeating pattern in the reference, not randomized. `\h`
-    // is ASS's hard (non-breaking, non-collapsing) space - a plain literal
-    // space between override blocks can get trimmed by some renderers.
+    // letter cycles through the style's palette - a fixed repeating
+    // pattern (matching the original "Rainbow Pop" reference's own
+    // "confirmed pattern, not random"), or a plain solid fill when the
+    // palette is a single color. `\h` is ASS's hard (non-breaking,
+    // non-collapsing) space - a plain literal space between override
+    // blocks can get trimmed by some renderers.
+    const outlineTag = style.outlineColor
+      ? `\\bord2\\3c${assColor(style.outlineColor)}`
+      : "\\bord0";
+    const glowTag = style.glow ? "\\blur3" : "\\blur0";
     const chars = [...text];
     const perChar = chars
-      .map((ch, i) => `{\\1c${assColor(RAINBOW[i % RAINBOW.length])}}${ch === " " ? "\\h" : ch}`)
+      .map((ch, i) => `{\\1c${assColor(style.palette[i % style.palette.length])}}${ch === " " ? "\\h" : ch}`)
       .join("");
     lines.push(
       dialogue(
         s.startSec,
         s.endSec,
         1,
-        `{\\an5\\pos(${x},${y})\\frz${s.rotationDeg}\\fn${STICKER_FONT}\\fs${fontSize}\\b1` +
-          `\\bord2\\3c&H000000&\\shad2\\4c&H000000&\\4a&H60&}${perChar}`
+        `{\\an5\\pos(${x},${y})\\frz${s.rotationDeg}\\fn${style.font}\\fs${fontSize}\\b1` +
+          `${outlineTag}${shadowTag}${glowTag}\\4c&H000000&\\4a&H60&}${perChar}`
       )
     );
   }

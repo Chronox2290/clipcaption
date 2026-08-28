@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { useApp } from "../store";
+import { STICKER_STYLES, getStickerStyle } from "../lib/stickerStyles";
 
 interface Props {
   /** Rendered size of the visible video area in px - same "stage" the
@@ -11,16 +12,15 @@ interface Props {
   time: number;
 }
 
-const RAINBOW = ["#FF3E9E", "#2EE6D6", "#FFD93D"];
-
 /** Live-preview render of the decorative sticker layer (see Sticker in
  * types.ts) - CSS approximation of what lib/stickerAss.ts burns into the
  * export via ASS, same "preview should look like the burn-in" goal
  * CaptionOverlay already follows for dialogue captions. Click to select
- * (shows a small edit toolbar), drag to reposition, delete from the
- * toolbar. Free placement + rotation is new UI this project didn't have
- * before - there's no free-placement text feature to build on top of, so
- * this is built from scratch rather than adapted from an existing one. */
+ * (shows a small edit toolbar with a style picker), drag to reposition,
+ * delete from the toolbar. Free placement + rotation is new UI this
+ * project didn't have before - there's no free-placement text feature to
+ * build on top of, so this is built from scratch rather than adapted from
+ * an existing one. */
 export default function StickerOverlay({ stageW, stageH, time }: Props) {
   const stickers = useApp((s) => s.stickers);
   const selectedStickerId = useApp((s) => s.selectedStickerId);
@@ -65,8 +65,10 @@ export default function StickerOverlay({ stageW, stageH, time }: Props) {
   return (
     <>
       {active.map((s) => {
+        const style = getStickerStyle(s.styleId);
         const fontSize = Math.max(10, (s.fontSizePct / 100) * stageH);
         const selected = s.id === selectedStickerId;
+        const displayText = style.uppercase ? s.text.toUpperCase() : s.text;
         return (
           <div
             key={s.id}
@@ -80,10 +82,12 @@ export default function StickerOverlay({ stageW, stageH, time }: Props) {
               cursor: "grab",
               pointerEvents: "auto",
               userSelect: "none",
-              padding: `${fontSize * 0.35}px ${fontSize * 0.55}px`,
-              background: "#FFF8EC",
-              borderRadius: fontSize * 0.35,
-              boxShadow: `${fontSize * 0.12}px ${fontSize * 0.16}px 0 rgba(0,0,0,0.35)`,
+              padding: style.boxColor ? `${fontSize * 0.35}px ${fontSize * 0.55}px` : 0,
+              background: style.boxColor ?? "transparent",
+              borderRadius: style.boxColor ? fontSize * 0.35 : 0,
+              boxShadow: style.shadow
+                ? `${fontSize * 0.12}px ${fontSize * 0.16}px 0 rgba(0,0,0,0.35)`
+                : "none",
               outline: selected ? "2px dashed #6b6bff" : "none",
               outlineOffset: 3,
               whiteSpace: "nowrap",
@@ -91,14 +95,19 @@ export default function StickerOverlay({ stageW, stageH, time }: Props) {
           >
             <span
               style={{
-                fontFamily: '"Comic Sans MS", "Comic Sans", cursive, sans-serif',
+                fontFamily: `"${style.font}", cursive, sans-serif`,
                 fontWeight: 700,
                 fontSize,
-                WebkitTextStroke: `${Math.max(1, fontSize * 0.05)}px #000`,
+                WebkitTextStroke: style.outlineColor
+                  ? `${Math.max(1, fontSize * 0.05)}px ${style.outlineColor}`
+                  : undefined,
+                filter: style.glow ? `blur(0.4px) drop-shadow(0 0 ${fontSize * 0.25}px currentColor)` : undefined,
+                textShadow:
+                  style.shadow && !style.boxColor ? `${fontSize * 0.08}px ${fontSize * 0.1}px 0 rgba(0,0,0,0.5)` : undefined,
               }}
             >
-              {[...s.text].map((ch, i) => (
-                <span key={i} style={{ color: RAINBOW[i % RAINBOW.length] }}>
+              {[...displayText].map((ch, i) => (
+                <span key={i} style={{ color: style.palette[i % style.palette.length] }}>
                   {ch}
                 </span>
               ))}
@@ -119,7 +128,7 @@ export default function StickerOverlay({ stageW, stageH, time }: Props) {
                   background: "rgba(20,20,24,0.92)",
                   borderRadius: 8,
                   padding: 8,
-                  minWidth: 160,
+                  minWidth: 220,
                 }}
               >
                 <input
@@ -128,6 +137,42 @@ export default function StickerOverlay({ stageW, stageH, time }: Props) {
                   onChange={(e) => updateSticker(s.id, { text: e.target.value })}
                   style={{ width: "100%", boxSizing: "border-box" }}
                 />
+                <div
+                  className="sticker-style-picker"
+                  style={{
+                    display: "flex",
+                    gap: 4,
+                    overflowX: "auto",
+                    maxWidth: 220,
+                    padding: "2px 0",
+                  }}
+                >
+                  {STICKER_STYLES.map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      title={opt.name}
+                      onClick={() => updateSticker(s.id, { styleId: opt.id })}
+                      style={{
+                        flex: "0 0 auto",
+                        width: 28,
+                        height: 22,
+                        borderRadius: 5,
+                        border: opt.id === style.id ? "2px solid #6b6bff" : "1px solid rgba(255,255,255,0.25)",
+                        background: opt.boxColor ?? "#1a1a1f",
+                        color: opt.palette[0],
+                        fontFamily: `"${opt.font}", sans-serif`,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      A
+                    </button>
+                  ))}
+                </div>
+                <span className="muted small">{style.name}</span>
                 <label className="muted small" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   Rotate
                   <input

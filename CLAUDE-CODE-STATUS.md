@@ -241,13 +241,26 @@ source and pans the crop window to follow it.
   genuinely tracks the motion left-to-right, not just plausible-looking numbers.
 - **Scoped to the single-clip manual export for now** (ExportDrawer), matching how the sticker layer
   above was scoped - not yet wired into montage/batch/reel paths.
-- **Follow-up, per the user (2026-08-28): the shipped rainbow/Comic-Sans look was just a reference,
-  not the spec.** Real want is a library of roughly 15 selectable sticker styles, same picker-card
-  pattern `STYLE_PRESETS`/`StylePanel.tsx` already uses for dialogue captions. Not built yet - v1
-  shipped one style with the data model (Sticker type, own ASS renderer) already shaped so adding a
-  style-preset array later doesn't need a rework, just more presets + a picker UI. Also: Korean was
-  only ever the smoke-test language, not an actual priority - Portuguese, Japanese, and Spanish matter
-  more for real non-Latin/accented coverage going forward.
+- **Follow-up done (2026-08-28): 15 selectable sticker styles.** Per the user's feedback that the
+  original rainbow/Comic-Sans look was just a reference, not the spec - `lib/stickerStyles.ts` now
+  holds 15 real, distinct presets (Rainbow Pop, Bubble Gum, Neon Glow, Caution Tape, Handwritten Note,
+  Retro Stamp, Cyber Glitch, Minimal White, Gold Foil, Warning Block, Kawaii Pastel, Horror Drip, Sports
+  Broadcast, Vaporwave, Chalkboard), each varying font/palette/outline/glow/box/shadow/default rotation
+  - same shape of decision `STYLE_PRESETS` already made for dialogue captions, not a general-purpose
+  picker UI. `stickerAss.ts` and `StickerOverlay.tsx`'s live preview were both refactored to read from
+  the chosen style instead of the old hardcoded constants; a small style-swatch picker was added to the
+  sticker's inline edit toolbar. **All 15 rendered and checked by eye against the real bundled ffmpeg**,
+  not just assumed from the config - two batches of synthetic frames, one style per sticker. Found and
+  fixed one real problem this way: "Chalkboard" was designed with a glow effect that turned out to
+  wreck legibility against its dark-green box (white-on-dark-green has little contrast margin to lose
+  to blur) - glow removed, re-rendered, confirmed legible. Not a hypothetical concern caught by review;
+  a real visual bug caught by actually looking at the output. Every style still uses the same box/text
+  ASS mechanism the original rainbow look introduced - font-width estimation for the box is still a
+  single approximation tuned loosely across all fonts (documented as such), not per-font metrics.
+
+Also per the user: Korean was only ever the smoke-test language for the sticker layer, not an actual
+priority - Portuguese, Japanese, and Spanish matter more for real non-Latin/accented coverage going
+forward.
 
 ## What ClipCaption is
 
