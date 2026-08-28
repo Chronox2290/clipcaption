@@ -135,11 +135,25 @@ independently, but a size cap on the whole joined file runs one more pass throug
 2-pass x264/VBV size-target machinery (reused, not reimplemented). Verified with the actual
 join-then-2-pass-encode ffmpeg chain run for real against synthetic clips, not just type-checked.
 
-With both named montage-builder gaps closed and the death detector being the one item left with real
-work (see `CLAUDE-CODE-BRIEF.md`), the numbered priority list from 2026-08-27 is now fully resolved.
-Next: picking through the backlog's "genuinely new" and "catching up to competitors" sections for
-what's still actually missing (confirmed absent from the code, not just assumed from the docs, given
-how far those had drifted before this session's correction).
+With both named montage-builder gaps closed, the numbered priority list from 2026-08-27 is now fully
+resolved.
+
+**Death detector — text-matching precision verified, real audio recall still open.** Couldn't validate
+against real labeled death audio (no ground-truth clip with a confirmed death exists), but that's not
+the only testable part - the detector's TEXT-matching logic is. Ran an adversarial pass (one-off
+harness, not committed - this project keeps verification scripts out of git, same as `scratch_align/`):
+22 realistic true-positive death callouts, the 10 already-guarded idiom traps, and 11 newly-suspected
+false-positive traps, against the real `DEATH_PATTERNS` list. Found and fixed four genuine gaps:
+"I/we/you died laughing" (a very common streaming idiom, unguarded even though "I'm dead serious" was
+already excluded the same way), the third-person he's/she's/they're-dead patterns missing that same
+idiom-exclusion lookahead entirely, "we lost" being completely unqualified (matched "we lost
+connection", "we lost the round" with nobody dying), and "knocked me out" not excluding "...of the
+tournament" the way "I'm out of ammo" was already excluded. One limitation left deliberately
+unfixed and documented in the code: "we lost her" is genuinely ambiguous (death vs. "lost track of")
+without more context than a regex can carry - same treatment as the pre-existing "killed me" note.
+Bottom line: precision on realistic phrasing is now verified; real recall against actual noisy game
+voice chat is still unmeasured and needs a labeled clip when one exists - not overclaiming "validated"
+here, just narrowing what's actually still unknown.
 
 ## What ClipCaption is
 
