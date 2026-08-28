@@ -7,6 +7,8 @@ use tauri::{AppHandle, Manager};
 
 use crate::encoders;
 use crate::jobs::{emit_done, emit_error, emit_progress, JobHandle};
+use crate::media;
+use crate::reframe;
 use crate::sidecar;
 
 #[derive(Deserialize, Clone)]
@@ -82,25 +84,52 @@ impl ExportRequest {
     }
 
     /// Builds the full "-filter_complex ... -map ... [-map ...]" args for this
-    /// request: crop/"fit" letterboxing, the resolution cap, and subtitle
-    /// burn-in as one filtergraph. Never called with cut_ranges present -
-    /// see input_args's own doc comment for why.
+    /// request: crop/"fit"/"track" reframing, the resolution cap, and
+    /// subtitle burn-in as one filtergraph. Never called with cut_ranges
+    /// present - see input_args's own doc comment for why.
     ///
     /// `include_audio`: false for the audio-less first pass of a 2-pass x264
     /// encode (run with -an) — a filtergraph output pad that's never consumed
     /// by a -map is a hard ffmpeg error, not a harmless no-op, so the audio
     /// stages must not be built at all in that case, not just left unmapped.
-    fn filter_and_map_args(&self, ass_path: Option<&Path>, include_audio: bool) -> Vec<String> {
+    ///
+    /// `track`: Some when fit_mode is "track" (smart auto-reframe) - built by
+    /// the caller (run_single_source) since it needs an ffmpeg motion-analysis
+    /// pass and a probe of the source's own dimensions first, both of which
+    /// need I/O this otherwise-pure function deliberately doesn't do itself.
+    fn filter_and_map_args(
+        &self,
+        ass_path: Option<&Path>,
+        include_audio: bool,
+        track: Option<&reframe::TrackConfig>,
+    ) -> Vec<String> {
         debug_assert!(self.ranges().is_none(), "filter_and_map_args called with unresolved cut_ranges");
         let mut fc = String::new();
         let mut v_label = "0:v".to_string();
 
-        // 1) Crop/fit into a forced target size, or just cap the resolution.
+        // 1) Crop/fit/track into a forced target size, or just cap the resolution.
         if let (Some(w), Some(h)) = (self.target_w, self.target_h) {
             if !fc.is_empty() {
                 fc.push(';');
             }
-            if self.fit_mode.as_deref() == Some("fit") {
+            if let Some(t) = track {
+                // Crop at native resolution FIRST (full source height, a
+                // width computed to match the target aspect ratio), THEN
+                // scale down to the exact target size - the opposite order
+                // from "fill"/"fit" below, because sendcmd's x values are
+                // computed in the source's own native pixel space
+                // (reframe::build_sendcmd_script) and cropping after a scale
+                // step would need those values re-derived in scaled space
+                // for no benefit. Starts centered (`(iw-{cw})/2`, evaluated
+                // once at init) until the first sendcmd command - a fraction
+                // of a second in - takes over.
+                let cw = t.crop_w;
+                let ch = t.src_h;
+                fc.push_str(&format!(
+                    "[{v_label}]sendcmd=f='{}',crop@panner=w={cw}:h={ch}:x=(iw-{cw})/2:y=0,scale={w}:{h}[vcrop]",
+                    escape_filter_path(&t.sendcmd_path.to_string_lossy())
+                ));
+            } else if self.fit_mode.as_deref() == Some("fit") {
                 // Whole frame visible ("zoomed out"): a blurred, cropped copy
                 // of the same frame fills the background instead of black bars.
                 fc.push_str(&format!(
@@ -250,6 +279,27 @@ fn run_single_source(
         Some(p)
     };
 
+    // Smart auto-reframe: motion-track the source and write a sendcmd
+    // script driving a panning crop, instead of the "fill" mode's static
+    // center-crop - see reframe.rs. Only meaningful when a forced crop is
+    // actually happening (target_w/h both set); silently has nothing to do
+    // otherwise, same as "fit" already does.
+    let track_config: Option<reframe::TrackConfig> =
+        if req.fit_mode.as_deref() == Some("track") && req.target_w.is_some() && req.target_h.is_some() {
+            emit_progress(app, job_id, "exporting", remap(0.0), Some("Analyzing motion for auto-reframe".into()));
+            let info = media::probe(&req.input_path)?;
+            let (tw, th) = (req.target_w.unwrap(), req.target_h.unwrap());
+            let crop_w = ((info.height as f64) * (tw as f64) / (th as f64)).round() as u32;
+            let crop_w = crop_w.clamp(1, info.width.max(1));
+            let samples = reframe::analyze_pan(&req.input_path)?;
+            let script = reframe::build_sendcmd_script(&samples, info.width, crop_w);
+            let sendcmd_path = cache.join(format!("{job_id}_pan.cmds"));
+            std::fs::write(&sendcmd_path, script).map_err(|e| e.to_string())?;
+            Some(reframe::TrackConfig { sendcmd_path, crop_w, src_h: info.height })
+        } else {
+            None
+        };
+
     let fps_str = req.fps.map(|f| format!("{f}"));
     let audio_bitrate = format!("{}k", req.audio_kbps);
 
@@ -272,7 +322,7 @@ fn run_single_source(
         if encoder != "x264" {
             // GPU encoders: single pass, size bounded by VBV (maxrate/bufsize)
             let mut args: Vec<String> = req.input_args();
-            args.extend(req.filter_and_map_args(ass_path.as_deref(), true));
+            args.extend(req.filter_and_map_args(ass_path.as_deref(), true, track_config.as_ref()));
             if let Some(f) = &fps_str {
                 args.extend(["-r".into(), f.clone()]);
             }
@@ -297,7 +347,7 @@ fn run_single_source(
 
         // Pass 1
         let mut args1: Vec<String> = req.input_args();
-        args1.extend(req.filter_and_map_args(ass_path.as_deref(), false));
+        args1.extend(req.filter_and_map_args(ass_path.as_deref(), false, track_config.as_ref()));
         if let Some(f) = &fps_str {
             args1.extend(["-r".into(), f.clone()]);
         }
@@ -316,7 +366,7 @@ fn run_single_source(
 
         // Pass 2
         let mut args2: Vec<String> = req.input_args();
-        args2.extend(req.filter_and_map_args(ass_path.as_deref(), true));
+        args2.extend(req.filter_and_map_args(ass_path.as_deref(), true, track_config.as_ref()));
         if let Some(f) = &fps_str {
             args2.extend(["-r".into(), f.clone()]);
         }
@@ -342,7 +392,7 @@ fn run_single_source(
         // ---- Quality (CRF) mode: single pass ----
         let crf = req.crf.unwrap_or(20);
         let mut args: Vec<String> = req.input_args();
-        args.extend(req.filter_and_map_args(ass_path.as_deref(), true));
+        args.extend(req.filter_and_map_args(ass_path.as_deref(), true, track_config.as_ref()));
         if let Some(f) = &fps_str {
             args.extend(["-r".into(), f.clone()]);
         }
@@ -630,7 +680,7 @@ mod tests {
     #[test]
     fn no_op_request_returns_no_filter_args() {
         let req = base_req();
-        assert_eq!(req.filter_and_map_args(None, true), Vec::<String>::new());
+        assert_eq!(req.filter_and_map_args(None, true, None), Vec::<String>::new());
     }
 
     #[test]
@@ -638,7 +688,7 @@ mod tests {
         let mut req = base_req();
         req.cut_ranges = Some(vec![]);
         assert_eq!(req.input_args(), vec!["-y", "-i", "in.mp4"]);
-        assert_eq!(req.filter_and_map_args(None, true), Vec::<String>::new());
+        assert_eq!(req.filter_and_map_args(None, true, None), Vec::<String>::new());
     }
 
     #[test]
@@ -646,7 +696,7 @@ mod tests {
         let mut req = base_req();
         req.target_w = Some(1080);
         req.target_h = Some(1920);
-        let args = req.filter_and_map_args(None, true);
+        let args = req.filter_and_map_args(None, true, None);
         let fc = &args[1];
         assert!(fc.contains("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[vcrop]"));
         assert!(!fc.contains("gblur"), "fill mode must not blur: {fc}");
@@ -659,7 +709,7 @@ mod tests {
         req.target_w = Some(1080);
         req.target_h = Some(1920);
         req.fit_mode = Some("fit".into());
-        let args = req.filter_and_map_args(None, true);
+        let args = req.filter_and_map_args(None, true, None);
         let fc = &args[1];
         assert!(fc.contains("split[vb0][vf0]"), "fit mode must split into bg/fg: {fc}");
         assert!(fc.contains("gblur=sigma=20"), "fit mode's background must be blurred: {fc}");
@@ -669,10 +719,34 @@ mod tests {
     }
 
     #[test]
+    fn track_mode_crops_at_native_res_before_scaling_and_wires_sendcmd() {
+        let mut req = base_req();
+        req.target_w = Some(1080);
+        req.target_h = Some(1920);
+        req.fit_mode = Some("track".into());
+        let track = reframe::TrackConfig {
+            sendcmd_path: Path::new("pan.cmds").to_path_buf(),
+            crop_w: 608,
+            src_h: 1080,
+        };
+        let args = req.filter_and_map_args(None, true, Some(&track));
+        let fc = &args[1];
+        assert!(fc.contains("sendcmd=f='pan.cmds'"), "must wire the sendcmd script in: {fc}");
+        assert!(fc.contains("crop@panner=w=608:h=1080"), "must crop at native res with the computed width: {fc}");
+        assert!(fc.contains("x=(iw-608)/2:y=0"), "must start centered until the first command fires: {fc}");
+        // Crop happens BEFORE the final scale, not after - see the doc
+        // comment on why (sendcmd values are in native pixel space).
+        let crop_pos = fc.find("crop@panner").unwrap();
+        let scale_pos = fc.find(",scale=1080:1920").unwrap();
+        assert!(crop_pos < scale_pos, "crop must come before the final scale: {fc}");
+        assert_eq!(&args[2..], &["-map", "[vcrop]", "-map", "0:a"]);
+    }
+
+    #[test]
     fn max_height_caps_resolution_without_cropping() {
         let mut req = base_req();
         req.max_height = Some(720);
-        let args = req.filter_and_map_args(None, true);
+        let args = req.filter_and_map_args(None, true, None);
         let fc = &args[1];
         assert_eq!(fc, "[0:v]scale=-2:min(ih\\,720)[vres]");
         assert_eq!(&args[2..], &["-map", "[vres]", "-map", "0:a"]);
@@ -684,7 +758,7 @@ mod tests {
         req.target_w = Some(1080);
         req.target_h = Some(1920);
         req.max_height = Some(720);
-        let args = req.filter_and_map_args(None, true);
+        let args = req.filter_and_map_args(None, true, None);
         let fc = &args[1];
         assert!(fc.contains("crop=1080:1920[vcrop]"));
         assert!(!fc.contains("[vres]"), "max_height must be ignored once target dims are set: {fc}");
@@ -693,11 +767,11 @@ mod tests {
     #[test]
     fn subtitles_without_cut_ranges_burn_directly_on_source_stream() {
         let mut req = base_req();
-        let args = req.filter_and_map_args(Some(Path::new("cap.ass")), true);
+        let args = req.filter_and_map_args(Some(Path::new("cap.ass")), true, None);
         assert_eq!(&args[1], "[0:v]subtitles=filename='cap.ass'[vout]");
         assert_eq!(&args[2..], &["-map", "[vout]", "-map", "0:a"]);
         req.max_height = Some(480); // sanity: chains after an earlier stage too
-        let args2 = req.filter_and_map_args(Some(Path::new("cap.ass")), true);
+        let args2 = req.filter_and_map_args(Some(Path::new("cap.ass")), true, None);
         assert_eq!(&args2[1], "[0:v]scale=-2:min(ih\\,480)[vres];[vres]subtitles=filename='cap.ass'[vout]");
     }
 

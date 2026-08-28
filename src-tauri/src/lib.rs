@@ -12,6 +12,7 @@ mod montage;
 mod sidecar;
 mod spatial;
 mod polish;
+mod reframe;
 mod transcribe;
 mod watchfolder;
 

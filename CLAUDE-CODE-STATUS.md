@@ -211,6 +211,36 @@ in one action - both were still "one word or line at a time."
   break" concept existed anywhere, confirmed the exact selection-state shape to reuse) rather than
   guessing at the design - see the session's own reasoning for why a per-word flag beats a separate
   timestamp list (immune to going stale when words are inserted/removed/retimed nearby).
+
+**Smart auto-reframe ("Auto-track" frame mode) — built (2026-08-28).** The "catching up to competitors"
+backlog item: a forced vertical/cropped export used to always hard-center-crop regardless of where the
+actual gameplay action was. New third `fitMode` option alongside "fill"/"fit" - motion-tracks the
+source and pans the crop window to follow it.
+- **Honest about what this is and isn't**: no bundled face/object-detection model exists in this app
+  (that's its own real bundling decision, same category as the Case B voice-separation one already
+  written up and deliberately not made lightly) - this is classical motion-saliency (frame-to-frame
+  grayscale pixel differencing, weighted by horizontal position, exponentially smoothed), not deep
+  tracking. Genuinely better than a fixed center-crop for gameplay where the action is off-center, but
+  it follows MOTION specifically - a flashing UI element or a moving background can pull it too. Says
+  so directly in `reframe.rs`'s own doc comment rather than oversold as face tracking.
+- **How it works**: `reframe::analyze_pan` decodes the source at a cheap 80x45/4fps via the bundled
+  ffmpeg, computes a smoothed horizontal motion-centroid track; `build_sendcmd_script` turns that into
+  an ffmpeg `sendcmd` script driving a named `crop@panner` filter's `x` parameter over time - a real,
+  standard ffmpeg technique (verified directly, not assumed from documentation - see below), not
+  something hacked together. The crop happens at native resolution, before the final scale to the
+  target export size.
+- **Verified at every layer, not just type-checked**: (1) the core ffmpeg technique itself - `sendcmd` +
+  a named `crop` filter's runtime-commandable `x` - proven for real against a synthetic video with a
+  known moving object before writing any Rust, since the whole feature depends on it; (2) the pure
+  centroid/smoothing/clamping math - 10 unit tests including left/right/symmetric motion and the
+  no-motion/below-floor edge cases; (3) the exact filtergraph string `filter_and_map_args` builds for
+  "track" mode - a unit test confirming crop happens before scale and the sendcmd/crop wiring is
+  correct; (4) a real end-to-end integration test (`#[ignore]`d for CI the same way `align.rs`'s
+  real-model test already is, since the ffmpeg binary is gitignored - run manually here) that builds an
+  actual synthetic panning clip through the real bundled ffmpeg and confirms `analyze_pan`'s output
+  genuinely tracks the motion left-to-right, not just plausible-looking numbers.
+- **Scoped to the single-clip manual export for now** (ExportDrawer), matching how the sticker layer
+  above was scoped - not yet wired into montage/batch/reel paths.
 - **Follow-up, per the user (2026-08-28): the shipped rainbow/Comic-Sans look was just a reference,
   not the spec.** Real want is a library of roughly 15 selectable sticker styles, same picker-card
   pattern `STYLE_PRESETS`/`StylePanel.tsx` already uses for dialogue captions. Not built yet - v1

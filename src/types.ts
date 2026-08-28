@@ -244,10 +244,12 @@ export interface ExportRequest {
   /** "auto" | "x264" | "nvenc" | "amf" | "qsv" */
   encoder: string;
   /** How to reconcile source aspect ratio with a forced targetW/targetH:
-   * "fill" (default, hard center-crop) or "fit" (whole frame visible,
-   * letterboxed with a blurred zoomed copy of itself instead of black bars).
-   * Ignored unless targetW/targetH are both set. */
-  fitMode: "fill" | "fit" | null;
+   * "fill" (default, hard center-crop), "fit" (whole frame visible,
+   * letterboxed with a blurred zoomed copy of itself instead of black bars),
+   * or "track" (smart auto-reframe - motion-tracks the source and pans the
+   * crop to follow it instead of sitting at a fixed center; see
+   * src-tauri/src/reframe.rs). Ignored unless targetW/targetH are both set. */
+  fitMode: "fill" | "fit" | "track" | null;
   /** Cap the output's height when targetW/targetH aren't set (no forced
    * crop) — never upscales past the source's own resolution. */
   maxHeight: number | null;

@@ -54,7 +54,7 @@ export default function ExportDrawer() {
   const [sizeLimitMb, setSizeLimitMb] = useState(25);
   const [burn, setBurn] = useState(true);
   const [resolutionId, setResolutionId] = useState("source");
-  const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
+  const [fitMode, setFitMode] = useState<"fill" | "fit" | "track">("fill");
 
   const demo = async () => {
     if (!videoPath) return;
@@ -206,6 +206,13 @@ export default function ExportDrawer() {
               onClick={() => setFitMode("fit")}
             >
               Fit (show all)
+            </button>
+            <button
+              className={`seg-toggle-btn ${fitMode === "track" ? "sel" : ""}`}
+              title="Smart auto-reframe: tracks where the on-screen motion actually is and pans the crop to follow it, instead of a fixed center-crop. Motion-based, not face/object tracking - works best when the action is clearly the biggest moving thing in frame."
+              onClick={() => setFitMode("track")}
+            >
+              ✨ Auto-track
             </button>
           </div>
         </div>
