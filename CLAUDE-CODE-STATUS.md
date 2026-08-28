@@ -189,6 +189,13 @@ not a reuse.
   (Latin text and Korean) - confirmed the box and text stay correctly centered and rotated together,
   per-letter rainbow renders correctly, drop shadow renders, and Korean falls back to a readable font
   with no missing-glyph boxes. Screenshots reviewed directly, not assumed from the math.
+- **Follow-up, per the user (2026-08-28): the shipped rainbow/Comic-Sans look was just a reference,
+  not the spec.** Real want is a library of roughly 15 selectable sticker styles, same picker-card
+  pattern `STYLE_PRESETS`/`StylePanel.tsx` already uses for dialogue captions. Not built yet - v1
+  shipped one style with the data model (Sticker type, own ASS renderer) already shaped so adding a
+  style-preset array later doesn't need a rework, just more presets + a picker UI. Also: Korean was
+  only ever the smoke-test language, not an actual priority - Portuguese, Japanese, and Spanish matter
+  more for real non-Latin/accented coverage going forward.
 
 ## What ClipCaption is
 
