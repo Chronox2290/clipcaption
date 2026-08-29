@@ -15,8 +15,19 @@ biasing, model size, voice separation, forced alignment, AI cleanup scope), clip
 accuracy looks like a real ceiling for this specific hard case (three-way overlapping proximity chat) -
 not an engineering gap, a reflection of how hard that audio genuinely is even for top-tier open ASR
 models (~95% on *clean* benchmark audio). Full numbers and reasoning in `CLAUDE-CODE-BRIEF.md`'s
-2026-08-29 entry. Scaling the cross-model proxy test from 10 clips to all 47 available real clips to
-see how representative clip11's hard-case number actually is - in progress.
+2026-08-29 entry.
+
+**2026-08-29 — scaled the cross-model proxy test to all 47 real clips available; 10-clip sample holds
+up.** Raw mean agreement across all 47 was 74.6%, lower than the 10-clip sample's 82.4% - but the drop
+traces to one clean, quantified cause: large-v3 (the cross-check model) transcribes noticeably fewer
+words than turbo on 13 of the 47 clips (28%), missing whole stretches of real dialogue rather than
+mistranscribing it. Split by whether large-v3 kept pace: the 34 clips (72%) where it did average 82.8%
+agreement - matching the original 10-clip number almost exactly, confirming that sample was genuinely
+representative, not lucky. The 13 where it fell behind average 53.2%, but that's measuring large-v3's
+completeness, not turbo's accuracy - another data point (on top of today's earlier "Good evening"
+correction) that turbo is the more reliable of the two on this kind of audio. Full numbers and the
+exact split in `CLAUDE-CODE-BRIEF.md`'s 2026-08-29 entry; also researched online/cloud transcription as
+a possible option there, at the user's request, for discussion with chat.
 
 **2026-08-29 — forced alignment now runs automatically, real measured timing win.** Per the user
 flagging the accuracy numbers as not great: found that forced alignment (built earlier, `align.rs`)

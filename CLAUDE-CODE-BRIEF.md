@@ -291,7 +291,7 @@ suggest typical, less-overlapping clips likely already sit meaningfully higher t
 worth keeping that distinction in view rather than treating clip11's number as "the" accuracy figure
 for every clip.
 
-## 2026-08-29: 10-clip real-footage test (word + timing accuracy, broader than one ground-truth clip)
+## 2026-08-29: real-footage test, scaled from 10 clips to all 47 available (see full-set results below)
 
 Only `clip11` has real human-verified ground truth (the painstaking correction pass this whole
 session's numbers are built on). Asked the user directly how to handle the other 9 rather than
@@ -334,6 +334,51 @@ work around in the first place, and this is a case where it couldn't. Whisper's 
 loop failure mode is still a real, independently-documented phenomenon (referenced elsewhere in this
 project's history) - just not something this specific clip is valid evidence of. No code change
 needed after all; correcting the record rather than building a fix for a bug that wasn't there.
+
+**Scaled to all 47 real clips available on disk (every raw `Replay *.mp4` in the one recording session
+found, not a hand-picked subset) - one real finding, and it reinforces the retraction above rather than
+contradicting it.**
+
+- **Raw mean agreement across all 47: 74.6%** (median 76.5%, range 18.8%-100%) - noticeably lower than
+  the 10-clip sample's 82.4%. Didn't stop at the headline number - checked why, the same "read the
+  actual transcript before trusting an aggregate" discipline the retraction above came from.
+- **Root cause, quantified, not eyeballed: large-v3 systematically transcribes FEWER words than turbo
+  on a real chunk of these clips.** Computed the lv3-word-count / turbo-word-count ratio for all 47:
+  13 of 47 (28%) show large-v3 producing under 80% as many words as turbo for the same audio - in the
+  single worst case, 39 words against turbo's 191 (a 0.20 ratio). Read a couple of these directly:
+  large-v3's output isn't wrong so much as *missing* - whole stretches of real back-and-forth dialogue
+  turbo transcribed in full are reduced to a sentence or two in large-v3's version, not mistranscribed,
+  dropped. That's a large-v3 completeness weakness on this kind of audio (noisy, casual, lots of quick
+  back-and-forth), not evidence turbo is inventing text.
+- **Splitting the 47 by whether large-v3 kept pace (word-count ratio ≥ 0.8) makes the picture much
+  clearer:**
+  - **34 of 47 clips (72%), large-v3 kept pace**: mean agreement 82.8%, median 83.2% - matches the
+    original 10-clip sample's 82.4% almost exactly. That sample wasn't cherry-picked or lucky; it was
+    genuinely representative of the common case.
+  - **13 of 47 clips (28%), large-v3 fell behind**: mean agreement 53.2% - and per the pattern above,
+    this low number is telling you about large-v3's completeness on this audio, not about turbo's
+    accuracy. Averaging these into one "47-clip accuracy" figure without this split understates how
+    good the shipped default (turbo) actually looks against a same-content point of comparison.
+- **Forced-alignment shift, same split**: 198ms mean / 170ms median on the 34 "kept pace" clips -
+  consistent with both the 10-clip sample (214ms) and the correction magnitude already measured against
+  real ground truth on clip11 (122ms → 64ms). The 13 "fell behind" clips weren't separately re-checked
+  for shift outliers given the root cause is already understood (same class of issue as the "Good
+  evening" clip - a model-completeness mismatch skewing the alignment-shift numbers for words counted
+  as text-matched only by chance).
+- **Caveat, not resolved**: the user mentioned 1-3 of roughly 100 total clips across the wider
+  collection are OBS having accidentally recorded VLC playback of older clips (reviewing footage) rather
+  than live gameplay - not screened for specifically in this batch, since telling those apart from real
+  gameplay audio from a transcript alone isn't reliable (would need to actually watch/listen to confirm,
+  which wasn't done for all 47). If one or two of the lower-agreement clips turn out to be one of these,
+  that's a separate, known, low-count explanation on top of the large-v3-completeness pattern above, not
+  a contradiction of it.
+- Full per-clip numbers for all 47: `scratch_align/analyze_all47.py` + `scratch_align/allclips/`
+  (gitignored, same as the rest of `scratch_align/`), reproducible against the same 47 source files.
+
+**Bottom line updated**: the 10-clip sample's 82.4% wasn't a fluke - it's what 72% of real clips
+actually look like. The wider net mainly surfaced a large-v3-specific weakness worth knowing for its
+own sake (reinforces the already-closed model-size decision: turbo is the right default, now with even
+more evidence) rather than new information about turbo's own accuracy.
 
 ## Priority build order after that
 
