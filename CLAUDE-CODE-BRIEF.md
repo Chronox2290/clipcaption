@@ -398,25 +398,15 @@ The north star: the whole pipeline — record → find the good moments → tran
 share — should need as close to zero manual editing as possible. Manual editing should be the
 override you reach for occasionally, not the default path every clip goes through.
 
-1. **A compilation/montage builder.** Doesn't exist yet at all. Stitches the top highlights into one
-   shareable reel — the actual missing piece that turns "a folder of individually-captioned clips"
-   into "the thing that was wanted," not a nice-to-have layered on later.
-2. **Tiered auto-apply for the transcript cleanup pass.** It currently queues every flagged word for
-   manual accept/skip, on purpose, as a safety valve. Worth revisiting as tiered: auto-apply the
-   cases the model is very confident about and there's really only one sane fix, only queue the
-   genuinely ambiguous ones for a human.
-3. **A dedicated "death" detector**, separate from the general highlight scan. Death sounds/messages
-   are a far more consistent signal across games than general hype detection — a more tractable win
-   than trying to make the general scan smarter all at once.
-4. **Discord auto-publish via webhook.** Paste a webhook URL into settings, finished clip posts
-   straight to the channel automatically. No approval process, no hosting requirement — the easy
-   version of "share it," as opposed to Instagram (see below).
-5. **Confidence-gated auto-export, once #2 exists.** Take tiered auto-cleanup one step further: a
-   clip where every flagged word cleared automatically — nothing needed a human — can skip the
-   editor screen entirely and go straight to compiled/exported/shared. Only clips with genuinely
-   ambiguous words stop for review. This is the actual "as close to zero manual editing as possible"
-   outcome, not just a faster editing screen — worth building as the natural next step after tiered
-   cleanup lands, not a separate project.
+**This numbered list is stale — kept only as a historical record of what was originally scoped.**
+Per the "re-verified fresh against the actual current code" paragraph above (2026-08-29) and the
+detailed shipped-feature writeup in `CLAUDE-CODE-STATUS.md`'s "New since v0.2.10" section, all five
+items below are done: the montage builder (`montage.rs` + `Montage.tsx`), tiered auto-apply
+(`AUTO_APPLY_CONFIDENCE` in `polish.rs`), the death detector (`deathDetector.ts`, later
+false-positive-hardened), the Discord webhook (`discord.rs`, wired to both single export and montage
+completion, plus an end-of-session digest), and confidence-gated auto-export (`needs_review` gating
+in the batch flow). Don't re-derive or re-plan these — go straight to `CLAUDE-CODE-STATUS.md` for
+current state and known gaps in each.
 
 **Cross-cutting, not a queued item — bake this into all four above as they're built:** the pipeline
 is gaining stages (detect → transcribe → clean up → collate → share), and each one needs to fail
