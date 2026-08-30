@@ -377,6 +377,65 @@ export function isUnsure(w: WordSpan): boolean {
   return w.confidence != null && w.confidence < UNSURE_BELOW;
 }
 
+/** How many times a repeating unit of each length has to repeat back-to-back
+ * before it's worth a second look. A single word needs more repeats than a
+ * short phrase to clear the bar, since "go, go, go" (2-3x) is completely
+ * ordinary hype speech - but the real case this exists for (see below) was a
+ * two-word phrase repeated 14 times, which single-word-only detection would
+ * completely miss (it alternates "good"/"evening", never repeating the same
+ * single word back-to-back). Checking phrase lengths up to 3 catches that
+ * shape without needing to know in advance how long the repeated unit is. */
+const MIN_REPEATS_FOR_UNIT_LENGTH: Record<number, number> = { 1: 5, 2: 4, 3: 4 };
+
+/** Flags candidate whisper repetition-loop runs for a human to glance at -
+ * and does NOTHING else. This deliberately does not try to tell a real
+ * repetition-loop hallucination apart from genuine repeated speech, because
+ * that call was gotten wrong once already on real data: a 14x "good evening"
+ * run looked exactly like a textbook hallucination loop from the transcript
+ * alone, and was actually a real inside joke someone said while bobbing up
+ * and down on camera (see CLAUDE-CODE-BRIEF.md's 2026-08-29 retraction).
+ * Nothing here edits or removes a word - it only marks a run so it's easy to
+ * jump to and give a 2-second listen, the same "advisory, human decides"
+ * shape as the AI cleanup pass's own review queue. Returns the set of word
+ * indices (within `words`) that are part of a flagged run. */
+export function suspectedStutterRuns(words: WordSpan[]): Set<number> {
+  const norm = words.map((w) => normalizeForRepeat(w.text));
+  const flagged = new Set<number>();
+  let i = 0;
+  while (i < norm.length) {
+    let bestSpan = 0;
+    for (const [lenStr, minRepeats] of Object.entries(MIN_REPEATS_FOR_UNIT_LENGTH)) {
+      const unitLen = Number(lenStr);
+      if (i + unitLen > norm.length) continue;
+      const unit = norm.slice(i, i + unitLen);
+      if (unit.every((u) => !u)) continue; // punctuation-only "word" - nothing to compare
+      let repeats = 1;
+      while (
+        i + (repeats + 1) * unitLen <= norm.length &&
+        rangeMatchesUnit(norm, i + repeats * unitLen, unit)
+      ) {
+        repeats++;
+      }
+      if (repeats >= minRepeats) bestSpan = Math.max(bestSpan, repeats * unitLen);
+    }
+    if (bestSpan > 0) {
+      for (let j = i; j < i + bestSpan; j++) flagged.add(j);
+      i += bestSpan;
+    } else {
+      i++;
+    }
+  }
+  return flagged;
+}
+
+function rangeMatchesUnit(norm: string[], start: number, unit: string[]): boolean {
+  return unit.every((u, k) => norm[start + k] === u);
+}
+
+function normalizeForRepeat(text: string): string {
+  return text.trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
 /** Job-stage strings from the Rust backend ("exporting", "pass 1/2", …) are
  * lowercase identifiers, not display text — capitalize the first letter
  * wherever one is shown directly in the UI. */

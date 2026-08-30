@@ -1,7 +1,14 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useApp } from "../store";
 import TimeField from "./TimeField";
-import { fmtTime, isProfane, isUnsure, resolveSpeakerNames, speakerLetter } from "../lib/captions";
+import {
+  fmtTime,
+  isProfane,
+  isUnsure,
+  resolveSpeakerNames,
+  speakerLetter,
+  suspectedStutterRuns,
+} from "../lib/captions";
 import { chronoPositions } from "../lib/highlights";
 
 interface Props {
@@ -256,7 +263,9 @@ export default function TranscriptPanel({ videoRef }: Props) {
         re-aim at the little × each time.
       </p>
       <div className="transcript-list">
-        {segments.map((seg) => (
+        {segments.map((seg) => {
+          const stutterFlags = suspectedStutterRuns(seg.words);
+          return (
           <div key={seg.id} className="seg">
             <button
               className="seg-time"
@@ -296,11 +305,13 @@ export default function TranscriptPanel({ videoRef }: Props) {
                         }}
                         className={`word-input ${isProfane(w.text) ? "profane" : ""} ${
                           tuning?.segId === seg.id && tuning.idx === i ? "tuning" : ""
-                        } ${isUnsure(w) ? "unsure" : ""}`}
+                        } ${isUnsure(w) ? "unsure" : ""} ${stutterFlags.has(i) ? "suspect-repeat" : ""}`}
                         title={
                           isUnsure(w)
                             ? `Whisper wasn't sure about this word (${Math.round((w.confidence ?? 0) * 100)}%)`
-                            : undefined
+                            : stutterFlags.has(i)
+                              ? "Part of a long run of the same word repeated in a row - could be real (people do repeat themselves), could be whisper looping. Worth a quick listen to confirm."
+                              : undefined
                         }
                         value={w.text}
                         size={Math.max(w.text.length, 1)}
@@ -389,7 +400,8 @@ export default function TranscriptPanel({ videoRef }: Props) {
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
       <div className="transcript-actions">
         <button className="btn btn-ghost" onClick={() => transcribe()}>

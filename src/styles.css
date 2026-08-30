@@ -997,6 +997,12 @@ kbd {
   text-decoration-thickness: 1.5px;
 }
 
+.word-input.suspect-repeat {
+  text-decoration: underline dashed rgba(46, 230, 255, 0.75);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+
 .speaker-count {
   display: flex;
   align-items: center;

@@ -448,8 +448,17 @@ reassign it, keyboard shortcuts for frame-accurate nudging, and full undo/redo.
 - **Voice/game audio separation, Case B** (single mixed-down recording, via Spleeter) — the biggest
   remaining transcription-accuracy lever, needs a bundled-dependency decision before starting.
 - **Multi-select and a "razor" cut tool** on the timeline — currently one word or line at a time.
-- Automatically collapsing whisper's occasional stuttering repeats ("go, go, go, go, go") — not
-  done; confirmed the AI cleanup pass won't touch these safely, so it needs its own simple check.
+- ~~Automatically collapsing whisper's occasional stuttering repeats~~ — built 2026-08-30, but as a
+  **flag-only** review marker, not an auto-remove, per an explicit decision: after this session's own
+  "Good evening" x14 mistake (a real inside joke first misdiagnosed as a hallucination loop), silently
+  deleting a suspicious repeat run risked doing exactly that for real, permanently. `suspectedStutter
+  Runs()` (`lib/captions.ts`) marks a run for a human to glance at; it never edits or removes a word.
+  Detects both single-word runs (5+) and short repeated phrases up to 3 words (4+ repeats) - the
+  phrase case matters because the actual "Good evening" run alternates two words and a single-word-only
+  check would never see it as a repeat at all (verified this gap for real before shipping the phrase
+  case: the single-word-only version scored 0/28 on that exact transcript). Shown in the transcript
+  panel as a dashed cyan underline, distinct from the existing amber "unsure" wavy underline (different
+  meaning - unsure means whisper doesn't know the word, this means "worth a listen either way").
 - A full mobile/Android version was considered and set aside — the local-AI, multi-process
   architecture doesn't fit that platform well, and going "bigger install, higher quality" (the
   direction chosen for this app) only widens that gap. A lightweight companion app just for
