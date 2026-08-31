@@ -106,11 +106,23 @@ pub fn analyze_pan(video_path: &str) -> Result<Vec<PanSample>, String> {
             "pipe:1",
         ])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| format!("Could not run ffmpeg: {e}"))?;
 
     let mut out = child.stdout.take().ok_or("ffmpeg gave no stdout")?;
+    // Drained on its own thread (same pattern as export.rs's run_ffmpeg) so a
+    // real ffmpeg error doesn't deadlock the stdout read loop below waiting
+    // for stderr's pipe buffer to drain.
+    let stderr = child.stderr.take();
+    let err_buf = std::thread::spawn(move || {
+        let mut buf = String::new();
+        if let Some(mut stderr) = stderr {
+            let _ = stderr.read_to_string(&mut buf);
+        }
+        buf
+    });
+
     let frame_bytes = (SAMPLE_W * SAMPLE_H) as usize;
     let mut buf = vec![0u8; frame_bytes];
     let mut prev: Option<Vec<u8>> = None;
@@ -121,8 +133,22 @@ pub fn analyze_pan(video_path: &str) -> Result<Vec<PanSample>, String> {
     let mut idx = 0u64;
 
     loop {
-        if out.read_exact(&mut buf).is_err() {
-            break; // EOF (or a short final read) - not an error, just done
+        match out.read_exact(&mut buf) {
+            Ok(()) => {}
+            // A clean end of stream - not an error, just done.
+            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            // Any other read failure means ffmpeg died mid-stream (a broken
+            // pipe from a crash, a truncated frame) - surfacing this as an
+            // error, rather than silently treating it the same as a clean
+            // EOF, is the whole point of this match: a failed analysis used
+            // to come back as Ok(partial-or-empty samples), which made the
+            // "track" export silently degrade to a near-static center crop
+            // with no indication anything went wrong.
+            Err(e) => {
+                let _ = child.kill();
+                let stderr = err_buf.join().unwrap_or_default();
+                return Err(format!("ffmpeg failed while analyzing motion: {e}. {stderr}"));
+            }
         }
         if let Some(prev_frame) = &prev {
             if let Some(raw_center) = motion_centroid(prev_frame, &buf, SAMPLE_W, SAMPLE_H) {
@@ -136,7 +162,12 @@ pub fn analyze_pan(video_path: &str) -> Result<Vec<PanSample>, String> {
         prev = Some(buf.clone());
         idx += 1;
     }
-    let _ = child.wait();
+    drop(out);
+    let stderr = err_buf.join().unwrap_or_default();
+    let status = child.wait().map_err(|e| format!("Could not wait for ffmpeg: {e}"))?;
+    if !status.success() {
+        return Err(format!("ffmpeg failed while analyzing motion: {}", stderr.trim()));
+    }
     Ok(samples)
 }
 

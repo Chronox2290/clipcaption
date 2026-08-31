@@ -205,14 +205,9 @@ fn join_via_concat_demuxer(
     list_name_hint: &str,
 ) -> Result<(), String> {
     let list_path = scratch_dir.join(format!("{list_name_hint}_list.txt"));
-    let mut list_content = String::new();
-    for p in paths {
-        // ffmpeg's concat-demuxer list format: single-quoted paths, with an
-        // embedded single quote escaped as '\''.
-        let escaped = p.to_string_lossy().replace('\'', r"'\''");
-        list_content.push_str(&format!("file '{escaped}'\n"));
-    }
-    std::fs::write(&list_path, list_content).map_err(|e| e.to_string())?;
+    // Shared with export.rs's own concat-demuxer join (same list format,
+    // same escaping) rather than a second copy of the same logic.
+    std::fs::write(&list_path, export::concat_list_content(paths)).map_err(|e| e.to_string())?;
 
     let out = sidecar::command("ffmpeg")
         .args(["-y", "-f", "concat", "-safe", "0", "-i"])

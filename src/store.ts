@@ -42,6 +42,7 @@ import {
   resolveSpeakerNames,
   speakerLabel,
   layoutRows,
+  segmentsInRange,
   shiftPages,
   UNSURE_BELOW,
 } from "./lib/captions";
@@ -401,14 +402,14 @@ interface AppState {
     presetId?: string,
     customMb?: number,
     resolutionId?: string,
-    fitMode?: "fill" | "fit"
+    fitMode?: "fill" | "fit" | "track"
   ) => Promise<void>;
   compileSelectedHighlights: (
     outputPath: string,
     presetId: string,
     customMb: number,
     resolutionId?: string,
-    fitMode?: "fill" | "fit",
+    fitMode?: "fill" | "fit" | "track",
     /** Explicit ranks to compile instead of the ticked checkboxes -
      * buildReel uses this so picking a hands-off reel never mutates what
      * the user has manually selected in the Highlights list. */
@@ -424,7 +425,7 @@ interface AppState {
     customMb: number,
     targetDurationSec: number,
     resolutionId?: string,
-    fitMode?: "fill" | "fit"
+    fitMode?: "fill" | "fit" | "track"
   ) => Promise<{ ranks: number[]; totalDurationSec: number } | null>;
   openBatch: () => void;
   openMontage: () => void;
@@ -441,7 +442,7 @@ interface AppState {
     outputPath: string,
     presetId: string,
     resolutionId: string,
-    fitMode: "fill" | "fit",
+    fitMode: "fill" | "fit" | "track",
     targetSizeMb?: number | null
   ) => Promise<void>;
   addBatchPaths: (paths: string[]) => void;
@@ -474,7 +475,7 @@ interface AppState {
     customMb: number,
     outputDir: string | null,
     resolutionId?: string,
-    fitMode?: "fill" | "fit",
+    fitMode?: "fill" | "fit" | "track",
     isWatchSession?: boolean
   ) => Promise<void>;
   cancelFileBatch: () => void;
@@ -1825,7 +1826,7 @@ export const useApp = create<AppState>((set, get) => ({
     presetId = "original",
     customMb = 25,
     resolutionId = "source",
-    fitMode: "fill" | "fit" = "fill"
+    fitMode: "fill" | "fit" | "track" = "fill"
   ) => {
     const {
       highlights,
@@ -2206,13 +2207,7 @@ export const useApp = create<AppState>((set, get) => ({
     // untouched (byId lookup below just skips them, same mechanism that
     // already no-ops on any segment translate_transcript wasn't asked
     // about).
-    const inScope = activeRange
-      ? segments.filter((s) => {
-          const s0 = s.words[0]?.start ?? 0;
-          const e0 = s.words[s.words.length - 1]?.end ?? s0;
-          return e0 > activeRange.start && s0 < activeRange.end;
-        })
-      : segments;
+    const inScope = segmentsInRange(segments, activeRange);
     if (!inScope.length) return;
     get().pushHistory();
     try {
@@ -2309,7 +2304,10 @@ export const useApp = create<AppState>((set, get) => ({
         c.start
       );
       pages = layoutRows(pages);
-      const ass = pages.length ? buildAss(pages, c.style, { playResX: outW, playResY: outH }) : "";
+      const rangeStickers = stickersForRange(c.stickers ?? [], c.start, c.end, c.start);
+      const ass =
+        (pages.length ? buildAss(pages, c.style, { playResX: outW, playResY: outH }) : "") +
+        buildStickerAss(rangeStickers, { playResX: outW, playResY: outH });
       return {
         inputPath: c.videoPath,
         assContent: ass,
@@ -2424,6 +2422,12 @@ export const useApp = create<AppState>((set, get) => ({
     const { selectedModel } = get();
     const preset = getExportPreset(presetId);
     const { targetW, targetH, maxHeight } = resolveResolution(preset, resolutionId);
+    // Captured once, like preset/resolutionId above - unlike style/censor
+    // (deliberately re-read per item so mid-batch tweaks apply to later
+    // clips), the encoder has to stay fixed for the whole run: the
+    // end-of-session digest joins this run's outputs with a stream-copy
+    // concat, which only works when every clip shares the same codec params.
+    const { encoder } = get();
     batchCancelRequested = false;
     set({ batchRunning: true, error: null });
 
@@ -2602,7 +2606,7 @@ export const useApp = create<AppState>((set, get) => ({
             trimStart: null,
             trimEnd: null,
             cutRanges: null,
-            encoder: get().encoder,
+            encoder,
             fitMode: targetW && targetH ? fitMode : null,
             maxHeight,
           } satisfies ExportRequest,
@@ -2771,13 +2775,7 @@ export const useApp = create<AppState>((set, get) => ({
     // the auto-apply loop), so sending a subset here just means suggestions
     // only ever come back for that subset - no merge-by-id needed downstream,
     // unlike alignTranscript below.
-    const inScope = activeRange
-      ? segments.filter((s) => {
-          const s0 = s.words[0]?.start ?? 0;
-          const e0 = s.words[s.words.length - 1]?.end ?? s0;
-          return e0 > activeRange.start && s0 < activeRange.end;
-        })
-      : segments;
+    const inScope = segmentsInRange(segments, activeRange);
     if (!inScope.length) return;
     try {
       set({ error: null, polishSuggestions: [] });
@@ -2805,13 +2803,7 @@ export const useApp = create<AppState>((set, get) => ({
     // was real, reported wasted time (same issue translateTranscript had).
     // The response is merged back by segment id (see the alignJob dispatch
     // case), so segments outside the range are untouched, not dropped.
-    const inScope = activeRange
-      ? segments.filter((s) => {
-          const s0 = s.words[0]?.start ?? 0;
-          const e0 = s.words[s.words.length - 1]?.end ?? s0;
-          return e0 > activeRange.start && s0 < activeRange.end;
-        })
-      : segments;
+    const inScope = segmentsInRange(segments, activeRange);
     if (!inScope.length) return;
     get().pushHistory();
     try {

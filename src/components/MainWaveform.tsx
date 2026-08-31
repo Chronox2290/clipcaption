@@ -675,9 +675,14 @@ export default function MainWaveform({ videoRef }: Props) {
       }
 
       const isGroupMove = hit.mode === "move" && selectedWords.size > 1 && selectedWords.has(key);
-      if (!isGroupMove) setSelectedWords(new Set());
-
-      setTuningWord({ segId: hit.segId, idx: hit.idx });
+      // A group move keeps selectedWords as the active concept and leaves
+      // tuningWord unset (see the comment above the selectedWords-gated
+      // keydown handler) - setting both left two independent Delete/
+      // Backspace listeners live at once, each acting on the same keypress.
+      if (!isGroupMove) {
+        setSelectedWords(new Set());
+        setTuningWord({ segId: hit.segId, idx: hit.idx });
+      }
       const v = videoRef.current;
       if (v) v.currentTime = Math.max(0, flat[hit.flatIdx].w.start + 0.001);
 

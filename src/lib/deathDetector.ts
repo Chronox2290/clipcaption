@@ -39,9 +39,14 @@ export const DEATH_PATTERNS: RegExp[] = [
   /\bi died\b(?!\s*laughing)/i,
   /\bwe died\b(?!\s*laughing)/i,
   /\byou died\b(?!\s*laughing)/i,
-  /\bhe'?s dead\b(?!\s*(serious|ass|on|wrong))/i,
-  /\bshe'?s dead\b(?!\s*(serious|ass|on|wrong))/i,
-  /\bthey'?re dead\b(?!\s*(serious|ass|on|wrong))/i,
+  // No "on" exclusion here unlike i'm-dead above: "I'm dead on [target]" is a
+  // real first-person agreement idiom, but "he's/she's/they're dead ON..." is
+  // not an established third-person idiom the same way - it's much more
+  // likely a literal callout ("she's dead on arrival", "he's dead on the
+  // ground"), so excluding it there was a real recall regression, not a fix.
+  /\bhe'?s dead\b(?!\s*(serious|ass|wrong))/i,
+  /\bshe'?s dead\b(?!\s*(serious|ass|wrong))/i,
+  /\bthey'?re dead\b(?!\s*(serious|ass|wrong))/i,
   /\bi got killed\b/i,
   /\byou killed me\b/i,
   // "that killed me"/"you killed me" for something FUNNY is a real, known

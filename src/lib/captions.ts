@@ -322,6 +322,24 @@ export function isProfane(text: string): boolean {
   return profanityRe.test(text.trim());
 }
 
+/** Segments whose words overlap [range.start, range.end) - the "this range,
+ * not the whole loaded session" scoping shared by translateTranscript/
+ * reviewTranscript/alignTranscript (store.ts) and TranscriptPanel's own
+ * "line N/M" display, so all four agree on exactly the same definition of
+ * "in scope" instead of four independently-maintained copies of it.
+ * `null`/no range means no narrower scope - everything is in scope. */
+export function segmentsInRange(
+  segments: Segment[],
+  range: { start: number; end: number } | null
+): Segment[] {
+  if (!range) return segments;
+  return segments.filter((s) => {
+    const s0 = s.words[0]?.start ?? 0;
+    const e0 = s.words[s.words.length - 1]?.end ?? s0;
+    return e0 > range.start && s0 < range.end;
+  });
+}
+
 /** Shift caption pages onto a clip-relative timeline (e.g. for trimmed exports). */
 export function shiftPages(pages: CaptionPage[], offset: number): CaptionPage[] {
   return pages.map((p) => ({

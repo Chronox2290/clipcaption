@@ -6,6 +6,7 @@ import {
   isProfane,
   isUnsure,
   resolveSpeakerNames,
+  segmentsInRange,
   speakerLetter,
   suspectedStutterRuns,
 } from "../lib/captions";
@@ -57,16 +58,11 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const translateTranscript = useApp((s) => s.translateTranscript);
   const activeRange = useApp((s) => s.activeRange);
   const [translateLanguage, setTranslateLanguage] = useState("Spanish");
-  // Mirrors translateTranscript/reviewTranscript/alignTranscript's own
-  // scoping in store.ts - purely for accurate "line N/M" text and disabled
-  // states here, not a second source of truth for what actually gets sent.
-  const activeScope = activeRange
-    ? segments.filter((s) => {
-        const s0 = s.words[0]?.start ?? 0;
-        const e0 = s.words[s.words.length - 1]?.end ?? s0;
-        return e0 > activeRange.start && s0 < activeRange.end;
-      })
-    : segments;
+  // Shares translateTranscript/reviewTranscript/alignTranscript's own
+  // scoping helper (lib/captions.ts) - purely for accurate "line N/M" text
+  // and disabled states here, not a second source of truth for what
+  // actually gets sent.
+  const activeScope = segmentsInRange(segments, activeRange);
   const translateScope = activeScope;
   const speakerEmbeddings = useApp((s) => s.speakerEmbeddings);
   const speakerProfiles = useApp((s) => s.speakerProfiles);

@@ -55,6 +55,7 @@ export default function Montage() {
               segments: project.segments,
               style: project.style,
               censor: project.censor,
+              stickers: project.stickers,
             });
           }
         } catch {

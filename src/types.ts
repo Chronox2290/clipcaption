@@ -400,4 +400,7 @@ export interface MontageClip {
   segments: Segment[];
   style: CaptionStyle;
   censor: boolean;
+  /** Carried over from the source project the same way segments/style/censor
+   * are - optional since an older .ccproj has none. */
+  stickers?: Sticker[];
 }

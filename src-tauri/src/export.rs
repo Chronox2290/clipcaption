@@ -69,7 +69,12 @@ impl ExportRequest {
     /// joined temp file first and neutralizes cut_ranges before this or
     /// filter_and_map_args ever sees the request (see prepare_ranges_source).
     fn input_args(&self) -> Vec<String> {
-        debug_assert!(self.ranges().is_none(), "input_args called with unresolved cut_ranges");
+        // A real assert, not debug_assert!: silently falling through to a
+        // plain-trim encode here would produce a wrong-duration, wrong-
+        // content export with effective_duration() still reporting the sum
+        // of the (ignored) ranges - worse than failing loudly, and a
+        // debug_assert compiles to nothing in a release build.
+        assert!(self.ranges().is_none(), "input_args called with unresolved cut_ranges");
         let mut args: Vec<String> = vec!["-y".into()];
         if let Some(s) = self.trim_start {
             if s > 0.0 {
@@ -103,7 +108,9 @@ impl ExportRequest {
         include_audio: bool,
         track: Option<&reframe::TrackConfig>,
     ) -> Vec<String> {
-        debug_assert!(self.ranges().is_none(), "filter_and_map_args called with unresolved cut_ranges");
+        // See input_args's own comment on why this is a real assert, not a
+        // debug_assert.
+        assert!(self.ranges().is_none(), "filter_and_map_args called with unresolved cut_ranges");
         let mut fc = String::new();
         let mut v_label = "0:v".to_string();
 
@@ -292,6 +299,20 @@ fn run_single_source(
             let crop_w = ((info.height as f64) * (tw as f64) / (th as f64)).round() as u32;
             let crop_w = crop_w.clamp(1, info.width.max(1));
             let samples = reframe::analyze_pan(&req.input_path)?;
+            // analyze_pan decodes the whole (untrimmed) input_path, so its
+            // samples' t values are timestamped against the FULL source's
+            // own 0..duration timeline. The actual encode below applies -ss
+            // (trim_start) before -i, which resets the filtergraph's own PTS
+            // to ~0 at the trim point - so the sendcmd schedule has to be
+            // rebased by the same offset, or every command fires against the
+            // wrong point in the trimmed output (or never fires at all, for
+            // a short highlight cut from deep inside a long recording).
+            let trim_start = req.trim_start.unwrap_or(0.0);
+            let samples: Vec<reframe::PanSample> = samples
+                .into_iter()
+                .filter(|s| s.t >= trim_start)
+                .map(|s| reframe::PanSample { t: s.t - trim_start, center_frac: s.center_frac })
+                .collect();
             let script = reframe::build_sendcmd_script(&samples, info.width, crop_w);
             let sendcmd_path = cache.join(format!("{job_id}_pan.cmds"));
             std::fs::write(&sendcmd_path, script).map_err(|e| e.to_string())?;
@@ -530,9 +551,11 @@ fn range_extract_args(input_path: &str, start: f64, dur: f64, encoder: &str, out
 
 /// ffmpeg concat-demuxer list file content: single-quoted paths, with an
 /// embedded single quote escaped as '\'' - the format ffmpeg's own docs
-/// specify for `-f concat`. Same escaping montage.rs already uses for the
-/// same format.
-fn concat_list_content(paths: &[PathBuf]) -> String {
+/// specify for `-f concat`. `pub(crate)` so montage.rs's own concat-demuxer
+/// join (a different operation - it invokes ffmpeg directly rather than
+/// through this module's job-aware, cancellable run_ffmpeg - but needs the
+/// exact same list format) can share this instead of re-deriving it.
+pub(crate) fn concat_list_content(paths: &[PathBuf]) -> String {
     let mut out = String::new();
     for p in paths {
         let escaped = p.to_string_lossy().replace('\'', r"'\''");
