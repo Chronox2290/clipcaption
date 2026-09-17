@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { useEffect } from "react";
-import { useApp } from "../store";
+import { useEffect, useMemo, useState } from "react";
+import { useApp, localDateKey } from "../store";
 import { pickDirectory, pickVideoFiles } from "../lib/tauri";
 import { STYLE_PRESETS } from "../lib/styles";
 import EncodingOptions from "../components/EncodingOptions";
@@ -41,12 +41,103 @@ function BatchThumb({ path }: { path: string }) {
   );
 }
 
+/** "Today" / "Yesterday" / a short weekday+date, in the viewer's own local
+ * time - matches the day boundaries localDateKey groups by. */
+function dayLabel(key: string): string {
+  if (key === localDateKey(Date.now())) return "Today";
+  if (key === localDateKey(Date.now() - 24 * 60 * 60 * 1000)) return "Yesterday";
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/** Shown after "Add folder" when that folder's videos span more than one
+ * calendar day - lets a folder OBS dumps every session into forever (a real
+ * user report) be filtered down to "just today's clips" instead of always
+ * queuing the entire folder's history. */
+function FolderDatePicker({
+  entries,
+  onConfirm,
+  onCancel,
+}: {
+  entries: { path: string; modifiedSecs: number }[];
+  onConfirm: (dateKeys: string[]) => void;
+  onCancel: () => void;
+}) {
+  const groups = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of entries) {
+      const key = localDateKey(e.modifiedSecs * 1000);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    // Newest day first - the day someone just finished recording is almost
+    // always the one they're here for.
+    return [...counts.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [entries]);
+
+  // Defaults to just the most recent day - "today's clips" is the whole
+  // point of this prompt existing; every older day is still one click away
+  // via its own checkbox rather than needing to be deselected first.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(groups[0] ? [groups[0][0]] : []));
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const selectedCount = groups.reduce((n, [key, count]) => (selected.has(key) ? n + count : n), 0);
+
+  return (
+    <div className="folder-date-picker">
+      <div className="folder-date-picker-head">
+        <strong>Which day's clips?</strong>
+        <span className="muted small">
+          {entries.length} video{entries.length === 1 ? "" : "s"} in that folder, across {groups.length} days
+        </span>
+      </div>
+      <div className="folder-date-list">
+        {groups.map(([key, count]) => (
+          <label key={key} className="check-row">
+            <input type="checkbox" checked={selected.has(key)} onChange={() => toggle(key)} />
+            <span>{dayLabel(key)}</span>
+            <span className="muted small">
+              {count} clip{count === 1 ? "" : "s"}
+            </span>
+          </label>
+        ))}
+      </div>
+      <div className="folder-date-actions">
+        <button className="btn btn-ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button className="btn btn-ghost" onClick={() => onConfirm(groups.map(([key]) => key))}>
+          Add all days ({entries.length})
+        </button>
+        <button
+          className="btn btn-primary"
+          onClick={() => onConfirm([...selected])}
+          disabled={selected.size === 0}
+        >
+          Add selected ({selectedCount})
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function BatchScreen() {
   const {
     batchItems,
     batchRunning,
     addBatchPaths,
     addBatchFolder,
+    batchFolderPending,
+    confirmBatchFolderDates,
+    cancelBatchFolderPending,
     removeBatchItem,
     clearBatchItems,
     runFileBatch,
@@ -207,6 +298,14 @@ export default function BatchScreen() {
               {doneCount > 0 ? ` · ${doneCount} done` : ""}
             </span>
           </div>
+
+          {batchFolderPending && (
+            <FolderDatePicker
+              entries={batchFolderPending.entries}
+              onConfirm={confirmBatchFolderDates}
+              onCancel={cancelBatchFolderPending}
+            />
+          )}
 
           {batchItems.length === 0 ? (
             <div className="ghost-queue">

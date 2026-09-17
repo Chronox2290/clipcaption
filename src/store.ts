@@ -109,6 +109,18 @@ function waitForJob(
   });
 }
 
+/** YYYY-MM-DD in the viewer's own local timezone, not UTC - a recording made
+ * at 11pm and grouped by UTC could land on the wrong day for anyone not near
+ * UTC+0, which defeats the entire point of a "what did I record today"
+ * filter (see addBatchFolder). */
+export function localDateKey(epochMs: number): string {
+  const d = new Date(epochMs);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 // id of the job the file-batch loop is currently awaiting (for cancellation)
 let currentBatchJobId: string | null = null;
 let batchCancelRequested = false;
@@ -325,6 +337,14 @@ interface AppState {
   // multi-clip batch queue
   batchItems: BatchItem[];
   batchRunning: boolean;
+  /** Set right after "Add folder" when that folder's videos span more than
+   * one calendar day (the normal case for OBS, which dumps every session
+   * into the same one folder forever) - holds the picked folder's contents
+   * so BatchScreen can show a "which day(s)?" step instead of queuing
+   * everything blindly. Null when no such prompt is pending. */
+  batchFolderPending: { dir: string; entries: { path: string; modifiedSecs: number }[] } | null;
+  confirmBatchFolderDates: (dateKeys: string[]) => void;
+  cancelBatchFolderPending: () => void;
 
   // jobs
   transcribeJob: JobState | null;
@@ -962,6 +982,7 @@ export const useApp = create<AppState>((set, get) => ({
   batch: null,
   batchItems: [],
   batchRunning: false,
+  batchFolderPending: null,
   watching: false,
   watchFolderPath: null,
   watchFolderJobId: null,
@@ -2501,16 +2522,40 @@ export const useApp = create<AppState>((set, get) => ({
 
   addBatchFolder: async (dir) => {
     try {
-      const paths = await invoke<string[]>("list_videos", { dir });
-      if (paths.length === 0) {
+      const entries = await invoke<{ path: string; modifiedSecs: number }[]>("list_videos", { dir });
+      if (entries.length === 0) {
         set({ error: "No video files found in that folder" });
         return;
       }
-      get().addBatchPaths(paths);
+      // OBS dumps every recording session into the same one folder forever
+      // (a real user report - "I have one folder for all recordings"), so
+      // this almost always spans more than one day after the first session.
+      // Queuing everything blindly every time defeats "just today's clips" -
+      // only skip the day-picker when there's genuinely nothing to pick
+      // between.
+      const distinctDays = new Set(entries.map((e) => localDateKey(e.modifiedSecs * 1000)));
+      if (distinctDays.size <= 1) {
+        get().addBatchPaths(entries.map((e) => e.path));
+      } else {
+        set({ batchFolderPending: { dir, entries } });
+      }
     } catch (e) {
       set({ error: String(e) });
     }
   },
+
+  confirmBatchFolderDates: (dateKeys) => {
+    const pending = get().batchFolderPending;
+    if (!pending) return;
+    const wanted = new Set(dateKeys);
+    const paths = pending.entries
+      .filter((e) => wanted.has(localDateKey(e.modifiedSecs * 1000)))
+      .map((e) => e.path);
+    get().addBatchPaths(paths);
+    set({ batchFolderPending: null });
+  },
+
+  cancelBatchFolderPending: () => set({ batchFolderPending: null }),
 
   startWatchFolder: async (folder) => {
     try {

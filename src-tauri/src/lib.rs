@@ -44,21 +44,40 @@ fn detect_encoders() -> Vec<String> {
     encoders::available()
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoFileEntry {
+    path: String,
+    /// Last-modified time, Unix seconds - lets the frontend group a single
+    /// OBS output folder (everything from every session lands in the one
+    /// place, per a real user report) by calendar day, e.g. "just today's
+    /// clips", without needing separate folders per day.
+    modified_secs: i64,
+}
+
 #[tauri::command]
-fn list_videos(dir: String) -> Result<Vec<String>, String> {
+fn list_videos(dir: String) -> Result<Vec<VideoFileEntry>, String> {
     const EXTS: [&str; 8] = ["mp4", "mkv", "mov", "webm", "avi", "flv", "ts", "m4v"];
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<VideoFileEntry> = Vec::new();
     for entry in std::fs::read_dir(&dir).map_err(|e| format!("Could not read folder: {e}"))? {
-        let path = entry.map_err(|e| e.to_string())?.path();
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
         if path.is_file() {
             if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                 if EXTS.contains(&ext.to_lowercase().as_str()) {
-                    out.push(path.to_string_lossy().to_string());
+                    let modified_secs = entry
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0);
+                    out.push(VideoFileEntry { path: path.to_string_lossy().to_string(), modified_secs });
                 }
             }
         }
     }
-    out.sort();
+    out.sort_by(|a, b| a.modified_secs.cmp(&b.modified_secs).then_with(|| a.path.cmp(&b.path)));
     Ok(out)
 }
 

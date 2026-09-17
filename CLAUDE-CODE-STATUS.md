@@ -5,6 +5,17 @@ Plain-language write-up of what's changed recently and where things stand. Curre
 v0.2.10 draft release described further down — that release note is kept as-is since it's still an
 accurate record of what shipped in it, not because it's the latest state.
 
+**2026-09-17 — new feature from live testing: "Add folder" can now filter by day.** User's own
+setup: OBS writes every recording session into one folder forever, no per-day subfolders, so "Add
+folder" was always queuing the entire history of that folder, not just what was just recorded.
+`list_videos` (the backend command behind it) now also returns each file's modified time; when a
+picked folder's videos span more than one calendar day (the normal case after the first session),
+BatchScreen shows a day picker (`FolderDatePicker`) - "Today (12)", "Yesterday (8)", etc., grouped
+by the viewer's own local day boundaries, most-recent day pre-selected - before actually queuing
+anything. A folder that's genuinely all one day (the previous common case, e.g. a dedicated
+highlights subfolder) still queues immediately with no extra step, so this doesn't add friction to
+that existing flow. tsc, cargo check, and the full test suite (97 tests) clean.
+
 **2026-09-17 — real bug from live testing: transcribing even a single short clip could bog down the
 whole PC.** User report: "running a transcribe almost killed my PC... other processes stopped."
 Traced it to CPU scheduling, not memory - `sidecar::command()`/`command_in()` (the one shared helper

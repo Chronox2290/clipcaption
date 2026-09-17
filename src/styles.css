@@ -2131,6 +2131,42 @@ kbd {
   justify-content: center;
 }
 
+/* Shown after "Add folder" when that folder spans more than one calendar
+   day - OBS dumps every session into the same folder forever, so this is
+   the normal case, not an edge case. */
+.folder-date-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--bg1);
+}
+.folder-date-picker-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.folder-date-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.folder-date-list .check-row {
+  justify-content: space-between;
+}
+.folder-date-list .check-row > span:nth-child(2) {
+  margin-right: auto;
+}
+.folder-date-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* Structured ghost rows for the empty batch queue - replaces one big 400px
    dashed void with rows that already look like what the list becomes, so
    the empty state teaches the queue's own anatomy instead of just saying
