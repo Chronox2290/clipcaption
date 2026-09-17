@@ -154,7 +154,7 @@ let pendingUpdate: any = null;
  * different questions ("how does the app look" vs "how do my captions
  * look"). See src/styles.css's [data-theme] blocks for what each actually
  * changes. */
-export type AppTheme = "precision" | "warm" | "gamer";
+export type AppTheme = "precision" | "warm" | "gamer" | "sunset";
 
 /** Matches src-tauri/src/analyze.rs's Genre enum (serde rename_all =
  * "lowercase") exactly - passed straight through to the analyze_highlights
@@ -878,7 +878,7 @@ async function restoreSession(
 export const useApp = create<AppState>((set, get) => ({
   theme: (() => {
     const v = localStorage.getItem("cc.theme");
-    return v === "warm" || v === "precision" ? v : "gamer";
+    return v === "warm" || v === "precision" || v === "sunset" ? v : "gamer";
   })(),
   setTheme: (t) => {
     localStorage.setItem("cc.theme", t);

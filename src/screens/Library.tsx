@@ -13,6 +13,7 @@ const APP_THEMES: { id: AppTheme; name: string; blurb: string; a: string; b: str
   { id: "precision", name: "Precision", blurb: "Dense, cool, restrained — Resolve/Premiere-adjacent.", a: "#7c5cff", b: "#2ee6ff" },
   { id: "warm", name: "Creator warm", blurb: "Roomier, warmer, fully rounded — Descript/CapCut-adjacent.", a: "#9b7bff", b: "#3ce6c2" },
   { id: "gamer", name: "High-energy", blurb: "Gradient glow, sharper actions — Discord/RGB-gear-adjacent.", a: "#8b5cf6", b: "#22d3ee" },
+  { id: "sunset", name: "Sunset", blurb: "Warm orange into gold — genuinely different from the other three, not another shade of violet/cyan.", a: "#ff6b35", b: "#ffc93c" },
 ];
 
 /** One recents-grid card. Its own component (not inlined in the map) so the
