@@ -88,7 +88,7 @@ export async function pickProjectSavePath(defaultName: string): Promise<string |
   const { save } = await import("@tauri-apps/plugin-dialog");
   const res = await save({
     defaultPath: defaultName,
-    filters: [{ name: "ClipCaption project", extensions: ["ccproj"] }],
+    filters: [{ name: "Substrike project", extensions: ["ccproj"] }],
   });
   return res ?? null;
 }
@@ -98,7 +98,7 @@ export async function pickProjectOpenPath(): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const res = await open({
     multiple: false,
-    filters: [{ name: "ClipCaption project", extensions: ["ccproj"] }],
+    filters: [{ name: "Substrike project", extensions: ["ccproj"] }],
   });
   return typeof res === "string" ? res : null;
 }
@@ -111,7 +111,7 @@ export async function pickProjectOpenPaths(): Promise<string[]> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const res = await open({
     multiple: true,
-    filters: [{ name: "ClipCaption project", extensions: ["ccproj"] }],
+    filters: [{ name: "Substrike project", extensions: ["ccproj"] }],
   });
   if (Array.isArray(res)) return res;
   return typeof res === "string" ? [res] : [];
@@ -125,7 +125,7 @@ export async function pickStyleSavePath(defaultName: string): Promise<string | n
   const { save } = await import("@tauri-apps/plugin-dialog");
   const res = await save({
     defaultPath: defaultName,
-    filters: [{ name: "ClipCaption style", extensions: ["ccstyle"] }],
+    filters: [{ name: "Substrike style", extensions: ["ccstyle"] }],
   });
   return res ?? null;
 }
@@ -135,7 +135,7 @@ export async function pickStyleOpenPath(): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const res = await open({
     multiple: false,
-    filters: [{ name: "ClipCaption style", extensions: ["ccstyle"] }],
+    filters: [{ name: "Substrike style", extensions: ["ccstyle"] }],
   });
   return typeof res === "string" ? res : null;
 }

@@ -1,9 +1,43 @@
-# ClipCaption — status summary
+# Substrike — status summary
 
 Plain-language write-up of what's changed recently and where things stand. Current as of
 **2026-09-17**. Everything below "New since v0.2.10" was built in one long session after the
 v0.2.10 draft release described further down — that release note is kept as-is since it's still an
 accurate record of what shipped in it, not because it's the latest state.
+
+**2026-09-17 — rename executed, pushed, and crosschecked by two independent AIs.** Everything from
+today's earlier entries (below) is now committed and pushed to `origin/master` (3 commits). The
+Substrike rename was then executed via `delegate codex --edit` (a clean, scoped, 26-file mechanical
+pass over display strings/docs, deliberately leaving `package.json`/`Cargo.toml`'s internal
+`clipcaption` names and the GitHub repo slug untouched), independently verified by Claude
+(`tsc --noEmit` + `cargo check` both clean, zero remaining case-sensitive `ClipCaption` hits) and by
+a second Grok pass reading the actual working tree (first attempt came back empty/lacked shell
+access; retried with an explicit self-contained prompt and it succeeded). Real findings from that
+crosscheck, all acted on:
+- **The "CC" (ClipCaption's initials) monogram was still the actual app icon/taskbar icon/installer
+  icon across every size and format**, plus the in-app logo badge - neither is a literal
+  "ClipCaption" string, so the text-only rename correctly didn't touch them. Found by actually
+  opening the running app in a browser (the Vite dev server survives outside the Tauri shell in a
+  limited "UI preview mode") and looking, not by reading code. In-app badge patched to a plain "S"
+  as a stopgap; the real icon files need finished logo art - see below.
+- **Changing `identifier` (`com.clipcaption.app` -> `com.substrike.app`) would have made every
+  previously-downloaded model look missing**, forcing a multi-GB redownload - the user hit this
+  directly. Fixed: `models::migrate_from_old_identifier` now runs once at startup and moves
+  everything from the old app_data_dir into the new one (generalized during the crosscheck, on
+  Grok's catch, to cover editor autosaves and the learned highlight-scoring bias too, not just the
+  models folder).
+- **Known, accepted for later**: the updater feed URL and GitHub repo slug are unchanged, so a real
+  future release would install Substrike side-by-side with an existing ClipCaption install on
+  Windows (separate registry identity/install dir/AppUserModelID) rather than replacing it. Not
+  fixed now - no real external installs exist on the old identifier yet - but recorded so it isn't
+  forgotten before an actual public release.
+- Full `cargo test --lib` and `tsc --noEmit` clean after every change in this entry.
+
+Also kicked off, still running as this is written: a full design/UX review of the app (three
+screens' worth of real screenshots given to Grok for a contrarian pass, a full `styles.css` +
+component audit given to Gemini, and Antigravity re-delegated to actually finish the Substrike logo
+this time, building on the T-crossbar idea rather than restarting). Results land in a follow-up
+entry once they're in and reviewed.
 
 **2026-09-17 — the open cloud-transcription question settled with real data: stay local.** Per the
 user's explicit go-ahead, ran clip11's real audio through three real cloud APIs (AssemblyAI,
@@ -64,7 +98,7 @@ in `CLAUDE-CODE-BRIEF.md`'s 2026-09-17 entry in more detail.
 
 **2026-09-17, later the same day — found where that "other session" actually lives, the name is
 now decided, and one more real accuracy bug got fixed.** The coordination gap above turned out to
-be a Claude Artifact ("ClipCaption Launch Plan"), not a linkable live session or anything in this
+be a Claude Artifact ("Substrike Launch Plan"), not a linkable live session or anything in this
 git repo — `.ai-handoff/`'s Antigravity/Grok logs were downstream work delegated FROM that doc, run
 locally against this same repo. Reading it directly (via this account's own artifact list) surfaced
 real information neither this session nor Codex's earlier diff review had:
@@ -75,11 +109,11 @@ real information neither this session nor Codex's earlier diff review had:
   on its own merits — this just explains why the swap happened.) ffmpeg's GPL-3.0 license also needs
   real source-distribution compliance before a commercial release, per the same audit — not yet done
   anywhere in this repo.
-- **The user confirmed the name directly: it's "Substrike."** Decided, not just in that plan.
-  Execution (productName/identifier/branding strings/README/installer) is still undone — see
-  `CLAUDE-CODE-BRIEF.md`'s rename section — and the plan's own status shows the real trademark/
-  domain conflict screen hasn't actually completed yet, so don't treat the name decision as
-  clearance to spend on assets before that's checked.
+- **The user confirmed the name directly: it's "Substrike"** and personally checked it isn't
+  trademarked. **Execution done the same day** — see the later "rename executed, pushed, and
+  crosschecked" entry below for what actually shipped and what real gaps came out of it (icon/logo
+  assets, the model-redownload fix, and a known-but-accepted install-identity risk for a future
+  real release).
 - **The same plan's speaker-diarization investigation (via Codex) surfaced a genuine correctness
   bug, verified and fixed today**: `diarize::speaker_for_span` assigned each transcript segment to
   whichever single diarized interval overlapped it most, instead of summing overlap PER SPEAKER
@@ -451,7 +485,7 @@ never composites to the screen this environment can see, and swapping the instal
 testing was correctly blocked by a safety classifier since it meant modifying an installed app's
 binary). Needs a real test on the user's end before being called fully closed.
 
-## What ClipCaption is
+## What Substrike is
 
 A Windows desktop app that auto-captions and compresses game clips — built for recording co-op
 games with friends over Discord proximity chat. Runs entirely offline: no cloud, no subscription,

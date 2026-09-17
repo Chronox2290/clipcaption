@@ -1,4 +1,4 @@
-﻿# Cuts a new ClipCaption release: bumps the version everywhere it needs to
+﻿# Cuts a new Substrike release: bumps the version everywhere it needs to
 # match, commits, tags, and pushes - the tag push is what makes GitHub Actions
 # (.github/workflows/release.yml) build the signed installer and updater
 # manifest. Run via RELEASE.cmd, or directly:

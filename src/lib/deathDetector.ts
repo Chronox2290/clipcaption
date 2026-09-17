@@ -3,7 +3,7 @@ import type { Highlight, Segment } from "../types";
 /** EXPERIMENTAL: scans the transcript for phrases people commonly say right
  * after dying in a game, across genres (not any one game's specific death
  * message - this reads what was actually SAID, not on-screen UI text, since
- * ClipCaption has no screen-reading capability).
+ * Substrike has no screen-reading capability).
  *
  * Still not validated against real labeled death moments the way the
  * loudness-based highlight scan (analyze.rs) was - there's no reference

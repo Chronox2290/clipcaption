@@ -1,4 +1,4 @@
-# ClipCaption — what to tackle now
+# Substrike — what to tackle now
 
 Consolidated brief pulling together everything decided across a long planning session — supersedes
 the piecemeal messages sent earlier. Organized so the actual priority order is unambiguous.
@@ -482,7 +482,7 @@ for the human collaborator, not something to change unilaterally — but recorde
 getting re-chased without anyone having actually decided to keep it.
 
 **Coordination gap above — now resolved by the user directly: the name is "Substrike."** Found the
-actual source of that other session's work: a "ClipCaption Launch Plan" doc (a Claude Artifact, not
+actual source of that other session's work: a "Substrike Launch Plan" doc (a Claude Artifact, not
 a repo file or a linkable live session — see CLAUDE-CODE-STATUS.md's 2026-09-17 entry for how that
 was tracked down) built around a full launch plan, not just a name pick. Two things from that plan
 matter more than the rename itself and are recorded here so they aren't lost between sessions again:
@@ -543,7 +543,7 @@ Intelligence" highlight detection — kill-feed events, per-genre tuning, screen
 moment boundaries — is the actual technical bar to measure against, not just their marketing copy):**
 - Sound-effect captions for accessibility — `[gunshot]`, `[footsteps approaching]` for non-speech
   game audio, not just what's said.
-- Multi-POV friend-sync — if a friend also has ClipCaption running during the same session, detect
+- Multi-POV friend-sync — if a friend also has Substrike running during the same session, detect
   the same moment across both recordings and offer a multi-angle cut.
 - Local AI title/hook/hashtag generation from the transcript, using the same local model already
   doing cleanup — free and private, unlike competitors' paid cloud metadata add-ons.
@@ -575,7 +575,7 @@ moment boundaries — is the actual technical bar to measure against, not just t
 Instagram Reel a car/cosplay account posted — the styling was interesting, but to be explicit about
 scope: this is NOT a request to switch the word-synced dialogue captions to single-word-at-a-time
 display. It's a second, opt-in layer for short reaction/decorative text (CapCut-sticker style),
-alongside the existing captions, not replacing them. ClipCaption already supports manual caption
+alongside the existing captions, not replacing them. Substrike already supports manual caption
 insertion; this is the same underlying idea — free placement, own styling — with different
 rendering. Visual spec, confirmed across 5 screenshots including two in Korean:
   - Per-letter rainbow coloring: each letter cycles through a fixed 3-color palette
@@ -638,13 +638,45 @@ there.
 
 **2026-09-17: the user decided this directly — the name is "Substrike."** Supersedes this file's
 old "NoScopeCap, Vantavox, 360NoCap, nothing picked yet" framing and the separate cloud session's
-"ClipCaption Launch Plan" doc, which had already tracked it internally as locked as of 2026-09-16
+"Substrike Launch Plan" doc, which had already tracked it internally as locked as of 2026-09-16
 (see the coordination-gap entry above). **Trademark clearance also confirmed by the user directly,
 same day** — the "conflict screen hasn't completed" caveat this entry originally carried is
-resolved; no further trademark/domain check is being asked for here. The rename EXECUTION is still
-real, undone work, not yet started: `tauri.conf.json`'s `productName` and `identifier`, every
-in-app branding string, the README, installer artifacts, and possibly the GitHub repo name all need
-updating together. Still worth a look, not a blocker: Grok's independent, unprompted branding
+resolved; no further trademark/domain check is being asked for here. **Rename execution done, same
+day, via a Codex `--edit` mechanical pass, independently crosschecked (Claude + Grok, separately) -
+see the "later the same day" entry in CLAUDE-CODE-STATUS.md for the full list.** `tauri.conf.json`'s
+`productName`/`identifier`/window title, every in-app branding string, the README, and
+`.github/workflows/release.yml`'s release-name are all updated; internal package/crate names
+(`clipcaption`/`clipcaption_lib`) and the GitHub repo slug were deliberately left alone, a separate
+decision not made here. Still worth a look, not a blocker: Grok's independent, unprompted branding
 critique (this session, 2026-09-17, before the user's decision came in) called "Substrike" itself
 "Counter-Strike cosplay" and "Valve-adjacent" — doesn't change the decision, but may be worth
 weighing when the tagline/visual identity around the name gets finalized.
+
+**Two real gaps the mechanical text-rename couldn't catch, since neither is a literal "ClipCaption"
+string — found by actually looking at the running app, not just grepping:**
+- The app's real icon files (`src-tauri/icons/*.png/.ico/.icns`, every size, the Windows Store tile
+  set) and the in-app logo badge both still showed a "CC" monogram (ClipCaption's initials). The
+  in-app badge is patched to a plain "S" as a stopgap. The actual icon files are unchanged — that
+  needs real logo design work, in progress (see below), not a text fix.
+- Changing `identifier` moves Tauri's `app_data_dir` (`com.clipcaption.app` -> `com.substrike.app`),
+  which would have made every previously-downloaded model (multi-GB) look "missing," forcing a
+  re-download. Fixed with a one-time startup migration (`models::migrate_from_old_identifier`) that
+  moves everything from the old app_data_dir into the new one the first time the renamed app runs -
+  covers models, editor autosaves, and the learned highlight-scoring bias, not just the models
+  folder Grok's crosscheck first found this scoped to. Known small gap, accepted: WebView2's own
+  localStorage (theme/recent-files prefs) isn't covered, and isn't worth the risk of touching a
+  live browser profile for what it saves.
+- **Known, accepted risk for later, not fixed now**: Grok's crosscheck also flagged that the
+  updater feed URL and GitHub repo slug are unchanged, so on Windows the identifier/productName
+  change means a real future release would install Substrike side-by-side with an existing
+  ClipCaption install (different registry product identity, different install directory, different
+  AppUserModelID) rather than replacing it. Not acted on because there are no real external
+  installs on the old identifier yet - genuinely a non-issue today - but worth remembering before
+  the actual first public release, not after.
+
+**Real, unfinished branding work, separate from the mechanical rename above**: the "Substrike
+Wordmark" logo concept already in `.ai-handoff/`/the launch-plan doc (violet/cyan diagonal-slash
+wordmark) was already internally critiqued as a generic AI-logo-template and redirected toward a
+"T-crossbar-as-caption-bar" idea that never actually got finished (two follow-up attempts came back
+empty). Re-delegated to Antigravity today to actually finish it and produce real icon assets - see
+CLAUDE-CODE-STATUS.md for the outcome once it lands.

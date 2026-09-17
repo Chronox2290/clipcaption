@@ -157,6 +157,62 @@ pub fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// One-time migration for the 2026-09-17 rename (ClipCaption -> Substrike):
+/// Tauri's app_data_dir is keyed by `identifier` (`com.clipcaption.app` ->
+/// `com.substrike.app`), so EVERYTHING that used to live under the old
+/// app_data_dir - not just the multi-GB downloaded models (whisper's ggml
+/// files, wav2vec2, polish.rs's llama model), but also per-video editor
+/// autosaves (`sessions/`), the learned highlight-scoring bias
+/// (`highlight_feedback.json`), and the phrase-correction dictionary - would
+/// otherwise look to have vanished under the new identifier even though it's
+/// all still sitting on disk under the old one. Called once at startup (see
+/// lib.rs's `setup`) so nobody has to notice this happened or manually move
+/// anything. Recurses through the whole old app_data_dir rather than
+/// special-casing `models/` alone, so it doesn't need updating every time a
+/// new kind of per-user file is added here.
+///
+/// Best-effort and additive only: moves a file only when the new location
+/// doesn't already have one at that same relative path (never overwrites),
+/// and any failure here (permissions, the old install simply never existed)
+/// just means things look fresh, exactly like a genuinely new install -
+/// never a hard error that blocks startup. Does NOT cover WebView2's own
+/// localStorage (a separate per-AppUserModelID browser profile, not under
+/// app_data_dir) - a real, small, known gap (loses recent-files/theme
+/// prefs), accepted for the same reason the identifier change itself was:
+/// there are no real external installs on the old identifier yet.
+pub fn migrate_from_old_identifier(app: &AppHandle) {
+    let Ok(new_root) = app.path().app_data_dir() else { return };
+    let Some(app_data_parent) = new_root.parent() else { return };
+    let old_root = app_data_parent.join("com.clipcaption.app");
+    if !old_root.is_dir() {
+        return;
+    }
+    let _ = std::fs::create_dir_all(&new_root);
+    migrate_dir_contents(&old_root, &new_root);
+}
+
+/// Moves every entry in `src_dir` into the matching relative path under
+/// `dest_dir`, recursing into subdirectories, skipping anything that already
+/// exists at the destination. All failures are swallowed by design - see
+/// migrate_from_old_identifier's own doc comment for why.
+fn migrate_dir_contents(src_dir: &std::path::Path, dest_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(src_dir) else { return };
+    for entry in entries.flatten() {
+        let src = entry.path();
+        let Some(name) = src.file_name() else { continue };
+        let dest = dest_dir.join(name);
+        if dest.exists() {
+            continue; // already migrated, or fresh data already landed here
+        }
+        if src.is_dir() {
+            let _ = std::fs::create_dir_all(&dest);
+            migrate_dir_contents(&src, &dest);
+        } else {
+            let _ = std::fs::rename(&src, &dest);
+        }
+    }
+}
+
 pub fn model_path(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     let spec = MODELS
         .iter()

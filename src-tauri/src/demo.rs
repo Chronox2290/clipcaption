@@ -1,7 +1,7 @@
 //! One-click "before/after" demo export: renders the same clip twice — once
 //! raw, once captioned+compressed exactly as a normal export would — and
 //! puts them side by side with BEFORE/AFTER labels, so showing off what
-//! ClipCaption does is one button instead of screen-recording two separate
+//! Substrike does is one button instead of screen-recording two separate
 //! exports and editing them together by hand.
 //!
 //! Reuses export::run_inner for both halves (same reasoning as montage.rs:

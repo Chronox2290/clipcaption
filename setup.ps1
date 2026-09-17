@@ -1,11 +1,11 @@
-﻿# ClipCaption one-shot setup: Rust + VS Build Tools + npm deps, then launch.
+﻿# Substrike one-shot setup: Rust + VS Build Tools + npm deps, then launch.
 # Run via SETUP.cmd (double-click) - logs everything to setup-log.txt.
 
 $ErrorActionPreference = "Continue"
 Set-Location $PSScriptRoot
 Start-Transcript -Path (Join-Path $PSScriptRoot "setup-log.txt") -Force
 
-Write-Host "=== ClipCaption setup ==="
+Write-Host "=== Substrike setup ==="
 
 # ---------- 1. Rust toolchain ----------
 $cargoBin = "$env:USERPROFILE\.cargo\bin"
@@ -52,7 +52,7 @@ Write-Host "[3/3] Installing npm dependencies..."
 npm.cmd install
 
 Write-Host ""
-Write-Host "=== Setup complete. Launching ClipCaption ==="
+Write-Host "=== Setup complete. Launching Substrike ==="
 Write-Host "First launch compiles the Rust side - expect several minutes of 'Compiling ...' lines."
 Stop-Transcript
 

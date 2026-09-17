@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 112" width="540" height="112" fill="none">
+  <defs>
+    <linearGradient id="wmVioletGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stopColor="#9B82FF"/>
+      <stop offset="100%" stopColor="#7C5CFF"/>
+    </linearGradient>
+    <filter id="wmGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Background ground plate (subtle obsidian glass) -->
+  <rect width="540" height="112" rx="14" fill="#0B0D12"/>
+  <rect x="0.5" y="0.5" width="539" height="111" rx="13.5" stroke="#222736" stroke-width="1"/>
+
+  <!-- Letter 1: S -->
+  <path d="M 76 39 C 76 31 69 28 59 28 C 48 28 41 33 41 41 C 41 51 51 54 62 57 C 74 60 78 65 78 72 C 78 81 70 84 59 84 C 47 84 40 79 40 70 L 50 70 C 50 74 54 76 59 76 C 64 76 68 74 68 71 C 68 66 62 64 53 61 C 43 58 31 54 31 42 C 31 30 42 21 59 21 C 74 21 86 29 86 40 Z" fill="url(#wmVioletGrad)"/>
+
+  <!-- Letter 2: U -->
+  <path d="M 94 28 L 105 28 L 105 68 C 105 73 108 76 113 76 C 118 76 121 73 121 68 L 121 28 L 132 28 L 132 68 C 132 79 124 84 113 84 C 102 84 94 79 94 68 Z" fill="url(#wmVioletGrad)"/>
+
+  <!-- Letter 3: B -->
+  <path d="M 146 28 L 172 28 C 181 28 186 33 186 40 C 186 45 182 49 176 51 C 183 53 187 58 187 65 C 187 74 180 84 170 84 L 146 84 Z M 157 36 L 157 50 L 169 50 C 173 50 176 48 176 43 C 176 39 173 36 169 36 Z M 157 58 L 157 76 L 170 76 C 174 76 177 73 177 67 C 177 62 174 58 170 58 Z" fill="url(#wmVioletGrad)"/>
+
+  <!-- Letter 4: S -->
+  <path d="M 236 39 C 236 31 229 28 219 28 C 208 28 201 33 201 41 C 201 51 211 54 222 57 C 234 60 238 65 238 72 C 238 81 230 84 219 84 C 207 84 200 79 200 70 L 210 70 C 210 74 214 76 219 76 C 224 76 228 74 228 71 C 228 66 222 64 213 61 C 203 58 191 54 191 42 C 191 30 202 21 219 21 C 234 21 246 29 246 40 Z" fill="url(#wmVioletGrad)"/>
+
+  <!-- ======================================================== -->
+  <!-- Letter 5: T (THE CAPTION BAR CENTERPIECE OF SUBSTRIKE)  -->
+  <!-- ======================================================== -->
+  <g id="t-caption-mark">
+    <!-- T-Stem -->
+    <path d="M 274 46 L 286 46 L 286 80 A 4 4 0 0 1 282 84 L 278 84 A 4 4 0 0 1 274 80 Z" fill="url(#wmVioletGrad)"/>
+
+    <!-- T-Crossbar: Caption / Subtitle Plate -->
+    <rect x="248" y="24" width="64" height="22" rx="7" fill="url(#wmVioletGrad)"/>
+
+    <!-- Caption Track (Left word block in dark obsidian) -->
+    <rect x="254" y="30" width="25" height="10" rx="4" fill="#0B0D12"/>
+
+    <!-- Active Karaoke Word Highlight (Cyber Cyan #2EE6FF) -->
+    <rect x="283" y="30" width="23" height="10" rx="4" fill="#2EE6FF" filter="url(#wmGlow)"/>
+  </g>
+
+  <!-- Letter 6: R -->
+  <path d="M 324 28 L 350 28 C 359 28 364 33 364 42 C 364 49 359 54 351 55 L 364 84 L 351 84 L 340 57 L 335 57 L 335 84 L 324 84 Z M 335 36 L 335 49 L 348 49 C 352 49 354 46 354 42 C 354 38 352 36 348 36 Z" fill="url(#wmVioletGrad)"/>
+
+  <!-- Letter 7: I -->
+  <rect x="376" y="28" width="11" height="56" rx="3" fill="url(#wmVioletGrad)"/>
+
+  <!-- Letter 8: K -->
+  <path d="M 401 28 L 412 28 L 412 52 L 431 28 L 445 28 L 424 53 L 446 84 L 432 84 L 415 58 L 412 62 L 412 84 L 401 84 Z" fill="url(#wmVioletGrad)"/>
+
+  <!-- Letter 9: E -->
+  <path d="M 457 28 L 493 28 L 493 37 L 468 37 L 468 51 L 489 51 L 489 60 L 468 60 L 468 75 L 494 75 L 494 84 L 457 84 Z" fill="url(#wmVioletGrad)"/>
+</svg>

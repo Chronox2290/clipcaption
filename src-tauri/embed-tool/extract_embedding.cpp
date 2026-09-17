@@ -1,5 +1,5 @@
 // extract-embedding: a small standalone tool built specifically for
-// ClipCaption's custom speaker-names feature.
+// Substrike's custom speaker-names feature.
 //
 // sherpa-onnx-offline-speaker-diarization (the sidecar diarize.rs already
 // uses) only ever prints a numeric label per detected speaker (speaker_00,
@@ -7,7 +7,7 @@
 // clustering on every single run, with no guarantee "speaker 0" means the
 // same real person across two separate runs (e.g. the live preview's
 // transcription vs. a highlight clip's own independent re-transcription
-// during export). To let a user permanently name a voice, ClipCaption needs
+// during export). To let a user permanently name a voice, Substrike needs
 // an actual voice fingerprint it can compare across runs - that's what this
 // tool produces.
 //
@@ -15,7 +15,7 @@
 // microphone-based speaker-identification tools), but it does expose the
 // building blocks via its public C API (SpeakerEmbeddingExtractor) that the
 // diarization tool itself is built on, using the exact same embedding model
-// ClipCaption already bundles (sherpa-embedding.onnx / NeMo titanet). This
+// Substrike already bundles (sherpa-embedding.onnx / NeMo titanet). This
 // tool is a thin wrapper around that API: read a WAV (optionally just one or
 // more [start, end) time slices of it, concatenated), run it through the
 // embedding model, print the resulting vector as a JSON array on stdout.

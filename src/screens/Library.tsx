@@ -31,8 +31,24 @@ export default function Library() {
     <div className="library">
       <header className="lib-header">
         <div className="logo">
-          <span className="logo-mark">CC</span>
-          <span className="logo-text">ClipCaption</span>
+          <span className="logo-mark" aria-label="Substrike">
+            <svg viewBox="0 0 34 34" width="34" height="34" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="badgeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#8E6EFF" />
+                  <stop offset="100%" stopColor="#623DE6" />
+                </linearGradient>
+              </defs>
+              <rect width="34" height="34" rx="10" fill="url(#badgeGrad)" />
+              <path
+                d="M 14 13 L 20 13 L 20 25 A 2 2 0 0 1 18 27 L 16 27 A 2 2 0 0 1 14 25 Z"
+                fill="#0B0D12"
+              />
+              <rect x="6" y="7" width="22" height="6" rx="2" fill="#0B0D12" />
+              <rect x="17" y="9" width="8" height="2" rx="1" fill="#2EE6FF" />
+            </svg>
+          </span>
+          <span className="logo-text">Substrike</span>
         </div>
         <span className="tagline">local captions for game clips — no uploads, no limits</span>
         {isTauri && (

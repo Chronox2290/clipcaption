@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 
-echo Fetching sidecar tools ClipCaption needs (ffmpeg, whisper-cli, and the
+echo Fetching sidecar tools Substrike needs (ffmpeg, whisper-cli, and the
 echo speaker-diarization binary + models) into src-tauri\binaries. Only
 echo missing ones are downloaded - already-installed ones are skipped.
 echo.

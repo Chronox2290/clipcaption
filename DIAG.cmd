@@ -2,10 +2,10 @@
 cd /d "%~dp0"
 set BIN=src-tauri\binaries\whisper-cli-x86_64-pc-windows-msvc.exe
 set FF=src-tauri\binaries\ffmpeg-x86_64-pc-windows-msvc.exe
-set MODEL=%APPDATA%\com.clipcaption.app\models\ggml-small.en.bin
+set MODEL=%APPDATA%\com.substrike.app\models\ggml-small.en.bin
 set LOG=%~dp0whisper-diag.txt
 
-echo === ClipCaption whisper diagnostic === > "%LOG%"
+echo === Substrike whisper diagnostic === > "%LOG%"
 echo BIN=%BIN% >> "%LOG%"
 echo MODEL=%MODEL% >> "%LOG%"
 if exist "%MODEL%" (echo model file: EXISTS >> "%LOG%") else (echo model file: MISSING >> "%LOG%")

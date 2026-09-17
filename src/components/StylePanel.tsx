@@ -33,7 +33,7 @@ export default function StylePanel() {
 
   return (
     <div className="style-panel">
-      {/* App theme changes how ClipCaption ITSELF looks - the editor chrome,
+      {/* App theme changes how Substrike ITSELF looks - the editor chrome,
           buttons, panels. Deliberately separate from the caption preset
           below, which is how captions look in the exported VIDEO - the two
           answer different questions and merging them into one picker would

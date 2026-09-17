@@ -136,7 +136,7 @@ pub struct Server {
 impl Drop for Server {
     fn drop(&mut self) {
         // Best-effort: if this fails the OS reclaims the process when
-        // ClipCaption itself exits, same as every other sidecar here.
+        // Substrike itself exits, same as every other sidecar here.
         let _ = self.child.kill();
     }
 }

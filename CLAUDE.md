@@ -1,4 +1,4 @@
-# ClipCaption — standing project context
+# Substrike — standing project context
 
 Read this at the start of every session, before picking up work. It doesn't change often; the
 specific current task list lives in `CLAUDE-CODE-BRIEF.md` and your own running log is

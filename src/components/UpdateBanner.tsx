@@ -17,7 +17,7 @@ export default function UpdateBanner() {
     return (
       <div className="toast toast-update" role="status">
         <span>
-          ⬆ ClipCaption {info.version} is available.
+          ⬆ Substrike {info.version} is available.
           {info.body ? ` ${info.body}` : ""}
         </span>
         <button className="btn btn-primary btn-small" onClick={() => void installUpdate()}>

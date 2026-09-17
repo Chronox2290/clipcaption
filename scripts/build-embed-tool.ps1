@@ -1,5 +1,5 @@
 # Builds src-tauri/embed-tool's extract-embedding.exe: a small custom sidecar
-# that ClipCaption's speaker-names feature needs to work correctly, and which
+# that Substrike's speaker-names feature needs to work correctly, and which
 # nobody publishes prebuilt (see src-tauri/embed-tool/extract_embedding.cpp's
 # top comment for what it does and why it has to be built from source here
 # instead of just downloaded like the other sidecars).

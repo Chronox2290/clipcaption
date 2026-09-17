@@ -1,4 +1,4 @@
-# ClipCaption
+# Substrike
 
 Local auto-captions + compression for game clips. Drop in an OBS recording, get
 TikTok-style animated captions (word-by-word highlight), edit the transcript,
@@ -35,7 +35,7 @@ Double-click **`BUILD-EXE.cmd`**, or run it yourself:
 npm run tauri build
 ```
 
-Output: `src-tauri/target/release/bundle/nsis/ClipCaption_0.1.0_x64-setup.exe`
+Output: `src-tauri/target/release/bundle/nsis/Substrike_0.1.0_x64-setup.exe`
 
 This is a full optimized release build (LTO + size optimization), so it's
 much slower than `tauri dev` — expect several minutes. The result is a real
@@ -131,7 +131,7 @@ a **draft** release. Open the Releases page and click **Publish** when you're
 happy with it — that's the deliberate go-live step; nothing auto-updates
 before that.
 
-Already-installed copies of ClipCaption check for updates ~2.5s after launch
+Already-installed copies of Substrike check for updates ~2.5s after launch
 (quietly — no banner if you're current) and via the "Check for updates"
 button on the home screen. Finding one shows a banner with **Update &
 restart**, which downloads, verifies the signature against the public key

@@ -344,6 +344,10 @@ pub fn run() {
             // make sure app dirs exist early
             let _ = app.path().app_data_dir().map(|d| std::fs::create_dir_all(d));
             let _ = app.path().app_cache_dir().map(|d| std::fs::create_dir_all(d));
+            // One-time: recover models downloaded under the pre-rename
+            // identifier (com.clipcaption.app) instead of asking for a
+            // multi-GB re-download - see models::migrate_from_old_identifier.
+            models::migrate_from_old_identifier(&app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -378,5 +382,5 @@ pub fn run() {
             align_transcript
         ])
         .run(tauri::generate_context!())
-        .expect("error while running ClipCaption");
+        .expect("error while running Substrike");
 }

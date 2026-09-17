@@ -1,4 +1,4 @@
-//! Word-level forced alignment: given audio and text ClipCaption already
+//! Word-level forced alignment: given audio and text Substrike already
 //! believes is correct (freshly transcribed or user-edited), finds precise
 //! per-word timestamps with a wav2vec2 CTC acoustic model + a forced-align
 //! Viterbi decode, instead of trusting whisper's free-decode DTW timing.

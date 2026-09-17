@@ -71,7 +71,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: "ClipCaption ${{ github.ref_name }}"
+          releaseName: "Substrike ${{ github.ref_name }}"
           releaseBody: |
             See clipcaption/05-build-log.md (in the Mini Programming Fun project) for what changed.
           # Left as a draft on purpose: the workflow builds and uploads

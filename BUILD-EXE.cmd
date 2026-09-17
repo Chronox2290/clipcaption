@@ -1,7 +1,7 @@
 @echo off
 cd /d "%~dp0"
 
-echo Building a standalone ClipCaption installer on this PC.
+echo Building a standalone Substrike installer on this PC.
 echo This is a full optimized release build, so it takes several minutes -
 echo much less if you've built before, since it reuses what it can.
 echo.
