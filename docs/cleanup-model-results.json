@@ -1,0 +1,596 @@
+{
+  "3b": {
+    "model": "src-tauri\\target\\debug\\binaries\\llama\\qwen2.5-3b-instruct-q4_k_m.gguf",
+    "ground_truth_words": 152,
+    "raw_words": 137,
+    "baseline_matched": 104,
+    "candidates": 27,
+    "results": [
+      {
+        "index": 7,
+        "original": "on",
+        "answer": "on top of",
+        "confidence": 0.5892469450529486,
+        "noop": false,
+        "match_delta": -1
+      },
+      {
+        "index": 10,
+        "original": "and",
+        "answer": "and we",
+        "confidence": 0.5192270966878495,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 35,
+        "original": "You're",
+        "answer": "You're",
+        "confidence": 0.7278717743801559,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 37,
+        "original": "\"Okay,",
+        "answer": "Okay",
+        "confidence": 0.5874750476634264,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 40,
+        "original": "the",
+        "answer": "the SAME",
+        "confidence": 0.6610146197711624,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 42,
+        "original": "me.\"",
+        "answer": "me too",
+        "confidence": 0.23853514392490846,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 55,
+        "original": "shit.",
+        "answer": "shit",
+        "confidence": 0.6373199892989557,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 59,
+        "original": "plane.",
+        "answer": "plane",
+        "confidence": 0.9742608667505214,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 64,
+        "original": "you're",
+        "answer": "you're\u2192you're\u2192you're",
+        "confidence": 0.20821031185596325,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 73,
+        "original": "and",
+        "answer": "and",
+        "confidence": 0.9934092758990842,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 89,
+        "original": "Alright,",
+        "answer": "Alright",
+        "confidence": 0.8400512929498521,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 90,
+        "original": "down",
+        "answer": "down",
+        "confidence": 0.9888930914560172,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 91,
+        "original": "below",
+        "answer": "below",
+        "confidence": 0.9882114533773456,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 92,
+        "original": "the",
+        "answer": "theirs",
+        "confidence": 0.5204784201290622,
+        "noop": false,
+        "match_delta": -1
+      },
+      {
+        "index": 93,
+        "original": "head,",
+        "answer": "head",
+        "confidence": 0.8934675450439927,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 97,
+        "original": "Y-y-you're",
+        "answer": "you're",
+        "confidence": 0.7962861017713313,
+        "noop": false,
+        "match_delta": 1
+      },
+      {
+        "index": 100,
+        "original": "thing.",
+        "answer": "this thing",
+        "confidence": 0.386672386606575,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 101,
+        "original": "Fuck",
+        "answer": "fuck",
+        "confidence": 0.8812630121261418,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 105,
+        "original": "you.",
+        "answer": "YOU",
+        "confidence": 0.5634084774525957,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 108,
+        "original": "you,",
+        "answer": "you",
+        "confidence": 0.9348293531414639,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 112,
+        "original": "I",
+        "answer": "I",
+        "confidence": 0.9999958276749297,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 115,
+        "original": "I",
+        "answer": "I",
+        "confidence": 0.9999908208849961,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 117,
+        "original": "you,",
+        "answer": "you",
+        "confidence": 0.9730220446085636,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 121,
+        "original": "you,",
+        "answer": "you",
+        "confidence": 0.9730220446085636,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 133,
+        "original": "God.",
+        "answer": "SAME",
+        "confidence": 0.4741497436138298,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 134,
+        "original": "Oh,",
+        "answer": "Oh",
+        "confidence": 0.7816456607579929,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 135,
+        "original": "God.",
+        "answer": "SAME",
+        "confidence": 0.4741497436138298,
+        "noop": true,
+        "match_delta": 0
+      }
+    ],
+    "sweep": [
+      {
+        "threshold": 0,
+        "applied": 8,
+        "matched": 103,
+        "accuracy": 67.76315789473684,
+        "individually_harmful": 2
+      },
+      {
+        "threshold": 0.5,
+        "applied": 5,
+        "matched": 103,
+        "accuracy": 67.76315789473684,
+        "individually_harmful": 2
+      },
+      {
+        "threshold": 0.6,
+        "applied": 2,
+        "matched": 105,
+        "accuracy": 69.07894736842105,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.7,
+        "applied": 1,
+        "matched": 105,
+        "accuracy": 69.07894736842105,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.8,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.85,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.9,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.95,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.99,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 1.0,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      }
+    ]
+  },
+  "1.5b": {
+    "model": "scratch_align\\qwen2.5-1.5b-instruct-q4_k_m.gguf",
+    "ground_truth_words": 152,
+    "raw_words": 137,
+    "baseline_matched": 104,
+    "candidates": 27,
+    "results": [
+      {
+        "index": 7,
+        "original": "on",
+        "answer": "on this plate",
+        "confidence": 0.6012220351381218,
+        "noop": false,
+        "match_delta": -1
+      },
+      {
+        "index": 10,
+        "original": "and",
+        "answer": "Christian and I are going to stand on this plate and you go get it.",
+        "confidence": 0.3792553767276828,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 35,
+        "original": "You're",
+        "answer": "You're",
+        "confidence": 0.6463431641391728,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 37,
+        "original": "\"Okay,",
+        "answer": "Okay, \" this is the second me.",
+        "confidence": 0.3982132056610724,
+        "noop": false,
+        "match_delta": -1
+      },
+      {
+        "index": 40,
+        "original": "the",
+        "answer": "the\" second me",
+        "confidence": 0.2265553469601007,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 42,
+        "original": "me.\"",
+        "answer": "SAME",
+        "confidence": 0.2879172576448778,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 55,
+        "original": "shit.",
+        "answer": "shit",
+        "confidence": 0.34747178726482825,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 59,
+        "original": "plane.",
+        "answer": "plane",
+        "confidence": 0.6522363479319332,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 64,
+        "original": "you're",
+        "answer": "I know what you're about to do to me.",
+        "confidence": 0.3560537000939939,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 73,
+        "original": "and",
+        "answer": "and all that piss",
+        "confidence": 0.38868615319614336,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 89,
+        "original": "Alright,",
+        "answer": "Alright, down below the head, get the piss.",
+        "confidence": 0.46448720575948726,
+        "noop": false,
+        "match_delta": -1
+      },
+      {
+        "index": 90,
+        "original": "down",
+        "answer": "Alright, down below, get the piss.",
+        "confidence": 0.3240806137771631,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 91,
+        "original": "below",
+        "answer": "below the waist",
+        "confidence": 0.37068620069477654,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 92,
+        "original": "the",
+        "answer": "the head",
+        "confidence": 0.48551506195963284,
+        "noop": false,
+        "match_delta": -1
+      },
+      {
+        "index": 93,
+        "original": "head,",
+        "answer": "head",
+        "confidence": 0.28306286385613644,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 97,
+        "original": "Y-y-you're",
+        "answer": "you are",
+        "confidence": 0.3463810838550628,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 100,
+        "original": "thing.",
+        "answer": "You're in this \u00abgame.\u00bb",
+        "confidence": 0.44804952843879076,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 101,
+        "original": "Fuck",
+        "answer": "Fuck you.",
+        "confidence": 0.645704272402908,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 105,
+        "original": "you.",
+        "answer": "I hate you.",
+        "confidence": 0.4801601978825276,
+        "noop": false,
+        "match_delta": -3
+      },
+      {
+        "index": 108,
+        "original": "you,",
+        "answer": "YOU",
+        "confidence": 0.3370322996640859,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 112,
+        "original": "I",
+        "answer": "I love you.",
+        "confidence": 0.7230274667589942,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 115,
+        "original": "I",
+        "answer": "I love you, bro.",
+        "confidence": 0.7799832814477448,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 117,
+        "original": "you,",
+        "answer": "I love you, bro.",
+        "confidence": 0.41488201523322105,
+        "noop": false,
+        "match_delta": 1
+      },
+      {
+        "index": 121,
+        "original": "you,",
+        "answer": "I love you, bro.",
+        "confidence": 0.41488201523322105,
+        "noop": false,
+        "match_delta": 0
+      },
+      {
+        "index": 133,
+        "original": "God.",
+        "answer": "God",
+        "confidence": 0.9775992632272452,
+        "noop": true,
+        "match_delta": 0
+      },
+      {
+        "index": 134,
+        "original": "Oh,",
+        "answer": "Oh, God.",
+        "confidence": 0.5296909114825176,
+        "noop": false,
+        "match_delta": -1
+      },
+      {
+        "index": 135,
+        "original": "God.",
+        "answer": "God",
+        "confidence": 0.9775992632272452,
+        "noop": true,
+        "match_delta": 0
+      }
+    ],
+    "sweep": [
+      {
+        "threshold": 0,
+        "applied": 19,
+        "matched": 96,
+        "accuracy": 63.1578947368421,
+        "individually_harmful": 6
+      },
+      {
+        "threshold": 0.5,
+        "applied": 5,
+        "matched": 102,
+        "accuracy": 67.10526315789474,
+        "individually_harmful": 2
+      },
+      {
+        "threshold": 0.6,
+        "applied": 4,
+        "matched": 103,
+        "accuracy": 67.76315789473684,
+        "individually_harmful": 1
+      },
+      {
+        "threshold": 0.7,
+        "applied": 2,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.8,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.85,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.9,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.95,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 0.99,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      },
+      {
+        "threshold": 1.0,
+        "applied": 0,
+        "matched": 104,
+        "accuracy": 68.42105263157895,
+        "individually_harmful": 0
+      }
+    ]
+  }
+}

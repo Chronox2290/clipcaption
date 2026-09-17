@@ -5,8 +5,9 @@
 //! transcript at once - tried that first and it fell apart, mixing up word
 //! indices and inventing text (see 05-build-log.md). Instead it is shown
 //! exactly one flagged word in its sentence, marked in «guillemets», and
-//! asked what that one word most likely was. That is a task a 3B model
-//! answers reliably; rewriting a paragraph is not.
+//! asked what that one word most likely was. The 1.5B model can still
+//! over-expand its answer; confidence gating held those edits for review
+//! in the clip11 evaluation.
 //!
 //! Runs entirely offline via llama-server (bundled the same way whisper-cli
 //! and the sherpa-onnx tools are - see scripts/get-sidecars.ps1) with a small
@@ -25,24 +26,31 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Manager};
 
 use crate::jobs::{emit_done, emit_error, emit_progress, JobHandle};
 use crate::sidecar;
 
 const SUBDIR: &str = "llama";
-const MODEL_FILE: &str = "qwen2.5-3b-instruct-q4_k_m.gguf";
+const MODEL_FILE: &str = "qwen2.5-1.5b-instruct-q4_k_m.gguf";
 /// Real, confirmed failure mode this needed raising for: a background
 /// compile saturating every CPU core made a cold model load take longer
 /// than the original 30s, timing this out even though the model was right
 /// there and would have come up fine a few seconds later.
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
-/// ~1.96GB (q4_k_m). Named explicitly rather than computed so a stale
-/// partial download from an interrupted run can never be mistaken for a
-/// complete one - see download() below.
-const MODEL_SIZE_BYTES: u64 = 1_976_000_000;
+/// Official Apache-2.0 Qwen2.5-1.5B Q4_K_M artifact, 1.12 GB.
+/// Exact size is the progress fallback when Content-Length is absent.
+const MODEL_SIZE_BYTES: u64 = 1_117_320_736;
 const MODEL_URL: &str =
-    "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf";
+    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf";
+/// Verified directly against the downloaded artifact during the 2026-09-17
+/// model migration (see docs/cleanup-model-evaluation.md) - checked after
+/// every download so a corrupted or tampered file is caught here, at a clear
+/// "the download failed, try again" error, instead of surfacing later as a
+/// confusing llama-server load failure or (worse) silently loading and
+/// producing degraded suggestions with no indication why.
+const MODEL_SHA256: &str = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e";
 
 /// Where the (large, optional, user-downloaded) model lives - the same
 /// app_data_dir/models folder whisper's own models are downloaded into (see
@@ -81,15 +89,13 @@ pub struct Candidate {
     pub original: String,
 }
 
-/// Below this, a proposed fix is confident enough to apply without asking -
-/// above every genuinely-correct answer measured, comfortably below every
-/// wrong one. Measured against 9 real cases on this exact prompt (see
-/// 05-build-log.md): every reasonable answer (a correct name fix, a
-/// correct SAME refusal, even an out-of-distribution name the model
-/// sensibly left alone) scored 91-100%; every wrong or garbled answer
-/// scored 25-35%. The gap between those two clusters is wide enough that
-/// the exact threshold isn't sensitive - 80% sits with real margin on both
-/// sides rather than splitting the difference.
+/// Conservative 1.5B gate, evaluated on clip11 (27 uncertain words).
+/// Its 19 proposals scored at most 0.780, including sentence expansions;
+/// 0.90 leaves margin above these rather than reusing the 3B calibration.
+/// Both models retain 104/152 matches with their shipping gates, but the
+/// smaller model's review suggestions are worse. This is a non-regression
+/// check on one clip, not validated precision on unseen clips. See
+/// docs/cleanup-model-evaluation.md for the sweep and limitations.
 ///
 /// A word is only as trustworthy as its LEAST confident token, same
 /// reasoning as WordSpan::confidence in transcribe.rs: averaging would let
@@ -103,7 +109,7 @@ pub struct Candidate {
 /// segments directly. Kept here anyway as the canonical, measured value -
 /// deleting it would leave that doc comment pointing at nothing.
 #[allow(dead_code)]
-pub const AUTO_APPLY_CONFIDENCE: f32 = 0.80;
+pub const AUTO_APPLY_CONFIDENCE: f32 = 0.90;
 
 #[derive(Serialize, Clone)]
 pub struct Suggestion {
@@ -137,7 +143,7 @@ impl Drop for Server {
 
 /// Shown by every caller when the sidecar/model files genuinely aren't
 /// there - the one case where "download it" is the actually correct fix.
-const NOT_INSTALLED_MSG: &str = "The local cleanup model isn't installed - download it from the Transcript tab first (about 2GB). It's optional; everything else works without it.";
+const NOT_INSTALLED_MSG: &str = "The local cleanup model isn't installed - download it from the Transcript tab first (about 1.1GB). It's optional; everything else works without it.";
 
 /// Starts llama-server if the sidecar and model are both present, and waits
 /// for it to report healthy.
@@ -537,6 +543,7 @@ pub fn download(app: AppHandle, job_id: String, handle: Arc<JobHandle>) {
 
         let part = dest.with_extension("part");
         let mut file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
+        let mut hasher = Sha256::new();
         let mut buf = [0u8; 1024 * 256];
         let mut read_total: u64 = 0;
         let mut last_emit = 0u64;
@@ -552,6 +559,7 @@ pub fn download(app: AppHandle, job_id: String, handle: Arc<JobHandle>) {
                 break;
             }
             file.write_all(&buf[..n]).map_err(|e| e.to_string())?;
+            hasher.update(&buf[..n]);
             read_total += n as u64;
             if read_total - last_emit > 4 * 1024 * 1024 {
                 last_emit = read_total;
@@ -566,6 +574,15 @@ pub fn download(app: AppHandle, job_id: String, handle: Arc<JobHandle>) {
         }
         file.flush().map_err(|e| e.to_string())?;
         drop(file);
+
+        let digest = format!("{:x}", hasher.finalize());
+        if digest != MODEL_SHA256 {
+            let _ = std::fs::remove_file(&part);
+            return Err(format!(
+                "Downloaded file failed integrity check (expected sha256 {MODEL_SHA256}, got {digest}) - the download was likely corrupted or interrupted. Try again."
+            ));
+        }
+
         std::fs::rename(&part, &dest).map_err(|e| e.to_string())?;
         Ok(())
     })();
@@ -622,7 +639,7 @@ fn run_inner(
     // already accepted once (see record_correction) is applied straight
     // away at full confidence. When every flagged word is already known,
     // this means a cleanup pass on a NEW clip can finish instantly without
-    // the ~2GB model even being installed, let alone running.
+    // the ~1.1GB model even being installed, let alone running.
     let dictionary = load_dictionary(app);
     let needs_model = candidates
         .iter()
@@ -759,7 +776,7 @@ impl Server {
     /// the exact text it started with.
     pub fn correct(&self, candidate: &Candidate, players: &[String]) -> Option<Suggestion> {
         let (answer, confidence) = self.ask(&candidate.marked_sentence, players)?;
-        if is_no_op(&answer, &candidate.original) {
+        if is_no_op(&answer, &candidate.original) || is_scope_violation(&answer, &candidate.original) {
             return None;
         }
         Some(Suggestion {
@@ -845,6 +862,22 @@ fn is_no_op(answer: &str, original: &str) -> bool {
             .to_lowercase()
     };
     norm(answer) == norm(original)
+}
+
+/// A word-count sanity check on top of is_no_op: the prompt asks for "the
+/// corrected text for that marked spot" - one flagged word - not a rewritten
+/// sentence. Measured failure mode on the 1.5B model (see
+/// docs/cleanup-model-evaluation.md): a single pronoun ("I") sometimes comes
+/// back as a whole invented sentence ("I love you, bro."). Every such
+/// over-expansion measured there scored well under AUTO_APPLY_CONFIDENCE, so
+/// it would never auto-apply - but it still landed in the human review queue
+/// as a plausible-looking, entirely bogus suggestion. Caught here instead of
+/// relying on a human to notice. The +1 slack still allows real short
+/// multi-word fixes (e.g. "thing." -> "this thing") while catching both
+/// measured over-expansions ("I" -> "I love you." / "I love you, bro.").
+fn is_scope_violation(answer: &str, original: &str) -> bool {
+    let word_count = |s: &str| s.split_whitespace().count().max(1);
+    word_count(answer) > word_count(original) + 1
 }
 
 const SYSTEM_PROMPT: &str = "You fix speech-to-text mistakes in a transcript of friends playing a co-op game together. You are shown one sentence with the uncertain word or phrase marked in guillemets (« »). Reply with ONLY the corrected text for that marked spot - no quotes, no punctuation explanation, nothing else. If the marked text is probably already correct, reply exactly SAME.";
@@ -987,6 +1020,22 @@ mod tests {
     fn a_genuine_correction_is_not_a_no_op() {
         assert!(!is_no_op("Christian", "Chris and"));
         assert!(!is_no_op("that way", "that wat"));
+    }
+
+    #[test]
+    fn a_single_word_expanded_into_a_sentence_is_a_scope_violation() {
+        // The real observed failure mode (docs/cleanup-model-evaluation.md):
+        // the 1.5B model answering the single flagged word "I" with an
+        // entire invented sentence.
+        assert!(is_scope_violation("I love you, bro.", "I"));
+        assert!(is_scope_violation("I love you.", "I"));
+    }
+
+    #[test]
+    fn a_short_real_multiword_fix_is_not_a_scope_violation() {
+        assert!(!is_scope_violation("this thing", "thing."));
+        assert!(!is_scope_violation("you're", "Y-y-you're"));
+        assert!(!is_scope_violation("Christian", "Chris and"));
     }
 
     /// A real response captured from llama-server (b10621) with

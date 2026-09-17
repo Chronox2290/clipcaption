@@ -25,6 +25,10 @@ reqwest = { version = "0.12", default-features = false, features = ["blocking", 
 # other native deps here (whisper.cpp, sherpa-onnx) are obtained rather than
 # vendored - no separate sidecar needed since ort loads it directly.
 ort = { version = "=2.0.0-rc.13", default-features = false, features = ["std", "api-27", "download-binaries", "copy-dylibs", "tls-rustls"] }
+# Verifies the cleanup model's download against its known-good hash (see
+# polish.rs::download) - a corrupted or tampered .gguf used to be
+# indistinguishable from a good one until llama-server tried to load it.
+sha2 = "0.10"
 
 [profile.release]
 codegen-units = 1

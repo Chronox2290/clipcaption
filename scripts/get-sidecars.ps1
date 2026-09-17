@@ -182,10 +182,10 @@ if ((Done "sherpa-onnx-offline-speaker-diarization") -and
     Write-Host "Embedding model installed."
 }
 
-# ---------------- local transcript-cleanup model (llama.cpp + Qwen2.5-3B) ----------------
+# ---------------- local transcript-cleanup model (llama.cpp + Qwen2.5-1.5B (Apache-2.0)) ----------------
 # Optional: an offline pass that catches misheard names/words whisper's own
 # confidence already flagged (see src-tauri/src/polish.rs for the full design
-# and why it never edits a whole transcript in one shot). ~2GB, entirely
+# and why it never edits a whole transcript in one shot). ~1.1GB, entirely
 # skippable - polish::available() reports false without it and the rest of
 # the app is unaffected.
 #

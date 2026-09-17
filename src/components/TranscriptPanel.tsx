@@ -427,11 +427,11 @@ export default function TranscriptPanel({ videoRef }: Props) {
             className="btn btn-ghost"
             onClick={() => void downloadPolishModel()}
             disabled={!!polishModelJob}
-            title="Downloads a small offline AI model (~2GB, one-time) that reviews the words whisper wasn't confident about - misheard names and similar. Everything else in the app works without it."
+            title="Downloads a small offline AI model (~1.1GB, one-time) that reviews the words whisper wasn't confident about - misheard names and similar. Everything else in the app works without it."
           >
             {polishModelJob
               ? `⬇ Downloading cleanup model… ${Math.round((polishModelJob.progress ?? 0) * 100)}%`
-              : "⬇ Get AI cleanup (~2GB)"}
+              : "⬇ Get AI cleanup (~1.1GB)"}
           </button>
         )}
         {models.find((m) => m.name === "wav2vec2-base-960h")?.downloaded ? (

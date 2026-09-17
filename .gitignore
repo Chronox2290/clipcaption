@@ -7,6 +7,9 @@ src-tauri/binaries/*.onnx
 # Scratch workspace for forced-alignment validation - downloaded model +
 # extracted audio, not project source, never meant to be committed.
 scratch_align/
+# Delegate-skill run logs (scripts/ai/delegate.sh) - prompts/answers from
+# Codex/Gemini/Grok/Antigravity sessions, a local audit trail, not source.
+.ai-handoff/
 src-tauri/binaries/llama/
 src-tauri/gen/
 *.log
