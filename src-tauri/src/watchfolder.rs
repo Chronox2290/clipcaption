@@ -47,15 +47,13 @@ fn is_video(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn list_videos(folder: &str) -> HashSet<PathBuf> {
-    std::fs::read_dir(folder)
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| is_video(p))
-                .collect()
-        })
-        .unwrap_or_default()
+fn list_videos(folder: &str) -> Option<HashSet<PathBuf>> {
+    std::fs::read_dir(folder).ok().map(|rd| {
+        rd.filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| is_video(p))
+            .collect()
+    })
 }
 
 /// Runs until `handle` is cancelled (see cancel_job, reused unchanged - the
@@ -94,7 +92,23 @@ fn check_stable(
 }
 
 pub fn run(app: AppHandle, job_id: String, handle: Arc<JobHandle>, folder: String) {
-    let mut seen = list_videos(&folder);
+    // A folder that's briefly unreadable when watching starts (a network
+    // drive still mounting, a permission delay) must NOT be treated as an
+    // empty folder - that would seed `seen` empty and then, the moment the
+    // folder becomes readable, flood the queue with every pre-existing file
+    // as if it had just arrived, exactly the "old clips get re-captioned"
+    // case the empty-`seen`-on-purpose design explicitly guards against.
+    // Retry the initial listing until it actually succeeds (or the job gets
+    // cancelled first) instead of silently starting from a wrong baseline.
+    let mut seen = loop {
+        if let Some(v) = list_videos(&folder) {
+            break v;
+        }
+        if handle.is_cancelled() {
+            return;
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    };
     let mut pending: HashMap<PathBuf, (u64, Instant)> = HashMap::new();
 
     while !handle.is_cancelled() {

@@ -403,4 +403,9 @@ export interface MontageClip {
   /** Carried over from the source project the same way segments/style/censor
    * are - optional since an older .ccproj has none. */
   stickers?: Sticker[];
+  /** Resolved once per source project (see Montage.tsx's addProjects) rather
+   * than carrying raw embeddings+profiles - each project's speaker indices
+   * only mean anything within that one project, so this has to be resolved
+   * before clips from different projects get merged into one clip list. */
+  speakerNames?: Record<number, string>;
 }

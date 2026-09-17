@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useApp } from "../store";
 import { invoke, pickProjectOpenPaths, pickSavePath } from "../lib/tauri";
-import { fmtTime } from "../lib/captions";
+import { fmtTime, resolveSpeakerNames } from "../lib/captions";
 import type { MontageClip, ProjectFile } from "../types";
 import DestinationControl from "../components/DestinationControl";
 import { Icon } from "../components/Icon";
@@ -40,6 +40,13 @@ export default function Montage() {
           const raw = await invoke<string>("read_text_file", { path });
           const project = JSON.parse(raw) as ProjectFile;
           const sourceLabel = path.split(/[\\/]/).pop() ?? path;
+          // Resolved once per source project - each project's speaker
+          // indices only mean anything within that one project, so this has
+          // to happen before clips from different projects sit in one list.
+          const speakerNames = resolveSpeakerNames(
+            project.speakerEmbeddings ?? {},
+            project.speakerProfiles ?? []
+          );
           for (const h of project.highlights) {
             const range = project.clipOverrides[h.rank] ?? { start: h.start, end: h.end };
             added.push({
@@ -54,6 +61,7 @@ export default function Montage() {
               style: project.style,
               censor: project.censor,
               stickers: project.stickers,
+              speakerNames,
             });
           }
         } catch {

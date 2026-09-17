@@ -5,6 +5,49 @@ Plain-language write-up of what's changed recently and where things stand. Curre
 v0.2.10 draft release described further down — that release note is kept as-is since it's still an
 accurate record of what shipped in it, not because it's the latest state.
 
+**2026-09-17 — Gemini finally completed the original backend/codebase-health review, and it found
+four real bugs, all now fixed.** Gemini was assigned this exact review at the very start of this
+session (`brief-codebase-health.md`) but kept failing on quota before finishing it, so a Claude
+subagent substituted for it back then. Once the user fixed Gemini's billing, I re-ran the original
+brief through Gemini itself so that task actually gets done by the AI it was meant for. It read
+`src-tauri/src/watchfolder.rs`/`spatial.rs`/`transcribe.rs`/`export.rs` and `src/store.ts`/
+`ExportDrawer.tsx`, and reported 5 findings. I verified every one against the real code before
+touching anything (one, the `spatial.rs` "zombie ffmpeg process" claim, didn't hold up — `child.wait()`
+is called, so the process is reaped; only the exit code is discarded, which is fine). The other four
+were real:
+- **ASS caption builds had drifted out of sync across export paths** (the exact bug class this
+  project's north star explicitly calls out as a standing risk): the single-clip Export tab
+  (`ExportDrawer.tsx`) never resolved named speakers at all, so anyone using named speaker profiles
+  would see them vanish on a plain single-clip export even though batch and highlight-export both
+  showed them correctly. `buildDemo` (the before/after preview) was missing both speaker names and
+  stickers, so the preview didn't actually match what a real export would look like. `buildMontage`
+  was missing speaker names too, because `MontageClip` never carried them forward from each source
+  project's own speaker profiles. Fixed all three: `ExportDrawer.tsx` and `buildDemo` now resolve
+  names from the currently-loaded project's own `speakerEmbeddings`/`speakerProfiles`; `MontageClip`
+  gained a `speakerNames` field resolved once per source project when it's added in `Montage.tsx`
+  (each project's speaker indices only mean something within that one project, so this has to happen
+  before clips from different projects sit in one list).
+- **`exportSelectedHighlights` aborted the entire highlight-export batch if any single clip failed**
+  (a bad range, a transient transcription error) — since each clip renders to its own independent
+  output file, one bad clip shouldn't have taken the rest down with it. Now catches per-clip, keeps
+  going, and reports a summary of which clips failed alongside however many did succeed, instead of
+  a blanket batch failure.
+- **The watch-folder service could flood the queue with every pre-existing file if the folder was
+  briefly unreadable the instant watching started** (a network drive still mounting, a permission
+  delay) — the initial file listing silently treated a read error as "empty folder," so once the
+  folder became readable, every already-existing file looked "new" and got queued for
+  re-captioning, exactly the case the watcher's own design doc explicitly says it must never do.
+  Now retries the initial listing until it actually succeeds before starting to watch.
+- **A real race between a job finishing and the JS side registering to listen for it**: the batch
+  pipeline calls `await invoke(...)` then `await waitForJob(id)` as two separate steps, and if the
+  Rust-side job fails or finishes fast enough, its done/error event could arrive and be silently
+  dropped before `waitForJob` was listening for it — the pipeline would then hang forever awaiting
+  an event that already fired and was lost. Fixed with a small capped buffer that holds an
+  unclaimed done/error event briefly so a `waitForJob` call moments later still sees it.
+
+`npx tsc --noEmit`, `cargo check`, and the full Rust test suite (97 tests) all clean after these
+fixes.
+
 **2026-09-17 — premium UI/UX redesign, built in four phases against a real design spec, verified
 visually at every step.** Per the user's ask to go "extremely deep" on design after the two-AI UX
 review above turned up real problems (raw radio-button SKU lists, dead-void empty states, a

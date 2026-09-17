@@ -72,10 +72,38 @@ const pendingJobs = new Map<
   }
 >();
 
+// A job's Rust-side thread can finish (and emit its done/error event) before
+// the JS caller gets from `await invoke(...)` returning the job id to the
+// `waitForJob(id)` call that registers a listener for it - a real race, not
+// a hypothetical one, since the two happen over separate async hops. A
+// terminal event that arrives with nobody in `pendingJobs` yet (and no
+// matching UI-state job either - see the final fallback in the
+// listenJobProgress callback below) is buffered here so the `waitForJob`
+// call that's about to happen a moment later still sees it, instead of
+// awaiting a promise that will never resolve. Capped so a genuinely
+// unclaimed event (spurious id, or a UI-tracked job that already got its
+// own patch()) can't accumulate forever.
+const orphanedJobResults = new Map<string, JobProgressPayload>();
+const MAX_ORPHANED_JOB_RESULTS = 50;
+
+function bufferOrphanedJobResult(p: JobProgressPayload) {
+  if (!p.done && !p.error) return;
+  if (orphanedJobResults.size >= MAX_ORPHANED_JOB_RESULTS) {
+    const oldest = orphanedJobResults.keys().next().value;
+    if (oldest !== undefined) orphanedJobResults.delete(oldest);
+  }
+  orphanedJobResults.set(p.id, p);
+}
+
 function waitForJob(
   id: string,
   onProgress?: (p: JobProgressPayload) => void
 ): Promise<string | undefined> {
+  const buffered = orphanedJobResults.get(id);
+  if (buffered) {
+    orphanedJobResults.delete(id);
+    return buffered.error ? Promise.reject(new Error(buffered.error)) : Promise.resolve(buffered.result);
+  }
   return new Promise((resolve, reject) => {
     pendingJobs.set(id, { resolve, reject, onProgress });
   });
@@ -1245,7 +1273,8 @@ export const useApp = create<AppState>((set, get) => ({
         patch(metadataJob, "metadataJob") ||
         patch(demoJob, "demoJob") ||
         patch(translateJob, "translateJob") ||
-        patch(modelJob, "modelJob");
+        patch(modelJob, "modelJob") ||
+        bufferOrphanedJobResult(p);
     });
     await listenWatchFolderFile(({ jobId, path }) => {
       // Ignore events from a watch session that's since been stopped (or a
@@ -1951,10 +1980,17 @@ export const useApp = create<AppState>((set, get) => ({
         ?.replace(/\.[^.]+$/, "") ?? "clip";
     const total = clips.length;
     const usedNames = new Set<string>();
+    // Each clip renders to its own independent output file, so one clip's
+    // transcription/export failing (a corrupt range, a transient ffmpeg
+    // error) shouldn't take the rest of an otherwise-fine batch down with
+    // it - same "don't let one bad item stall everything else" treatment
+    // runFileBatch already gets. Caught per-clip and reported together at
+    // the end instead of a single outer try/catch aborting on the first one.
+    const failed: string[] = [];
 
-    try {
-      for (let i = 0; i < clips.length; i++) {
-        const h = clips[i];
+    for (let i = 0; i < clips.length; i++) {
+      const h = clips[i];
+      try {
         const range = clipOverrides[h.rank] ?? { start: h.start, end: h.end };
         const { style, censor } = get(); // re-read so mid-batch tweaks apply
 
@@ -2027,11 +2063,15 @@ export const useApp = create<AppState>((set, get) => ({
           } satisfies ExportRequest,
         });
         await waitForJob(eid);
+      } catch (e) {
+        failed.push(`#${h.rank} (${String(e)})`);
       }
-      set({ batch: null, exportDone: outputDir });
-    } catch (e) {
-      set({ batch: null, error: String(e) });
     }
+    set({
+      batch: null,
+      exportDone: outputDir,
+      error: failed.length > 0 ? `${failed.length} of ${total} clip(s) failed to export: ${failed.join("; ")}` : null,
+    });
   },
 
   /**
@@ -2246,7 +2286,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   buildDemo: async (outputPath) => {
-    const { videoPath, mediaInfo, segments, style, censor, activeRange, encoder } = get();
+    const { videoPath, mediaInfo, segments, style, censor, activeRange, encoder, stickers, speakerEmbeddings, speakerProfiles } = get();
     if (!videoPath || !mediaInfo) return;
 
     // Each half keeps the source's own aspect ratio (no crop needed, since
@@ -2269,7 +2309,15 @@ export const useApp = create<AppState>((set, get) => ({
       start
     );
     pages = layoutRows(pages);
-    const ass = pages.length ? buildAss(pages, style, { playResX: halfWidth, playResY: height }) : "";
+    // Same speakerNames/stickers treatment as every other export path - this
+    // is a preview of what the real export looks like, so it has to actually
+    // match (see the codebase-health pass that caught this drifting out of
+    // sync across ~8 ASS-building call sites).
+    const speakerNames = resolveSpeakerNames(speakerEmbeddings, speakerProfiles);
+    const rangeStickers = stickersForRange(stickers, start, end, start);
+    const ass =
+      (pages.length ? buildAss(pages, style, { playResX: halfWidth, playResY: height, speakerNames }) : "") +
+      buildStickerAss(rangeStickers, { playResX: halfWidth, playResY: height });
 
     try {
       set({ error: null, exportDone: null });
@@ -2406,8 +2454,9 @@ export const useApp = create<AppState>((set, get) => ({
       pages = layoutRows(pages);
       const rangeStickers = stickersForRange(c.stickers ?? [], c.start, c.end, c.start);
       const ass =
-        (pages.length ? buildAss(pages, c.style, { playResX: outW, playResY: outH }) : "") +
-        buildStickerAss(rangeStickers, { playResX: outW, playResY: outH });
+        (pages.length
+          ? buildAss(pages, c.style, { playResX: outW, playResY: outH, speakerNames: c.speakerNames })
+          : "") + buildStickerAss(rangeStickers, { playResX: outW, playResY: outH });
       return {
         inputPath: c.videoPath,
         assContent: ass,
