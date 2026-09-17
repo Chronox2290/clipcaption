@@ -117,35 +117,51 @@ export default function BatchScreen() {
         </span>
       </header>
 
-      <div className={`watch-folder-banner ${watching ? "active" : ""}`}>
-        <div className="watch-folder-info">
-          <strong>{watching ? "Watching" : "Watch a folder"}</strong>
-          <span className="muted small">
-            {watching
-              ? `${watchFolderPath} — new recordings are captioned + exported automatically${
-                  watchFolderCount > 0 ? ` (${watchFolderCount} so far this session)` : ""
-                }`
-              : "Point this at OBS's recording output folder — every new clip gets captioned and exported with no manual step, using the settings below."}
-          </span>
+      <div className={`watch-hero ${watching ? "active" : ""}`}>
+        <div className="watch-hero-head">
+          <div className="watch-hero-title">
+            <span className="watch-hero-pulse" />
+            <strong>{watching ? "Live OBS watch folder" : "OBS watch folder"}</strong>
+            <span className="chip watch-hero-badge">{watching ? "WATCHER ACTIVE" : "HANDS-OFF ENGINE"}</span>
+          </div>
+          <button className={`btn ${watching ? "btn-danger-outline" : "btn-primary"}`} onClick={() => void toggleWatch()}>
+            {watching ? (
+              <>
+                <Icon name="stop" size={13} /> Stop watching
+              </>
+            ) : (
+              "Start watching…"
+            )}
+          </button>
         </div>
-        <button className="btn btn-small" onClick={() => void toggleWatch()}>
-          {watching ? "Stop watching" : "Start watching…"}
-        </button>
+        <p className="muted small watch-hero-copy">
+          Listening in the background. Any new recording saved to this folder is automatically
+          transcribed, captioned with your active style, and exported with the settings on the
+          right - no manual step.
+        </p>
+        {watching && (
+          <div className="watch-hero-path">
+            <Icon name="folder" size={14} />
+            <span title={watchFolderPath ?? undefined}>{watchFolderPath}</span>
+            {watchFolderCount > 0 && (
+              <span className="muted small">· {watchFolderCount} captioned so far this session</span>
+            )}
+          </div>
+        )}
+        {discordWebhook && (
+          <label className="check-row watch-hero-digest">
+            <input
+              type="checkbox"
+              checked={autoDigestOnBatch}
+              onChange={(e) => setAutoDigestOnBatch(e.target.checked)}
+            />
+            <span>
+              Post an end-of-session digest to Discord once a watch session goes quiet — clip
+              count, a compiled reel of everything that finished, and anything flagged for review.
+            </span>
+          </label>
+        )}
       </div>
-
-      {discordWebhook && (
-        <label className="check-row watch-folder-digest">
-          <input
-            type="checkbox"
-            checked={autoDigestOnBatch}
-            onChange={(e) => setAutoDigestOnBatch(e.target.checked)}
-          />
-          <span>
-            Post an end-of-session digest to Discord once a watch session goes quiet — clip
-            count, a compiled reel of everything that finished, and anything flagged for review.
-          </span>
-        </label>
-      )}
 
       <div className="batch-body">
         <div className="batch-queue">
@@ -168,21 +184,32 @@ export default function BatchScreen() {
           </div>
 
           {batchItems.length === 0 ? (
-            <div
-              className="dropzone batch-empty"
-              onClick={addFiles}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  void addFiles();
-                }
-              }}
-            >
-              <div className="dropzone-icon"><Icon name="folder" size={40} /></div>
-              <h2>Queue up your clips</h2>
-              <p>Add individual clips or a whole folder of OBS recordings</p>
+            <div className="ghost-queue">
+              <div
+                className="ghost-row ghost-row-active"
+                onClick={addFiles}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    void addFiles();
+                  }
+                }}
+              >
+                <Icon name="plus" size={16} />
+                <span>Drop video clips or a folder here to queue for batch processing</span>
+              </div>
+              <div className="ghost-row ghost-row-phantom" style={{ opacity: 0.5 }}>
+                <span className="ghost-row-dot" />
+                <span className="ghost-row-bar" style={{ width: "45%" }} />
+                <span className="ghost-row-bar ghost-row-bar-sm" />
+              </div>
+              <div className="ghost-row ghost-row-phantom" style={{ opacity: 0.28 }}>
+                <span className="ghost-row-dot" />
+                <span className="ghost-row-bar" style={{ width: "30%" }} />
+                <span className="ghost-row-bar ghost-row-bar-sm" />
+              </div>
             </div>
           ) : (
             <div className="batch-list">
@@ -241,6 +268,23 @@ export default function BatchScreen() {
                   )}
                 </div>
               ))}
+              {!batchRunning && (
+                <div
+                  className="ghost-row ghost-row-active ghost-row-trailing"
+                  onClick={addFiles}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void addFiles();
+                    }
+                  }}
+                >
+                  <Icon name="plus" size={14} />
+                  <span>Drop more clips or folders here</span>
+                </div>
+              )}
             </div>
           )}
         </div>
