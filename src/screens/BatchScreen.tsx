@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useEffect } from "react";
 import { useApp } from "../store";
 import { pickDirectory, pickVideoFiles } from "../lib/tauri";
 import { STYLE_PRESETS } from "../lib/styles";
@@ -15,6 +16,30 @@ const STATUS_ICON: Record<string, ReactNode> = {
   skipped: "–",
   needs_review: <Icon name="warning" size={14} />,
 };
+
+/** A small poster-frame thumbnail per queued clip - reuses the exact same
+ * recentThumbnails cache/loadRecentThumbnail action the Library screen's
+ * recents grid uses (keyed by path), rather than a second thumbnail
+ * pipeline: a batch item that later shows up in "recent" gets its
+ * thumbnail for free, and vice versa. Was raw filenames only before this -
+ * a real usability gap when queuing a folder of dozens of similarly-named
+ * OBS replay files, since there was no way to tell them apart before
+ * processing without opening each one. */
+function BatchThumb({ path }: { path: string }) {
+  const src = useApp((s) => s.recentThumbnails[path]);
+  const loadRecentThumbnail = useApp((s) => s.loadRecentThumbnail);
+
+  useEffect(() => {
+    void loadRecentThumbnail(path);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [path]);
+
+  return (
+    <div className="batch-thumb">
+      {src ? <img src={src} alt="" /> : <Icon name="film" size={16} />}
+    </div>
+  );
+}
 
 export default function BatchScreen() {
   const {
@@ -215,6 +240,7 @@ export default function BatchScreen() {
             <div className="batch-list">
               {batchItems.map((item) => (
                 <div key={item.id} className={`batch-row st-${item.status}`}>
+                  <BatchThumb path={item.path} />
                   <span className="batch-status">{STATUS_ICON[item.status]}</span>
                   <div className="batch-mid">
                     <span className="batch-name" title={item.path}>

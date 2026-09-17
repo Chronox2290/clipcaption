@@ -28,10 +28,17 @@ const DISCORD_TIERS: { id: string; label: string; sub: string }[] = [
   { id: "discord500", label: "Nitro Max", sub: "500 MB" },
 ];
 
-const TILES: { platform: Platform; icon: IconName; title: string; badge: string; defaultPreset: string }[] = [
+const TILES: { platform: Platform; icon: IconName; title: string; badge: string; defaultPreset: string; hint?: string }[] = [
   { platform: "discord", icon: "discord", title: "Discord", badge: "Fit file size cap", defaultPreset: "discord50" },
   { platform: "vertical", icon: "phone", title: "TikTok / Reels / Shorts", badge: "9:16 vertical crop", defaultPreset: "vertical" },
-  { platform: "original", icon: "film", title: "Original master", badge: "Source res · CRF 20", defaultPreset: "original" },
+  {
+    platform: "original",
+    icon: "film",
+    title: "Original master",
+    badge: "Source res · CRF 20",
+    defaultPreset: "original",
+    hint: "Re-encodes at a fixed visual-quality target, not a fixed bitrate - this can produce a LARGER file than the source for busy, high-motion gameplay, since quality mode has no size ceiling. Pick a Discord or Custom tile instead if you need a smaller file than the original.",
+  },
   { platform: "custom", icon: "sliders", title: "Custom size…", badge: "Manual MB limit", defaultPreset: "custom" },
 ];
 
@@ -101,6 +108,7 @@ export default function DestinationControl({
             type="button"
             className={`dest-tile ${platform === t.platform ? "sel" : ""}`}
             onClick={() => onPresetChange(t.defaultPreset)}
+            title={t.hint}
           >
             <Icon name={t.icon} size={20} />
             <span className="dest-tile-title">{t.title}</span>

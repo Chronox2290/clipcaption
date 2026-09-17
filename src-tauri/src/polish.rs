@@ -156,7 +156,7 @@ const NOT_INSTALLED_MSG: &str = "The local cleanup model isn't installed - downl
 /// the model" when it was already sitting right there. Only the
 /// files-missing case gets that message now; a slow/failed start gets a
 /// message that actually points at what happened.
-pub fn start(app: &AppHandle) -> Result<Server, String> {
+pub fn start(app: &AppHandle, handle: &JobHandle) -> Result<Server, String> {
     let exe = sidecar::resolve_in(SUBDIR, "llama-server");
     let model = model_path(app).map_err(|_| NOT_INSTALLED_MSG.to_string())?;
     if !exe.exists() || !model.exists() {
@@ -199,7 +199,10 @@ pub fn start(app: &AppHandle) -> Result<Server, String> {
             .map_err(|e| format!("Could not set up a connection to the local AI model: {e}"))?,
     };
 
-    if !server.wait_healthy() {
+    if !server.wait_healthy(handle) {
+        if handle.is_cancelled() {
+            return Err("Cancelled".into());
+        }
         return Err("The local AI model didn't start in time - the machine may be busy (another heavy task using every CPU core can slow this down). Try again in a moment.".to_string());
     }
     Ok(server)
@@ -301,7 +304,7 @@ fn generate_metadata_inner(
     if req.transcript.trim().is_empty() {
         return Err("No transcript to work from - caption this clip first.".into());
     }
-    let server = start(app)?;
+    let server = start(app, handle)?;
     if handle.is_cancelled() {
         return Err("Cancelled".into());
     }
@@ -406,7 +409,7 @@ fn translate_inner(
     if req.segments.is_empty() {
         return serde_json::to_string(&Vec::<TranslatedSegment>::new()).map_err(|e| e.to_string());
     }
-    let server = start(app)?;
+    let server = start(app, handle)?;
 
     let total = req.segments.len();
     let mut out = Vec::with_capacity(total);
@@ -645,7 +648,7 @@ fn run_inner(
         .iter()
         .any(|c| dictionary_hit(&dictionary, &c.original).is_none());
 
-    let server = if needs_model { Some(start(app)?) } else { None };
+    let server = if needs_model { Some(start(app, handle)?) } else { None };
 
     let total = candidates.len();
     let mut out = Vec::with_capacity(total);
@@ -749,9 +752,18 @@ fn mark_sentence(words: &[ReviewWord], mark_idx: usize) -> String {
 }
 
 impl Server {
-    fn wait_healthy(&mut self) -> bool {
+    /// Confirmed real bug (2026-09-17): this loop used to have no way to
+    /// hear a cancel - a user pressing "Stop after current clip" while the
+    /// model was still cold-starting got no response for up to the full
+    /// HEALTH_TIMEOUT (60s), indistinguishable from a genuine hang. Checked
+    /// every poll tick (200ms) now, same as every other long-running loop
+    /// in this app already does.
+    fn wait_healthy(&mut self, handle: &JobHandle) -> bool {
         let deadline = Instant::now() + HEALTH_TIMEOUT;
         while Instant::now() < deadline {
+            if handle.is_cancelled() {
+                return false;
+            }
             if let Ok(resp) = self
                 .client
                 .get(format!("http://127.0.0.1:{}/health", self.port))
