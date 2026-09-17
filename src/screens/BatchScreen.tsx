@@ -198,7 +198,7 @@ export default function BatchScreen() {
               + Add folder
             </button>
             {batchItems.length > 0 && !batchRunning && (
-              <button className="btn btn-ghost" onClick={clearBatchItems}>
+              <button className="btn btn-ghost btn-danger-outline" onClick={clearBatchItems}>
                 Clear
               </button>
             )}

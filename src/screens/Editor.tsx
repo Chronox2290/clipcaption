@@ -50,7 +50,16 @@ export default function Editor() {
   // rather than a decision imposed on every video.
   const timeline = useSplitter({
     storageKey: "cc.timelineHeight",
-    initial: 300,
+    // 300px is the right default at the app's own normal launch size
+    // (1320x860 - tauri.conf.json - only 35% of window height). But this is
+    // a flat, one-time first-launch default, not a live-responsive value -
+    // at the app's advertised MINIMUM size (1040x680), a bare 300px is 44%
+    // of the window and left only ~196px for the video preview and ~279px
+    // for the whole sidebar on a first run, before anyone's ever dragged
+    // the splitter to something they prefer. Scaling it down for a small
+    // starting window keeps the same intent (timeline as the primary
+    // workspace) without choking everything else out on a small display.
+    initial: Math.min(300, Math.round(window.innerHeight * 0.35)),
     min: 140,
     max: () => Math.max(200, window.innerHeight - 260),
     axis: "y",
@@ -228,7 +237,7 @@ export default function Editor() {
             Picked up where you left off — your transcript, clips and tweaks for this video were
             restored from an autosave.
           </span>
-          <button className="btn btn-ghost btn-small" onClick={() => void discardSession()}>
+          <button className="btn btn-ghost btn-small btn-danger-outline" onClick={() => void discardSession()}>
             Start fresh
           </button>
           <button className="btn btn-ghost btn-small" onClick={dismissRestoredNotice}>

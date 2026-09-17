@@ -1071,7 +1071,11 @@ kbd {
   align-items: center;
 }
 .word-gap {
-  width: 7px;
+  /* Real bug: this used to grow 7px -> 14px on hover, inside an inline-flex
+     word-wrapping row - every word after it visibly shifted right, and a
+     word near a line break would pop onto the next line right under the
+     cursor. Width now stays fixed; only color/background animate. */
+  width: 10px;
   height: 22px;
   flex: 0 0 auto;
   display: flex;
@@ -1081,11 +1085,11 @@ kbd {
   border-radius: 4px;
   font-size: 12px;
   line-height: 1;
+  transition: color 120ms ease, background 120ms ease;
 }
 .word-gap:hover {
   color: var(--accent2);
-  background: rgba(var(--accent2-rgb), 0.14);
-  width: 14px;
+  background: rgba(var(--accent2-rgb), 0.18);
 }
 .waveform-wrap {
   overflow-x: auto;
@@ -1520,6 +1524,14 @@ kbd {
 }
 
 /* style panel */
+.style-panel {
+  /* Real bug (sister to the DestinationControl one): no layout rule at all
+     existed for this container, so its ~10 .field rows under <h4>Tweak</h4>
+     stacked with zero vertical space between them. */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
 .transcript h4,
 .style-panel h4,
 .export-panel h4 {
@@ -1859,6 +1871,12 @@ kbd {
   display: flex;
   align-items: center;
   gap: 4px;
+  /* This row can hold 7+ buttons/selects at once (select all/none, mark,
+     re-scan, flag deaths, genre) - a real fit failure without wrapping in
+     a narrower sidebar, silently clipping controls instead of flowing
+     them to a second line. */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 .hl-item {
   display: flex;
@@ -2700,15 +2718,19 @@ kbd {
   width: 11px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
+  /* First pass used --line-strong (0.16 opacity) - measured contrast
+     against --bg1 is ~1.67:1, still well under WCAG's 3:1 non-text
+     minimum. Raised further, plus a visible (if subtle) track so a
+     scrollable panel reads as scrollable even before you spot the thumb. */
+  background: rgba(255, 255, 255, 0.32);
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.5);
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(0, 0, 0, 0.2);
 }

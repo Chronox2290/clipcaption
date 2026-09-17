@@ -143,7 +143,7 @@ export default function Montage() {
             </button>
             {clips.length > 0 && !montageJob && (
               <button
-                className="btn btn-ghost"
+                className="btn btn-ghost btn-danger-outline"
                 onClick={() => {
                   setClips([]);
                   setSelected(new Set());

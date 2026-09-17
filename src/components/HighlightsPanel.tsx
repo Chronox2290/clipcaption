@@ -2,9 +2,10 @@ import { useState, type RefObject } from "react";
 import { useApp, autoHighlightCount } from "../store";
 import { fmtTime, capitalize } from "../lib/captions";
 import { pickDirectory, pickSavePath } from "../lib/tauri";
-import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
+import { EXPORT_PRESETS as PRESETS, resolveResolution } from "../lib/exportPresets";
 import { chronoPositions } from "../lib/highlights";
 import { Icon } from "./Icon";
+import DestinationControl from "./DestinationControl";
 import TimeField from "./TimeField";
 import type { Highlight } from "../types";
 
@@ -66,7 +67,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
   const [presetId, setPresetId] = useState("original");
   const [customMb, setCustomMb] = useState(25);
   const [resolutionId, setResolutionId] = useState("source");
-  const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
+  const [fitMode, setFitMode] = useState<"fill" | "fit" | "track">("fill");
   const [sortMode, setSortMode] = useState<"time" | "hype">("time");
 
   // Preview a clip by making it the active range — Editor's own playback
@@ -188,7 +189,6 @@ export default function HighlightsPanel({ videoRef }: Props) {
   }
 
   const preset = PRESETS.find((p) => p.id === presetId)!;
-  const isCropped = !!(preset.targetW && preset.targetH);
   const chrono = chronoPositions(highlights);
   const sortedHighlights = [...highlights].sort((a, b) =>
     sortMode === "time" ? a.start - b.start : b.score - a.score
@@ -550,82 +550,34 @@ export default function HighlightsPanel({ videoRef }: Props) {
 
       {!batch && (
         <div className="hl-compile">
-          <div className="preset-list">
-            {PRESETS.map((p) => (
-              <label key={p.id} className={`preset-row ${presetId === p.id ? "sel" : ""}`}>
-                <input
-                  type="radio"
-                  name="hlpreset"
-                  checked={presetId === p.id}
-                  onChange={() => setPresetId(p.id)}
-                />
-                <span>{p.name}</span>
-              </label>
-            ))}
-          </div>
-          {presetId === "custom" && (
-            <div className="field">
-              <label>Target size (MB)</label>
-              <input
-                type="number"
-                min={1}
-                max={2000}
-                value={customMb}
-                onChange={(e) => setCustomMb(Number(e.target.value))}
-              />
-            </div>
-          )}
-
-          <div className="field">
-            <label>Resolution</label>
-            <select value={resolutionId} onChange={(e) => setResolutionId(e.target.value)}>
-              {RESOLUTION_OPTIONS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {mode === "reel" && (
-            <div className="field">
-              <label title="Manually-bookmarked clips are always included in full, on top of this budget — this only caps how much of the auto-detected pool gets pulled in.">
-                Target length
-              </label>
-              <select
-                value={reelTargetSec}
-                onChange={(e) => setReelTargetSec(Number(e.target.value))}
-              >
-                <option value={30}>~30s</option>
-                <option value={60}>~1 min</option>
-                <option value={90}>~90s</option>
-                <option value={180}>~3 min</option>
-                <option value={300}>~5 min</option>
-              </select>
-            </div>
-          )}
-
-          {isCropped && (
-            <div className="field">
-              <label>Frame</label>
-              <div className="seg-toggle">
-                <button
-                  className={`seg-toggle-btn ${fitMode === "fill" ? "sel" : ""}`}
-                  title="Fill the frame edge-to-edge, cropping whatever doesn't fit"
-                  onClick={() => setFitMode("fill")}
+          <DestinationControl
+            presetId={presetId}
+            customMb={customMb}
+            resolutionId={resolutionId}
+            fitMode={fitMode}
+            onPresetChange={setPresetId}
+            onCustomMbChange={setCustomMb}
+            onResolutionChange={setResolutionId}
+            onFitModeChange={setFitMode}
+          >
+            {mode === "reel" && (
+              <div className="field">
+                <label title="Manually-bookmarked clips are always included in full, on top of this budget — this only caps how much of the auto-detected pool gets pulled in.">
+                  Target length
+                </label>
+                <select
+                  value={reelTargetSec}
+                  onChange={(e) => setReelTargetSec(Number(e.target.value))}
                 >
-                  Fill (crop)
-                </button>
-                <button
-                  className={`seg-toggle-btn ${fitMode === "fit" ? "sel" : ""}`}
-                  title="Show the whole frame, padded with a blurred zoomed copy instead of cropping"
-                  onClick={() => setFitMode("fit")}
-                >
-                  Fit (show all)
-                </button>
+                  <option value={30}>~30s</option>
+                  <option value={60}>~1 min</option>
+                  <option value={90}>~90s</option>
+                  <option value={180}>~3 min</option>
+                  <option value={300}>~5 min</option>
+                </select>
               </div>
-            </div>
-          )}
+            )}
+          </DestinationControl>
 
           {mode === "separate" && (
             <button
