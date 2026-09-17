@@ -2422,11 +2422,20 @@ kbd {
 /* Shared destination-platform tile picker (DestinationControl.tsx) -
    replaces the old vertical list of 6-7 preset radios (raw MB SKUs up
    front) with platform-first tiles plus progressive disclosure. */
+.dest-control {
+  /* Real bug: this had no layout of its own, so its own fields (tiles,
+     Discord/framing disclosure, resolution) and whatever a call site
+     passes as children (e.g. Montage's "Limit file size" checkbox) all
+     stacked with zero space between them - reported live as "Output
+     resolution and Limit file size are very close together". */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
 .dest-tiles {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-bottom: var(--space-3);
 }
 .dest-tile {
   display: flex;
@@ -2636,12 +2645,24 @@ kbd {
   }
 }
 
-/* scrollbars */
+/* scrollbars - the thumb used to be --bg2 on panels whose own background is
+   --bg1, two adjacent steps on the same near-black elevation ladder with
+   barely any contrast between them (a real report: the Transcript sidebar's
+   own scrollbar was "not very obvious"). Lightened and given a hover state
+   so it actually reads as an interactive element, not a shadow. */
 ::-webkit-scrollbar {
-  width: 10px;
+  width: 11px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--bg2);
+  background: var(--line-strong);
   border-radius: 999px;
-  border: 2px solid var(--bg0);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }

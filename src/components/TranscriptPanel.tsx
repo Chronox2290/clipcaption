@@ -28,8 +28,6 @@ export default function TranscriptPanel({ videoRef }: Props) {
   const transcribeJob = useApp((s) => s.transcribeJob);
   const polishJob = useApp((s) => s.polishJob);
   const polishAvailable = useApp((s) => s.polishAvailable);
-  const polishModelJob = useApp((s) => s.polishModelJob);
-  const downloadPolishModel = useApp((s) => s.downloadPolishModel);
   const polishSuggestions = useApp((s) => s.polishSuggestions);
   const polishLastRun = useApp((s) => s.polishLastRun);
   const reviewTranscript = useApp((s) => s.reviewTranscript);
@@ -441,17 +439,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
               : "Clean up transcript"}
           </button>
         ) : (
-          <button
-            className="btn btn-ghost"
-            onClick={() => void downloadPolishModel()}
-            disabled={!!polishModelJob}
-            title="Downloads a small offline AI model (~1.1GB, one-time) that reviews the words whisper wasn't confident about - misheard names and similar. Everything else in the app works without it."
-          >
-            <Icon name="download" size={14} />
-            {polishModelJob
-              ? `Downloading cleanup model… ${Math.round((polishModelJob.progress ?? 0) * 100)}%`
-              : "Get AI cleanup (~1.1GB)"}
-          </button>
+          <span className="muted small">
+            Get AI cleanup on the home screen first (optional, ~1.1GB) to catch misheard names
+            here.
+          </span>
         )}
         {models.find((m) => m.name === "wav2vec2-base-960h")?.downloaded ? (
           <button

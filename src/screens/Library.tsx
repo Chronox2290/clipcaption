@@ -49,6 +49,9 @@ export default function Library() {
   const setSelectedModel = useApp((s) => s.setSelectedModel);
   const vocabulary = useApp((s) => s.vocabulary);
   const setVocabulary = useApp((s) => s.setVocabulary);
+  const polishAvailable = useApp((s) => s.polishAvailable);
+  const downloadPolishModel = useApp((s) => s.downloadPolishModel);
+  const polishModelJob = useApp((s) => s.polishModelJob);
   const downloadModel = useApp((s) => s.downloadModel);
   const modelJob = useApp((s) => s.modelJob);
   const loadProject = useApp((s) => s.loadProject);
@@ -190,6 +193,34 @@ export default function Library() {
             Speakers are detected automatically by real voice recognition (not just turn
             alternation) and colored per-speaker in the captions — no setup needed.
           </p>
+
+          <div className="model-card-head" style={{ marginTop: 4 }}>
+            <h3>AI cleanup (optional)</h3>
+            {polishAvailable && <span className="chip chip-ok">ready</span>}
+          </div>
+          {polishAvailable ? (
+            <p className="muted small">
+              Installed - reviews words whisper wasn't confident about (misheard names and
+              similar) from the clip editor's Cleanup tab.
+            </p>
+          ) : (
+            <>
+              <button
+                className="btn btn-small"
+                onClick={() => void downloadPolishModel()}
+                disabled={!!polishModelJob}
+              >
+                <Icon name="download" size={13} />
+                {polishModelJob
+                  ? `Downloading… ${Math.round((polishModelJob.progress ?? 0) * 100)}%`
+                  : "Get AI cleanup (~1.1GB)"}
+              </button>
+              <p className="muted small">
+                A small offline model that catches misheard names and similar - entirely
+                optional, everything else works without it.
+              </p>
+            </>
+          )}
         </section>
       )}
 
