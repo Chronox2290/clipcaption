@@ -218,7 +218,7 @@ export default function Library() {
         <div className="recents-header">
           <h3>Recent clips &amp; projects</h3>
           <button className="btn btn-ghost btn-small" onClick={() => void loadProject()}>
-            <Icon name="folder" size={13} /> Open .ccproj file…
+            <Icon name="folder" size={13} /> Open saved project…
           </button>
         </div>
 

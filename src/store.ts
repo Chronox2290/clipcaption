@@ -85,6 +85,49 @@ function waitForJob(
 let currentBatchJobId: string | null = null;
 let batchCancelRequested = false;
 
+// Thumbnail generation queue (see loadRecentThumbnail) - confirmed real bug:
+// adding a whole folder to Batch mounted one BatchThumb per clip, and each
+// one fired its own probe_video + extract_thumbnail call with no
+// coordination, so a folder of dozens of OBS replays spawned dozens of
+// concurrent ffmpeg processes at once and made the whole app look like it
+// had frozen. Capped to a small number running at a time; everything else
+// waits its turn in this queue instead of firing immediately.
+const THUMBNAIL_CONCURRENCY = 2;
+let thumbnailsInFlight = 0;
+const thumbnailQueue: string[] = [];
+const thumbnailQueued = new Set<string>();
+
+async function pumpThumbnailQueue(get: () => AppState, set: (partial: Partial<AppState>) => void) {
+  if (thumbnailsInFlight >= THUMBNAIL_CONCURRENCY) return;
+  const path = thumbnailQueue.shift();
+  if (path === undefined) return;
+  thumbnailsInFlight++;
+  try {
+    const info = await invoke<MediaInfo>("probe_video", { path });
+    // A couple seconds in rather than frame 0 - the very first frame of a
+    // gameplay recording is disproportionately likely to be a loading
+    // screen or black frame, same reasoning as pickThumbnail's own peak-
+    // moment logic just applied at a much cheaper fixed offset since this
+    // runs for every recent/queued clip, not just the one open project.
+    const t = Math.min(2, Math.max(0, info.durationSec - 0.5));
+    const thumbPath = await invoke<string>("extract_thumbnail", { videoPath: path, timeSec: t });
+    const src = await fileSrc(thumbPath);
+    set({ recentThumbnails: { ...get().recentThumbnails, [path]: src } });
+  } catch {
+    // A missing/moved file, or a format ffmpeg can't probe - the card just
+    // falls back to its plain icon, same as a slow/failed network image
+    // would on a web page. Not worth surfacing as an app error for a
+    // background thumbnail.
+  } finally {
+    thumbnailsInFlight--;
+    thumbnailQueued.delete(path);
+    // Immediately pull the next queued path into this now-free slot, and
+    // kick a second pump in case more than one slot is free (e.g. right
+    // after a burst of items got queued while both slots were busy).
+    void pumpThumbnailQueue(get, set);
+  }
+}
+
 // End-of-session Discord digest (watch-folder mode only - see runFileBatch).
 // Batch items already rolled into a previous digest, so a long watch session
 // that drains and refills its queue many times doesn't re-report the same
@@ -1253,24 +1296,10 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   loadRecentThumbnail: async (path) => {
-    if (get().recentThumbnails[path]) return; // already cached this session
-    try {
-      const info = await invoke<MediaInfo>("probe_video", { path });
-      // A couple seconds in rather than frame 0 - the very first frame of a
-      // gameplay recording is disproportionately likely to be a loading
-      // screen or black frame, same reasoning as pickThumbnail's own peak-
-      // moment logic just applied at a much cheaper fixed offset since this
-      // runs for every recent clip, not just the one open project.
-      const t = Math.min(2, Math.max(0, info.durationSec - 0.5));
-      const thumbPath = await invoke<string>("extract_thumbnail", { videoPath: path, timeSec: t });
-      const src = await fileSrc(thumbPath);
-      set({ recentThumbnails: { ...get().recentThumbnails, [path]: src } });
-    } catch {
-      // A missing/moved file, or a format ffmpeg can't probe - the card
-      // just falls back to its plain icon, same as a slow/failed network
-      // image would on a web page. Not worth surfacing as an app error for
-      // a background thumbnail on the home screen.
-    }
+    if (get().recentThumbnails[path] || thumbnailQueued.has(path)) return; // cached or already queued
+    thumbnailQueued.add(path);
+    thumbnailQueue.push(path);
+    void pumpThumbnailQueue(get, set);
   },
 
   openVideo: async (path: string) => {

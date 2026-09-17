@@ -174,7 +174,7 @@ export default function Montage() {
               >
                 <Icon name="plus" size={20} />
                 <span>Add highlight clips</span>
-                <span className="muted small">Pick saved projects (.ccproj)</span>
+                <span className="muted small">Pick saved projects</span>
               </button>
               {selectedClips.length === 0
                 ? [2, 3, 4, 5].map((n) => (

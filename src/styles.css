@@ -2121,8 +2121,8 @@ kbd {
 .batch-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 10px;
+  padding: 8px 12px;
   border-radius: 10px;
   background: var(--bg1);
   border: 1px solid var(--line);
@@ -2160,9 +2160,9 @@ kbd {
 }
 .batch-thumb {
   flex-shrink: 0;
-  width: 56px;
-  height: 32px;
-  border-radius: 6px;
+  width: 96px;
+  height: 54px;
+  border-radius: 7px;
   background: var(--bg2);
   display: flex;
   align-items: center;
