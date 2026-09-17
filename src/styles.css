@@ -1978,6 +1978,139 @@ kbd {
   flex-shrink: 0;
 }
 
+/* Montage filmstrip - the empty and populated states are the same physical
+   track (a row of 16:9-ish slots), not a text paragraph that gets swapped
+   for a real list once clips exist. See CLAUDE.md/the 2026-09-17 design
+   review for why: an apologetic help-article paragraph in the one screen
+   whose whole job is sequencing clips read as an unstyled test page. */
+.filmstrip {
+  background: var(--bg1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+.filmstrip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: var(--space-3);
+}
+.filmstrip-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.filmstrip-track {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+.filmstrip-slot {
+  flex: 0 0 180px;
+  height: 128px;
+  border-radius: var(--radius-md);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.filmstrip-add {
+  border: 1.8px dashed var(--accent);
+  background: rgba(var(--accent-rgb), 0.06);
+  color: var(--text);
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  padding: 0 10px;
+}
+.filmstrip-add:hover {
+  background: rgba(var(--accent-rgb), 0.12);
+}
+.filmstrip-add:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.filmstrip-ghost {
+  border: 1px solid var(--line);
+  align-items: center;
+  justify-content: center;
+}
+.filmstrip-ghost-num {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--bg3);
+}
+.filmstrip-card {
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  padding: 8px;
+  cursor: grab;
+  transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+}
+.filmstrip-card.dragging {
+  border-color: var(--accent);
+  box-shadow: 0 12px 24px rgba(var(--accent-rgb), 0.35);
+  transform: translateY(-4px) scale(1.02);
+}
+.filmstrip-seq {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text);
+  background: rgba(11, 13, 18, 0.75);
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.filmstrip-duration {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent2);
+  background: rgba(11, 13, 18, 0.75);
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.filmstrip-card-body {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.filmstrip-card-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filmstrip-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.filmstrip-grip {
+  color: var(--dim);
+  cursor: grab;
+}
+.filmstrip-hint {
+  margin-top: var(--space-2);
+}
+.filmstrip-available {
+  margin-top: var(--space-3);
+}
+
 /* encoding options */
 .enc-options {
   display: flex;

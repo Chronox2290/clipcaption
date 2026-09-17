@@ -4,6 +4,7 @@ import { invoke, pickProjectOpenPaths, pickSavePath } from "../lib/tauri";
 import { fmtTime } from "../lib/captions";
 import type { MontageClip, ProjectFile } from "../types";
 import DestinationControl from "../components/DestinationControl";
+import { Icon } from "../components/Icon";
 
 /** Stitches highlight clips from SEVERAL different saved projects into one
  * shareable reel — the piece Auto Reel (Highlights tab) doesn't cover,
@@ -151,59 +152,107 @@ export default function Montage() {
                 Clear
               </button>
             )}
-            <span className="muted small batch-count">
-              {selectedClips.length}/{clips.length} clip{clips.length === 1 ? "" : "s"} selected
-              {selectedClips.length > 0 ? ` · ${fmtTime(totalDurationSec)} total` : ""}
-            </span>
+            {selectedClips.length > 0 && (
+              <span className="muted small batch-count">{fmtTime(totalDurationSec)} total</span>
+            )}
           </div>
 
-          {clips.length === 0 ? (
-            <div className="panel-empty">
-              <p className="muted">
-                Pick one or more saved .ccproj files — every highlight in each one shows up here,
-                ready to tick, reorder, and stitch into a single output. Drag a row to reorder;
-                playback order follows the list top to bottom.
-              </p>
+          <div className="filmstrip">
+            <div className="filmstrip-header">
+              <span className="filmstrip-label">Playback sequence</span>
+              <span className="muted small">
+                {selectedClips.length} clip{selectedClips.length === 1 ? "" : "s"} ·{" "}
+                {fmtTime(totalDurationSec)} total
+              </span>
             </div>
-          ) : (
-            <div className="batch-list">
-              {clips.map((c) => (
-                <div
-                  key={c.id}
-                  className={`batch-row montage-row ${selected.has(c.id) ? "sel" : ""}`}
-                  draggable={!montageJob}
-                  onDragStart={() => setDragId(c.id)}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={() => {
-                    if (dragId) moveClip(dragId, c.id);
-                    setDragId(null);
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selected.has(c.id)}
-                    onChange={() => toggle(c.id)}
-                  />
-                  <span className="montage-drag-handle" title="Drag to reorder">
-                    ⋮⋮
-                  </span>
-                  <span className="montage-source" title={c.projectPath}>
-                    {c.sourceLabel}
-                  </span>
-                  <span className="montage-clip-name">Clip #{c.rank}</span>
-                  <span className="muted small">
-                    {fmtTime(c.start)}–{fmtTime(c.end)} · {fmtTime(c.end - c.start)}
-                  </span>
-                  <button
-                    className="btn btn-ghost btn-small"
-                    onClick={() => removeClip(c.id)}
-                    disabled={!!montageJob}
-                    title="Remove from this montage"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
+            <div className="filmstrip-track">
+              <button
+                type="button"
+                className="filmstrip-slot filmstrip-add"
+                onClick={() => void addProjects()}
+                disabled={loading || !!montageJob}
+              >
+                <Icon name="plus" size={20} />
+                <span>Add highlight clips</span>
+                <span className="muted small">Pick saved projects (.ccproj)</span>
+              </button>
+              {selectedClips.length === 0
+                ? [2, 3, 4, 5].map((n) => (
+                    <div key={n} className="filmstrip-slot filmstrip-ghost" style={{ opacity: 1 - n * 0.13 }}>
+                      <span className="filmstrip-ghost-num">{String(n).padStart(2, "0")}</span>
+                    </div>
+                  ))
+                : selectedClips.map((c, i) => (
+                    <div
+                      key={c.id}
+                      className={`filmstrip-slot filmstrip-card ${dragId === c.id ? "dragging" : ""}`}
+                      draggable={!montageJob}
+                      onDragStart={() => setDragId(c.id)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={() => {
+                        if (dragId) moveClip(dragId, c.id);
+                        setDragId(null);
+                      }}
+                    >
+                      <span className="filmstrip-seq">{String(i + 1).padStart(2, "0")}</span>
+                      <span className="filmstrip-duration">{fmtTime(c.end - c.start)}</span>
+                      <div className="filmstrip-card-body">
+                        <span className="filmstrip-card-title" title={c.projectPath}>
+                          {c.sourceLabel}
+                        </span>
+                        <span className="muted small">Clip #{c.rank}</span>
+                      </div>
+                      <div className="filmstrip-card-actions">
+                        <span className="filmstrip-grip" title="Drag to reorder">
+                          <Icon name="grip" size={14} />
+                        </span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-small"
+                          onClick={() => toggle(c.id)}
+                          disabled={!!montageJob}
+                          title="Remove from this montage"
+                        >
+                          <Icon name="close" size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+            </div>
+            <p className="muted small filmstrip-hint">
+              Highlights play in order from left to right. Drag any card to reorder. Output
+              resolution is unified automatically.
+            </p>
+          </div>
+
+          {clips.length > selectedClips.length && (
+            <div className="filmstrip-available">
+              <h4>Available highlights not in this reel</h4>
+              <div className="batch-list">
+                {clips
+                  .filter((c) => !selected.has(c.id))
+                  .map((c) => (
+                    <label key={c.id} className="batch-row montage-row">
+                      <input type="checkbox" checked={false} onChange={() => toggle(c.id)} />
+                      <span className="montage-source" title={c.projectPath}>
+                        {c.sourceLabel}
+                      </span>
+                      <span className="montage-clip-name">Clip #{c.rank}</span>
+                      <span className="muted small">
+                        {fmtTime(c.start)}–{fmtTime(c.end)} · {fmtTime(c.end - c.start)}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-small"
+                        onClick={() => removeClip(c.id)}
+                        disabled={!!montageJob}
+                        title="Remove entirely"
+                      >
+                        <Icon name="close" size={13} />
+                      </button>
+                    </label>
+                  ))}
+              </div>
             </div>
           )}
         </div>
@@ -261,12 +310,11 @@ export default function Montage() {
           ) : (
             <button
               className="btn btn-primary btn-big"
-              disabled={selectedClips.length === 0}
-              onClick={() => void build()}
+              onClick={() => (selectedClips.length === 0 ? void addProjects() : void build())}
             >
               {selectedClips.length === 0
-                ? "Select clips to build"
-                : `Build montage (${selectedClips.length} clip${selectedClips.length === 1 ? "" : "s"})`}
+                ? "+ Add clips from project(s)…"
+                : `Stitch & export reel (${selectedClips.length} clip${selectedClips.length === 1 ? "" : "s"} · ${fmtTime(totalDurationSec)}) →`}
             </button>
           )}
 
