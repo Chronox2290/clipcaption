@@ -33,7 +33,12 @@ export type IconName =
   | "refresh"
   | "film"
   | "thumbUp"
-  | "thumbDown";
+  | "thumbDown"
+  | "bolt"
+  | "folder"
+  | "clock"
+  | "globe"
+  | "stop";
 
 const PATHS: Record<IconName, string> = {
   play: "M6 4l14 8-14 8V4z",
@@ -57,6 +62,11 @@ const PATHS: Record<IconName, string> = {
   film: "M4 4h16v16H4V4zM4 9h16M4 15h16M8 4v16M16 4v16",
   thumbUp: "M7 11v9H4a1 1 0 01-1-1v-7a1 1 0 011-1h3zM7 11l3.5-7a2 2 0 013.6 1.2L13 9h5a2 2 0 012 2.3l-1.5 7A2 2 0 0116.6 20H10a3 3 0 01-3-3v-6z",
   thumbDown: "M17 13V4h3a1 1 0 011 1v7a1 1 0 01-1 1h-3zM17 13l-3.5 7a2 2 0 01-3.6-1.2L11 15H6a2 2 0 01-2-2.3l1.5-7A2 2 0 017.4 4H14a3 3 0 013 3v6z",
+  bolt: "M13 3L5 14h5l-1 7 9-11h-5l1-7z",
+  folder: "M4 7a2 2 0 012-2h4l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H6a2 2 0 01-2-2V7z",
+  clock: "M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 3",
+  globe: "M12 21a9 9 0 100-18 9 9 0 000 18zM3 12h18M12 3a13 13 0 010 18M12 3a13 13 0 000 18",
+  stop: "M6 6h12v12H6z",
 };
 
 export function Icon({

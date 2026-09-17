@@ -4,6 +4,7 @@ import { invoke, pickProjectOpenPaths, pickSavePath } from "../lib/tauri";
 import { fmtTime } from "../lib/captions";
 import { EXPORT_PRESETS, RESOLUTION_OPTIONS } from "../lib/exportPresets";
 import type { MontageClip, ProjectFile } from "../types";
+import { Icon } from "../components/Icon";
 
 /** Stitches highlight clips from SEVERAL different saved projects into one
  * shareable reel — the piece Auto Reel (Highlights tab) doesn't cover,
@@ -21,7 +22,7 @@ export default function Montage() {
   const [loading, setLoading] = useState(false);
   const [presetId, setPresetId] = useState("original");
   const [resolutionId, setResolutionId] = useState("1080");
-  const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
+  const [fitMode, setFitMode] = useState<"fill" | "fit" | "track">("fill");
   const [dragId, setDragId] = useState<string | null>(null);
   const [sizeLimitEnabled, setSizeLimitEnabled] = useState(false);
   const [sizeLimitMb, setSizeLimitMb] = useState(25);
@@ -256,6 +257,13 @@ export default function Montage() {
                 >
                   Fit (show all)
                 </button>
+                <button
+                  className={`seg-toggle-btn ${fitMode === "track" ? "sel" : ""}`}
+                  title="Smart auto-reframe: tracks where the on-screen motion actually is and pans the crop to follow it, instead of a fixed center-crop. Motion-based, not face/object tracking - works best when the action is clearly the biggest moving thing in frame."
+                  onClick={() => setFitMode("track")}
+                >
+                  <Icon name="sparkle" size={13} /> Auto-track
+                </button>
               </div>
             </div>
           )}
@@ -302,7 +310,9 @@ export default function Montage() {
               disabled={selectedClips.length === 0}
               onClick={() => void build()}
             >
-              Build montage ({selectedClips.length} clip{selectedClips.length === 1 ? "" : "s"})
+              {selectedClips.length === 0
+                ? "Select clips to build"
+                : `Build montage (${selectedClips.length} clip${selectedClips.length === 1 ? "" : "s"})`}
             </button>
           )}
 

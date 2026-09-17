@@ -3,6 +3,7 @@ import { pickDirectory, pickVideoFiles } from "../lib/tauri";
 import { EXPORT_PRESETS, RESOLUTION_OPTIONS } from "../lib/exportPresets";
 import { STYLE_PRESETS } from "../lib/styles";
 import EncodingOptions from "../components/EncodingOptions";
+import { Icon } from "../components/Icon";
 
 const STATUS_ICON: Record<string, string> = {
   pending: "•",
@@ -67,7 +68,7 @@ export default function BatchScreen() {
   const setPresetId = (v: string) => setBatchExportSettings({ presetId: v });
   const setCustomMb = (v: number) => setBatchExportSettings({ customMb: v });
   const setResolutionId = (v: string) => setBatchExportSettings({ resolutionId: v });
-  const setFitMode = (v: "fill" | "fit") => setBatchExportSettings({ fitMode: v });
+  const setFitMode = (v: "fill" | "fit" | "track") => setBatchExportSettings({ fitMode: v });
   const setSaveMode = (v: "beside" | "folder") => setBatchExportSettings({ saveMode: v });
   const setOutputDir = (v: string | null) => setBatchExportSettings({ outputDir: v });
 
@@ -331,6 +332,13 @@ export default function BatchScreen() {
                 >
                   Fit (show all)
                 </button>
+                <button
+                  className={`seg-toggle-btn ${fitMode === "track" ? "sel" : ""}`}
+                  title="Smart auto-reframe: tracks where the on-screen motion actually is and pans the crop to follow it, instead of a fixed center-crop. Motion-based, not face/object tracking - works best when the action is clearly the biggest moving thing in frame."
+                  onClick={() => setFitMode("track")}
+                >
+                  <Icon name="sparkle" size={13} /> Auto-track
+                </button>
               </div>
             </div>
           )}
@@ -368,11 +376,16 @@ export default function BatchScreen() {
                 (saveMode === "folder" && !outputDir)
               }
             >
-              ⚡ Process {pendingCount} clip{pendingCount === 1 ? "" : "s"}
+              <Icon name="bolt" size={14} />{" "}
+              {pendingCount === 0
+                ? "Add clips to process"
+                : saveMode === "folder" && !outputDir
+                  ? "Choose an output folder"
+                  : `Process ${pendingCount} clip${pendingCount === 1 ? "" : "s"}`}
             </button>
           ) : (
             <button className="btn btn-big" onClick={cancelFileBatch}>
-              ■ Stop after current clip
+              <Icon name="stop" size={13} /> Stop after current clip
             </button>
           )}
           {!model?.downloaded && (

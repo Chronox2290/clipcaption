@@ -1,4 +1,4 @@
-/* ClipCaption — dark, glassy, snappy
+/* Substrike — dark, glassy, snappy
  *
  * Theme system: every color below is a token, and every token is
  * re-declared (not overridden piecemeal) under [data-theme="warm"] and
@@ -1881,7 +1881,18 @@ kbd {
   border-color: rgba(255, 92, 122, 0.4);
 }
 .batch-row.st-skipped {
-  opacity: 0.5;
+  /* Was a blanket opacity: 0.5 on the whole row - which multiplies down
+     already-muted text, cutting the one state a user most needs to read
+     (why did this clip not run) roughly in half again. Signal "skipped"
+     structurally instead (dashed border, no elevation shadow) and only dim
+     the status glyph, which is decorative, not the name/reason text next
+     to it. */
+  border-style: dashed;
+  border-color: var(--line);
+  box-shadow: none;
+}
+.batch-row.st-skipped .batch-status {
+  opacity: 0.6;
 }
 .batch-row.st-needs_review {
   border-color: rgba(var(--warn-rgb), 0.5);

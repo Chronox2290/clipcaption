@@ -128,7 +128,7 @@ export interface BatchExportSettings {
   presetId: string;
   customMb: number;
   resolutionId: string;
-  fitMode: "fill" | "fit";
+  fitMode: "fill" | "fit" | "track";
   saveMode: "beside" | "folder";
   outputDir: string | null;
 }
@@ -945,7 +945,7 @@ export const useApp = create<AppState>((set, get) => ({
         // without having to go looking for it.
         try {
           const { getCurrentWindow } = await import("@tauri-apps/api/window");
-          await getCurrentWindow().setTitle(`ClipCaption v${version}`);
+          await getCurrentWindow().setTitle(`Substrike v${version}`);
         } catch (titleErr) {
           console.error("Could not set window title:", titleErr);
         }
@@ -1417,7 +1417,7 @@ export const useApp = create<AppState>((set, get) => ({
       const raw = await invoke<string>("read_text_file", { path });
       const parsed: unknown = JSON.parse(raw);
       if (!isValidCaptionStyle(parsed)) {
-        set({ error: "That file doesn't look like a ClipCaption style preset." });
+        set({ error: "That file doesn't look like a Substrike style preset." });
         return;
       }
       // A fresh id/name pair so importing the same file twice (or a file
