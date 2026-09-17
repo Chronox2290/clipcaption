@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { useApp } from "../store";
 
 // Rendered once, globally (mounted in App.tsx) so an update found while
@@ -17,7 +18,7 @@ export default function UpdateBanner() {
     return (
       <div className="toast toast-update" role="status">
         <span>
-          ⬆ Substrike {info.version} is available.
+          <Icon name="refresh" size={14} /> Substrike {info.version} is available.
           {info.body ? ` ${info.body}` : ""}
         </span>
         <button className="btn btn-primary btn-small" onClick={() => void installUpdate()}>
@@ -41,7 +42,7 @@ export default function UpdateBanner() {
   if (status === "error" && error) {
     return (
       <div className="toast toast-error" role="alert">
-        <span>⚠ Update check failed: {error}</span>
+        <span><Icon name="warning" size={14} /> Update check failed: {error}</span>
         <button className="toast-close" onClick={dismiss} title="Dismiss">
           ✕
         </button>

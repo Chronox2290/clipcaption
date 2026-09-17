@@ -686,7 +686,7 @@ export default function HighlightsPanel({ videoRef }: Props) {
 
       {exportDone && !batch && (
         <div className="export-done">
-          ✔ Saved to
+          <Icon name="check" size={14} /> Saved to
           <code>{exportDone}</code>
         </div>
       )}

@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { useApp } from "../store";
 import TimeField from "./TimeField";
@@ -139,7 +140,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
           </label>
         )}
         <button className="btn btn-primary" onClick={() => transcribe()} disabled={!model?.downloaded}>
-          ✦ Auto-caption this clip
+          <Icon name="sparkle" size={14} /> Auto-caption this clip
         </button>
         {!model?.downloaded && (
           <p className="muted small">
@@ -191,6 +192,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
           )}
         </div>
       )}
+      <h4>Speakers</h4>
       <div className="speakers-panel">
         <label className="speaker-count">
           <span className="muted small">People talking in this recording</span>
@@ -247,6 +249,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
           </div>
         </div>
       )}
+      <h4>Transcript</h4>
       <label className="check-row">
         <input type="checkbox" checked={censor} onChange={(e) => setCensor(e.target.checked)} />
         <span>Censor profanity (f***)</span>
@@ -373,7 +376,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
                         title="Set to where the video is paused"
                         onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "start")}
                       >
-                        📍
+                        <Icon name="pin" size={13} />
                       </button>
                     </TimeField>
                     <span className="hl-nudge-label">End</span>
@@ -388,7 +391,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
                         title="Set to where the video is paused"
                         onClick={() => syncWordToPlayhead(seg.id, tuning.idx, "end")}
                       >
-                        📍
+                        <Icon name="pin" size={13} />
                       </button>
                     </TimeField>
                   </div>
@@ -399,9 +402,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
           );
         })}
       </div>
+      <h4>Cleanup &amp; tools</h4>
       <div className="transcript-actions">
         <button className="btn btn-ghost" onClick={() => transcribe()}>
-          ↻ Re-transcribe
+          <Icon name="refresh" size={14} /> Re-transcribe
         </button>
         {polishAvailable ? (
           <button
@@ -416,11 +420,12 @@ export default function TranscriptPanel({ videoRef }: Props) {
                 : "No clip range is active, so this checks the WHOLE loaded transcript - open a specific clip/highlight first to check just that instead. Nothing is changed until you review and accept each fix."
             }
           >
+            <Icon name="sparkle" size={14} />
             {polishJob
-              ? `✨ Checking… ${Math.round((polishJob.progress ?? 0) * 100)}%`
+              ? `Checking… ${Math.round((polishJob.progress ?? 0) * 100)}%`
               : activeRange
-              ? "✨ Clean up this clip"
-              : "✨ Clean up transcript"}
+              ? "Clean up this clip"
+              : "Clean up transcript"}
           </button>
         ) : (
           <button
@@ -429,9 +434,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
             disabled={!!polishModelJob}
             title="Downloads a small offline AI model (~1.1GB, one-time) that reviews the words whisper wasn't confident about - misheard names and similar. Everything else in the app works without it."
           >
+            <Icon name="download" size={14} />
             {polishModelJob
-              ? `⬇ Downloading cleanup model… ${Math.round((polishModelJob.progress ?? 0) * 100)}%`
-              : "⬇ Get AI cleanup (~1.1GB)"}
+              ? `Downloading cleanup model… ${Math.round((polishModelJob.progress ?? 0) * 100)}%`
+              : "Get AI cleanup (~1.1GB)"}
           </button>
         )}
         {models.find((m) => m.name === "wav2vec2-base-960h")?.downloaded ? (
@@ -447,11 +453,12 @@ export default function TranscriptPanel({ videoRef }: Props) {
                 : "No clip range is active, so this re-times the WHOLE loaded transcript - open a specific clip/highlight first to align just that instead (much faster). Undoable."
             }
           >
+            <Icon name="clock" size={14} />
             {alignJob
-              ? `⏱ Aligning… ${Math.round((alignJob.progress ?? 0) * 100)}%`
+              ? `Aligning… ${Math.round((alignJob.progress ?? 0) * 100)}%`
               : activeRange
-              ? "⏱ Align this clip"
-              : "⏱ Align timing"}
+              ? "Align this clip"
+              : "Align timing"}
           </button>
         ) : (
           <button
@@ -460,9 +467,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
             disabled={!!modelJob}
             title="Downloads a small offline model (~360MB, one-time) that re-times words against the actual audio using the transcript's own text - measurably more accurate than whisper's own timing, especially on overlapping speech."
           >
+            <Icon name="download" size={14} />
             {modelJob
-              ? `⬇ Downloading alignment model… ${Math.round((modelJob.progress ?? 0) * 100)}%`
-              : "⬇ Get timing alignment (~360MB)"}
+              ? `Downloading alignment model… ${Math.round((modelJob.progress ?? 0) * 100)}%`
+              : "Get timing alignment (~360MB)"}
           </button>
         )}
         {polishAvailable && (
@@ -498,7 +506,7 @@ export default function TranscriptPanel({ videoRef }: Props) {
             {translateJob ? (
               <>
                 <span className="muted small translate-progress">
-                  🌐 Translating line {Math.min(
+                  <Icon name="globe" size={14} /> Translating line {Math.min(
                     translateScope.length,
                     Math.round((translateJob.progress ?? 0) * translateScope.length)
                   )}
@@ -514,9 +522,10 @@ export default function TranscriptPanel({ videoRef }: Props) {
                 onClick={() => void translateTranscript(translateLanguage)}
                 disabled={translateScope.length === 0}
               >
+                <Icon name="globe" size={14} />
                 {activeRange
-                  ? `🌐 Translate this clip (${translateScope.length} line${translateScope.length === 1 ? "" : "s"})`
-                  : "🌐 Translate whole transcript"}
+                  ? `Translate this clip (${translateScope.length} line${translateScope.length === 1 ? "" : "s"})`
+                  : "Translate whole transcript"}
               </button>
             )}
           </span>

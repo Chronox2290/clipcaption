@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store";
 import CaptionOverlay from "../components/CaptionOverlay";
@@ -196,7 +197,7 @@ export default function Editor() {
           disabled={!canUndo}
           title="Undo (Ctrl+Z)"
         >
-          ↺
+          <Icon name="undo" size={14} />
         </button>
         <button
           className="btn btn-ghost btn-small"
@@ -204,11 +205,11 @@ export default function Editor() {
           disabled={!canRedo}
           title="Redo (Ctrl+Shift+Z)"
         >
-          ↻
+          <Icon name="redo" size={14} />
         </button>
-        {savedFlash && <span className="ed-saved-flash">✔ Saved</span>}
+        {savedFlash && <span className="ed-saved-flash"><Icon name="check" size={14} /> Saved</span>}
         <button className="btn btn-ghost btn-small" onClick={doSave} title={projectPath ?? "Save the highlights, names, style, and transcript so far"}>
-          💾 Save Project
+          <Icon name="save" size={14} /> Save Project
         </button>
         <button className="btn btn-ghost btn-small" onClick={() => void saveProjectAs()}>
           Save As…
@@ -218,7 +219,7 @@ export default function Editor() {
           onClick={() => void loadProject()}
           title="Open a different saved .ccproj - your work on this video is autosaved first"
         >
-          📁 Open Project…
+          <Icon name="folder" size={14} /> Open Project…
         </button>
       </header>
       {restoredSession && (
@@ -291,13 +292,13 @@ export default function Editor() {
                 title="Adds a decorative reaction sticker at the current playhead - drag to place, click to edit text/rotation/size. Separate from the dialogue captions, its own opt-in layer."
                 onClick={() => addSticker(time)}
               >
-                ✨ Add sticker
+                <Icon name="sparkle" size={14} /> Add sticker
               </button>
             </div>
 
             <div className="transport">
-              <button className="btn btn-ghost" onClick={togglePlay}>
-                {playing ? "❚❚" : "▶"}
+              <button className="btn btn-ghost" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
+                <Icon name={playing ? "pause" : "play"} size={16} />
               </button>
               <div className="seek-wrap">
                 <input

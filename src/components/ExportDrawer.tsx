@@ -212,7 +212,7 @@ export default function ExportDrawer() {
               title="Smart auto-reframe: tracks where the on-screen motion actually is and pans the crop to follow it, instead of a fixed center-crop. Motion-based, not face/object tracking - works best when the action is clearly the biggest moving thing in frame."
               onClick={() => setFitMode("track")}
             >
-              ✨ Auto-track
+              <Icon name="sparkle" size={13} /> Auto-track
             </button>
           </div>
         </div>
@@ -267,7 +267,7 @@ export default function ExportDrawer() {
             onClick={() => void generateMetadata()}
             disabled={!!metadataJob}
           >
-            {metadataJob ? "Generating…" : clipMetadata ? "Regenerate" : "✨ Generate from transcript"}
+            {metadataJob ? "Generating…" : clipMetadata ? "Regenerate" : <><Icon name="sparkle" size={14} /> Generate from transcript</>}
           </button>
           {clipMetadata && (
             <div className="metadata-result">
@@ -333,7 +333,7 @@ export default function ExportDrawer() {
 
       {!exportJob && (
         <button className="btn btn-primary btn-big" onClick={go} disabled={!videoPath}>
-          ⬇ Export
+          <Icon name="download" size={14} /> Export
         </button>
       )}
 
@@ -358,7 +358,7 @@ export default function ExportDrawer() {
 
       {exportDone && (
         <div className="export-done">
-          ✔ Exported to
+          <Icon name="check" size={14} /> Exported to
           <code>{exportDone}</code>
         </div>
       )}

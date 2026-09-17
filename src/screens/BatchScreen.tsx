@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useApp } from "../store";
 import { pickDirectory, pickVideoFiles } from "../lib/tauri";
 import { EXPORT_PRESETS, RESOLUTION_OPTIONS } from "../lib/exportPresets";
@@ -5,14 +6,14 @@ import { STYLE_PRESETS } from "../lib/styles";
 import EncodingOptions from "../components/EncodingOptions";
 import { Icon } from "../components/Icon";
 
-const STATUS_ICON: Record<string, string> = {
+const STATUS_ICON: Record<string, ReactNode> = {
   pending: "•",
-  transcribing: "✦",
-  exporting: "⬇",
+  transcribing: <Icon name="sparkle" size={14} />,
+  exporting: <Icon name="download" size={14} />,
   done: "✔",
   error: "✕",
   skipped: "–",
-  needs_review: "⚠",
+  needs_review: <Icon name="warning" size={14} />,
 };
 
 export default function BatchScreen() {
@@ -181,7 +182,7 @@ export default function BatchScreen() {
                 }
               }}
             >
-              <div className="dropzone-icon">🗂️</div>
+              <div className="dropzone-icon"><Icon name="folder" size={40} /></div>
               <h2>Queue up your clips</h2>
               <p>Add individual clips or a whole folder of OBS recordings</p>
             </div>

@@ -1325,6 +1325,7 @@ kbd {
 }
 
 /* style panel */
+.transcript h4,
 .style-panel h4,
 .export-panel h4 {
   font-size: 12px;

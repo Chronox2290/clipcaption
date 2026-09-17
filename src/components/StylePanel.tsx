@@ -221,7 +221,7 @@ export default function StylePanel() {
       </div>
       <div className="field">
         <label title="Adds a relevant emoji after the key word in each caption line">
-          Emojis 🔥
+          Emojis <Icon name="fire" size={14} />
         </label>
         <input
           type="checkbox"
@@ -231,7 +231,7 @@ export default function StylePanel() {
       </div>
       <div className="field">
         <label title="Captions follow the voice: they slide toward where the speaker is in the stereo field, shrink when someone is far away and quiet, grow when they're close and loud, and shake when someone screams. Needs a transcript made on v0.2.4 or later.">
-          Living captions 🎭
+          Living captions <Icon name="mask" size={14} />
         </label>
         <input
           type="checkbox"

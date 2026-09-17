@@ -1,3 +1,4 @@
+import { Icon } from "./components/Icon";
 import { useEffect } from "react";
 import { useApp } from "./store";
 import { isTauri } from "./lib/tauri";
@@ -54,7 +55,7 @@ export default function App() {
       <UpdateBanner />
       {error && (
         <div className="toast toast-error" role="alert">
-          <span>⚠ {error}</span>
+          <span><Icon name="warning" size={14} /> {error}</span>
           <button className="toast-close" onClick={clearError} title="Dismiss">
             ✕
           </button>

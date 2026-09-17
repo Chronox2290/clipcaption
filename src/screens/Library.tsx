@@ -1,3 +1,4 @@
+import { Icon } from "../components/Icon";
 import { useApp } from "../store";
 import { pickVideoFile, isTauri } from "../lib/tauri";
 
@@ -79,7 +80,7 @@ export default function Library() {
             }
           }}
         >
-          <div className="dropzone-icon">🎬</div>
+          <div className="dropzone-icon"><Icon name="film" size={40} /></div>
           <h2>Drop a clip here</h2>
           <p>or click to browse — mp4 · mkv · mov · webm</p>
           {!isTauri && (
@@ -88,7 +89,7 @@ export default function Library() {
         </div>
 
         <button className="batch-launch" onClick={openBatch}>
-          <span className="batch-launch-icon">🗂️</span>
+          <span className="batch-launch-icon"><Icon name="folder" size={22} /></span>
           <span>
             <strong>Batch process clips</strong>
             <span className="muted"> — caption + compress a whole folder in one go</span>
@@ -97,7 +98,7 @@ export default function Library() {
         </button>
 
         <button className="batch-launch" onClick={openMontage}>
-          <span className="batch-launch-icon">🎞️</span>
+          <span className="batch-launch-icon"><Icon name="film" size={22} /></span>
           <span>
             <strong>Build a montage</strong>
             <span className="muted"> — stitch highlights from several projects into one reel</span>
@@ -106,7 +107,7 @@ export default function Library() {
         </button>
 
         <button className="batch-launch" onClick={() => void loadProject()}>
-          <span className="batch-launch-icon">📁</span>
+          <span className="batch-launch-icon"><Icon name="folder" size={22} /></span>
           <span>
             <strong>Open a saved project</strong>
             <span className="muted"> — resume highlights, names, and captions from a .ccproj file</span>

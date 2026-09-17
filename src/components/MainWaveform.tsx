@@ -1,3 +1,4 @@
+import { Icon } from "./Icon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../store";
 import { fmtTime, isUnsure, resolveSpeakerNames } from "../lib/captions";
@@ -920,7 +921,7 @@ export default function MainWaveform({ videoRef }: Props) {
             disabled={!tuningWord}
             title="Zoom in on the selected word until it's big enough to drag (Z)"
           >
-            ⤢ Word
+            <Icon name="zoom" size={13} /> Word
           </button>
           <button
             className="btn btn-ghost btn-small"
@@ -932,7 +933,7 @@ export default function MainWaveform({ videoRef }: Props) {
                 : `Jump to the next word whisper wasn't sure about (${unsureCount} in this transcript)`
             }
           >
-            ⚠ {unsureCount}
+            <Icon name="warning" size={13} /> {unsureCount}
           </button>
         </span>
       </div>
