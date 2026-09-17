@@ -540,26 +540,44 @@ export const SPEAKER_MATCH_THRESHOLD = 0.5;
  * Returns the whole matched profile (not just its name) so callers that
  * need to update/replace a profile - not just display it - have its id
  * too. A speaker with no embedding, or whose closest match doesn't clear
- * SPEAKER_MATCH_THRESHOLD, is simply absent from the result. */
+ * SPEAKER_MATCH_THRESHOLD, is simply absent from the result.
+ *
+ * Real confirmed bug this used to have: it matched each speaker index
+ * *independently*, so two different real people in the same clip could
+ * both best-match the same saved profile (their embeddings don't have to
+ * be identical, just each closer to that one profile than to anything
+ * else - genuinely possible on this app's own hardest case, overlapping
+ * proximity-chat audio). The visible symptom was typing a name for
+ * "Speaker A" immediately making "Speaker B" show the exact same name,
+ * since both indices resolved to the profile just created/renamed. Fixed
+ * with a greedy one-to-one assignment: highest-scoring (index, profile)
+ * pairs are assigned first, and once a profile or an index is claimed,
+ * neither is considered again - the loser of a collision falls back to
+ * unmatched (its own "Speaker B" placeholder) rather than borrowing
+ * someone else's name. */
 export function matchSpeakerProfiles(
   speakerEmbeddings: Record<string, number[]>,
   profiles: SpeakerProfile[]
 ): Record<number, SpeakerProfile> {
   const matched: Record<number, SpeakerProfile> = {};
   if (!profiles.length) return matched;
+
+  const candidates: { key: number; profile: SpeakerProfile; score: number }[] = [];
   for (const [key, embedding] of Object.entries(speakerEmbeddings)) {
-    let best: SpeakerProfile | null = null;
-    let bestScore = -Infinity;
     for (const profile of profiles) {
       const score = cosineSimilarity(embedding, profile.embedding);
-      if (score > bestScore) {
-        bestScore = score;
-        best = profile;
+      if (score >= SPEAKER_MATCH_THRESHOLD) {
+        candidates.push({ key: Number(key), profile, score });
       }
     }
-    if (best && bestScore >= SPEAKER_MATCH_THRESHOLD) {
-      matched[Number(key)] = best;
-    }
+  }
+  candidates.sort((a, b) => b.score - a.score);
+
+  const claimedProfiles = new Set<string>();
+  for (const { key, profile } of candidates) {
+    if (key in matched || claimedProfiles.has(profile.id)) continue;
+    matched[key] = profile;
+    claimedProfiles.add(profile.id);
   }
   return matched;
 }

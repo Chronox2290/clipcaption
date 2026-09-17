@@ -211,6 +211,19 @@ export default function TranscriptPanel({ videoRef }: Props) {
             ))}
           </select>
         </label>
+        {/* Real user report: changing this alone did nothing to a clip
+            that had already been transcribed, because it only takes
+            effect on the NEXT transcribe run - the button that actually
+            applies it lived far below, past the whole word grid, with no
+            visible link to this control. This closes that gap directly. */}
+        <button
+          className="btn btn-small btn-ghost speaker-count-apply"
+          onClick={() => transcribe()}
+          disabled={!model?.downloaded}
+          title="This clip keeps its current speaker labels until you re-transcribe - changing the count above doesn't retroactively fix an already-diarized clip."
+        >
+          <Icon name="refresh" size={12} /> Re-transcribe with this count
+        </button>
       </div>
       {distinctSpeakers.length > 0 && (
         <div className="speakers-panel">

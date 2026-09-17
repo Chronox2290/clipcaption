@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
-import { useApp } from "../store";
+import { useApp, type AppTheme } from "../store";
 import { pickVideoFile, isTauri } from "../lib/tauri";
+
+/** App theme changes how Substrike ITSELF looks - the editor chrome,
+ * buttons, panels - a global preference, not a per-clip one. Used to live
+ * inside a single clip's Style panel (which is about how CAPTIONS look in
+ * the exported video), a real reported confusion: an app-wide setting
+ * tucked inside one clip's editing context. Lives on the home screen now,
+ * the same "global settings behind a click" pattern as the engine chip. */
+const APP_THEMES: { id: AppTheme; name: string; blurb: string; a: string; b: string }[] = [
+  { id: "precision", name: "Precision", blurb: "Dense, cool, restrained — Resolve/Premiere-adjacent.", a: "#7c5cff", b: "#2ee6ff" },
+  { id: "warm", name: "Creator warm", blurb: "Roomier, warmer, fully rounded — Descript/CapCut-adjacent.", a: "#9b7bff", b: "#3ce6c2" },
+  { id: "gamer", name: "High-energy", blurb: "Gradient glow, sharper actions — Discord/RGB-gear-adjacent.", a: "#8b5cf6", b: "#22d3ee" },
+];
 
 /** One recents-grid card. Its own component (not inlined in the map) so the
  * lazy thumbnail fetch is a normal per-item mount effect instead of a
@@ -55,6 +67,9 @@ export default function Library() {
   // compact header status chip that expands on demand, the same "settings
   // live behind a click, not in the way" pattern CapCut/Descript use.
   const [showEngine, setShowEngine] = useState(false);
+  const [showTheme, setShowTheme] = useState(false);
+  const theme = useApp((s) => s.theme);
+  const setTheme = useApp((s) => s.setTheme);
 
   const browse = async () => {
     const p = await pickVideoFile();
@@ -92,6 +107,9 @@ export default function Library() {
           >
             <span className="engine-chip-dot" />
             {selectedModel} · {selected?.downloaded ? "ready" : "not downloaded"}
+          </button>
+          <button className="engine-chip" onClick={() => setShowTheme((v) => !v)}>
+            <Icon name="sliders" size={12} /> Appearance
           </button>
           {isTauri && (
             <>
@@ -172,6 +190,30 @@ export default function Library() {
             Speakers are detected automatically by real voice recognition (not just turn
             alternation) and colored per-speaker in the captions — no setup needed.
           </p>
+        </section>
+      )}
+
+      {showTheme && (
+        <section className="model-card">
+          <div className="model-card-head">
+            <h3>App theme</h3>
+          </div>
+          <div className="theme-grid">
+            {APP_THEMES.map((t) => (
+              <button
+                key={t.id}
+                className={`theme-card ${theme === t.id ? "sel" : ""}`}
+                onClick={() => setTheme(t.id)}
+                title={t.blurb}
+              >
+                <span
+                  className="theme-swatch"
+                  style={{ background: `linear-gradient(135deg, ${t.a}, ${t.b})` }}
+                />
+                <span className="theme-card-name">{t.name}</span>
+              </button>
+            ))}
+          </div>
         </section>
       )}
 
