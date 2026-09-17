@@ -5,8 +5,9 @@ import { buildStickerAss, stickersForRange } from "../lib/stickerAss";
 import { paginate, applyCensor, shiftPages, layoutRows, fmtTime, capitalize } from "../lib/captions";
 import { addEmojis } from "../lib/emojis";
 import { pickSavePath } from "../lib/tauri";
-import { EXPORT_PRESETS as PRESETS, RESOLUTION_OPTIONS, resolveResolution } from "../lib/exportPresets";
+import { EXPORT_PRESETS as PRESETS, resolveResolution } from "../lib/exportPresets";
 import EncodingOptions from "./EncodingOptions";
+import DestinationControl from "./DestinationControl";
 import { Icon } from "./Icon";
 
 export default function ExportDrawer() {
@@ -132,91 +133,49 @@ export default function ExportDrawer() {
           </button>
         </div>
       )}
-      <h4>Destination preset</h4>
-      <div className="preset-list">
-        {PRESETS.map((p) => (
-          <label key={p.id} className={`preset-row ${presetId === p.id ? "sel" : ""}`}>
-            <input
-              type="radio"
-              name="epreset"
-              checked={presetId === p.id}
-              onChange={() => {
-                setPresetId(p.id);
-                // Discord presets carry a known platform limit - prefill it
-                // as a convenience. Doesn't touch the checkbox for a preset
-                // with no inherent size (original/vertical/etc), so it never
-                // fights a limit the user already turned on by hand.
-                if (p.targetSizeMB != null) {
-                  setSizeLimitEnabled(true);
-                  setSizeLimitMb(p.targetSizeMB);
-                }
-              }}
-            />
-            <span>{p.name}</span>
-          </label>
-        ))}
-      </div>
-
-      <div className="field">
-        <label title="Works with any preset above - e.g. TikTok's 9:16 crop capped to fit Facebook's 25MB upload limit, not just the Discord presets.">
-          Limit file size
-        </label>
-        <input
-          type="checkbox"
-          checked={sizeLimitEnabled}
-          onChange={(e) => setSizeLimitEnabled(e.target.checked)}
-        />
-        {sizeLimitEnabled && (
-          <input
-            type="number"
-            min={1}
-            max={2000}
-            value={sizeLimitMb}
-            onChange={(e) => setSizeLimitMb(Number(e.target.value))}
-          />
-        )}
-        {sizeLimitEnabled && <span className="field-val">MB</span>}
-      </div>
-
-      <div className="field">
-        <label>Resolution</label>
-        <select value={resolutionId} onChange={(e) => setResolutionId(e.target.value)}>
-          {RESOLUTION_OPTIONS.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {isCropped && (
+      <DestinationControl
+        presetId={presetId}
+        customMb={sizeLimitMb}
+        resolutionId={resolutionId}
+        fitMode={fitMode}
+        hideCustomInput
+        onPresetChange={(id) => {
+          setPresetId(id);
+          // Discord/custom presets carry a known platform limit - prefill
+          // it as a convenience. Doesn't touch the checkbox for a preset
+          // with no inherent size (original/vertical), so it never fights a
+          // limit the user already turned on by hand.
+          const p = PRESETS.find((x) => x.id === id);
+          if (p?.targetSizeMB != null) {
+            setSizeLimitEnabled(true);
+            setSizeLimitMb(p.targetSizeMB);
+          }
+        }}
+        onCustomMbChange={setSizeLimitMb}
+        onResolutionChange={setResolutionId}
+        onFitModeChange={setFitMode}
+      >
         <div className="field">
-          <label>Frame</label>
-          <div className="seg-toggle">
-            <button
-              className={`seg-toggle-btn ${fitMode === "fill" ? "sel" : ""}`}
-              title="Fill the frame edge-to-edge, cropping whatever doesn't fit"
-              onClick={() => setFitMode("fill")}
-            >
-              Fill (crop)
-            </button>
-            <button
-              className={`seg-toggle-btn ${fitMode === "fit" ? "sel" : ""}`}
-              title="Show the whole frame, padded with a blurred zoomed copy instead of cropping"
-              onClick={() => setFitMode("fit")}
-            >
-              Fit (show all)
-            </button>
-            <button
-              className={`seg-toggle-btn ${fitMode === "track" ? "sel" : ""}`}
-              title="Smart auto-reframe: tracks where the on-screen motion actually is and pans the crop to follow it, instead of a fixed center-crop. Motion-based, not face/object tracking - works best when the action is clearly the biggest moving thing in frame."
-              onClick={() => setFitMode("track")}
-            >
-              <Icon name="sparkle" size={13} /> Auto-track
-            </button>
-          </div>
+          <label title="Works with any preset above - e.g. TikTok's 9:16 crop capped to fit Facebook's 25MB upload limit, not just the Discord presets.">
+            Limit file size
+          </label>
+          <input
+            type="checkbox"
+            checked={sizeLimitEnabled}
+            onChange={(e) => setSizeLimitEnabled(e.target.checked)}
+          />
+          {sizeLimitEnabled && (
+            <input
+              type="number"
+              min={1}
+              max={2000}
+              value={sizeLimitMb}
+              onChange={(e) => setSizeLimitMb(Number(e.target.value))}
+            />
+          )}
+          {sizeLimitEnabled && <span className="field-val">MB</span>}
         </div>
-      )}
+      </DestinationControl>
 
       {activeRange && (
         <div className="hl-active">

@@ -2,9 +2,8 @@ import { useState } from "react";
 import { useApp } from "../store";
 import { invoke, pickProjectOpenPaths, pickSavePath } from "../lib/tauri";
 import { fmtTime } from "../lib/captions";
-import { EXPORT_PRESETS, RESOLUTION_OPTIONS } from "../lib/exportPresets";
 import type { MontageClip, ProjectFile } from "../types";
-import { Icon } from "../components/Icon";
+import DestinationControl from "../components/DestinationControl";
 
 /** Stitches highlight clips from SEVERAL different saved projects into one
  * shareable reel — the piece Auto Reel (Highlights tab) doesn't cover,
@@ -26,9 +25,6 @@ export default function Montage() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [sizeLimitEnabled, setSizeLimitEnabled] = useState(false);
   const [sizeLimitMb, setSizeLimitMb] = useState(25);
-
-  const preset = EXPORT_PRESETS.find((p) => p.id === presetId) ?? EXPORT_PRESETS[0];
-  const isCropped = !!(preset.targetW && preset.targetH);
   const selectedClips = clips.filter((c) => selected.has(c.id));
   const totalDurationSec = selectedClips.reduce((n, c) => n + (c.end - c.start), 0);
 
@@ -213,81 +209,39 @@ export default function Montage() {
         </div>
 
         <div className="batch-side">
-          <h4>Destination preset</h4>
-          <div className="preset-list">
-            {EXPORT_PRESETS.filter((p) => p.id !== "custom").map((p) => (
-              <label key={p.id} className={`preset-row ${presetId === p.id ? "sel" : ""}`}>
-                <input
-                  type="radio"
-                  name="mpreset"
-                  checked={presetId === p.id}
-                  onChange={() => setPresetId(p.id)}
-                />
-                <span>{p.name}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className="field">
-            <label>Resolution</label>
-            <select value={resolutionId} onChange={(e) => setResolutionId(e.target.value)}>
-              {RESOLUTION_OPTIONS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {isCropped && (
+          <DestinationControl
+            presetId={presetId}
+            customMb={sizeLimitMb}
+            resolutionId={resolutionId}
+            fitMode={fitMode}
+            resolutionMode="uniform"
+            allowCustom={false}
+            onPresetChange={setPresetId}
+            onCustomMbChange={setSizeLimitMb}
+            onResolutionChange={setResolutionId}
+            onFitModeChange={setFitMode}
+          >
             <div className="field">
-              <label>Frame</label>
-              <div className="seg-toggle">
-                <button
-                  className={`seg-toggle-btn ${fitMode === "fill" ? "sel" : ""}`}
-                  title="Fill the frame edge-to-edge, cropping whatever doesn't fit"
-                  onClick={() => setFitMode("fill")}
-                >
-                  Fill (crop)
-                </button>
-                <button
-                  className={`seg-toggle-btn ${fitMode === "fit" ? "sel" : ""}`}
-                  title="Show the whole frame, padded with a blurred zoomed copy instead of cropping"
-                  onClick={() => setFitMode("fit")}
-                >
-                  Fit (show all)
-                </button>
-                <button
-                  className={`seg-toggle-btn ${fitMode === "track" ? "sel" : ""}`}
-                  title="Smart auto-reframe: tracks where the on-screen motion actually is and pans the crop to follow it, instead of a fixed center-crop. Motion-based, not face/object tracking - works best when the action is clearly the biggest moving thing in frame."
-                  onClick={() => setFitMode("track")}
-                >
-                  <Icon name="sparkle" size={13} /> Auto-track
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="field">
-            <label title="Each clip still renders at quality (CRF) individually - this caps the FINAL joined file with one extra compression pass, same as a single export's own size limit.">
-              Limit file size
-            </label>
-            <input
-              type="checkbox"
-              checked={sizeLimitEnabled}
-              onChange={(e) => setSizeLimitEnabled(e.target.checked)}
-            />
-            {sizeLimitEnabled && (
+              <label title="Each clip still renders at quality (CRF) individually - this caps the FINAL joined file with one extra compression pass, same as a single export's own size limit.">
+                Limit file size
+              </label>
               <input
-                type="number"
-                min={1}
-                max={2000}
-                value={sizeLimitMb}
-                onChange={(e) => setSizeLimitMb(Number(e.target.value))}
+                type="checkbox"
+                checked={sizeLimitEnabled}
+                onChange={(e) => setSizeLimitEnabled(e.target.checked)}
               />
-            )}
-            {sizeLimitEnabled && <span className="field-val">MB</span>}
-          </div>
+              {sizeLimitEnabled && (
+                <input
+                  type="number"
+                  min={1}
+                  max={2000}
+                  value={sizeLimitMb}
+                  onChange={(e) => setSizeLimitMb(Number(e.target.value))}
+                />
+              )}
+              {sizeLimitEnabled && <span className="field-val">MB</span>}
+            </div>
+          </DestinationControl>
 
           <p className="muted small">
             Every clip is rendered at this same resolution regardless of its own source video's

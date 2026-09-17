@@ -1,10 +1,10 @@
 import type { ReactNode } from "react";
 import { useApp } from "../store";
 import { pickDirectory, pickVideoFiles } from "../lib/tauri";
-import { EXPORT_PRESETS, RESOLUTION_OPTIONS } from "../lib/exportPresets";
 import { STYLE_PRESETS } from "../lib/styles";
 import EncodingOptions from "../components/EncodingOptions";
 import { Icon } from "../components/Icon";
+import DestinationControl from "../components/DestinationControl";
 
 const STATUS_ICON: Record<string, ReactNode> = {
   pending: "•",
@@ -74,8 +74,6 @@ export default function BatchScreen() {
   const setOutputDir = (v: string | null) => setBatchExportSettings({ outputDir: v });
 
   const model = models.find((m) => m.name === selectedModel);
-  const preset = EXPORT_PRESETS.find((p) => p.id === presetId)!;
-  const isCropped = !!(preset.targetW && preset.targetH);
   const pendingCount = batchItems.filter((i) => i.status === "pending").length;
   const doneCount = batchItems.filter((i) => i.status === "done").length;
 
@@ -277,72 +275,16 @@ export default function BatchScreen() {
             uses whatever is currently set.
           </p>
 
-          <h4>Export preset</h4>
-          <div className="preset-list">
-            {EXPORT_PRESETS.map((p) => (
-              <label key={p.id} className={`preset-row ${presetId === p.id ? "sel" : ""}`}>
-                <input
-                  type="radio"
-                  name="bpreset"
-                  checked={presetId === p.id}
-                  onChange={() => setPresetId(p.id)}
-                />
-                <span>{p.name}</span>
-              </label>
-            ))}
-          </div>
-          {presetId === "custom" && (
-            <div className="field">
-              <label>Target size (MB)</label>
-              <input
-                type="number"
-                min={1}
-                max={2000}
-                value={customMb}
-                onChange={(e) => setCustomMb(Number(e.target.value))}
-              />
-            </div>
-          )}
-
-          <div className="field">
-            <label>Resolution</label>
-            <select value={resolutionId} onChange={(e) => setResolutionId(e.target.value)}>
-              {RESOLUTION_OPTIONS.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {isCropped && (
-            <div className="field">
-              <label>Frame</label>
-              <div className="seg-toggle">
-                <button
-                  className={`seg-toggle-btn ${fitMode === "fill" ? "sel" : ""}`}
-                  title="Fill the frame edge-to-edge, cropping whatever doesn't fit"
-                  onClick={() => setFitMode("fill")}
-                >
-                  Fill (crop)
-                </button>
-                <button
-                  className={`seg-toggle-btn ${fitMode === "fit" ? "sel" : ""}`}
-                  title="Show the whole frame, padded with a blurred zoomed copy instead of cropping"
-                  onClick={() => setFitMode("fit")}
-                >
-                  Fit (show all)
-                </button>
-                <button
-                  className={`seg-toggle-btn ${fitMode === "track" ? "sel" : ""}`}
-                  title="Smart auto-reframe: tracks where the on-screen motion actually is and pans the crop to follow it, instead of a fixed center-crop. Motion-based, not face/object tracking - works best when the action is clearly the biggest moving thing in frame."
-                  onClick={() => setFitMode("track")}
-                >
-                  <Icon name="sparkle" size={13} /> Auto-track
-                </button>
-              </div>
-            </div>
-          )}
+          <DestinationControl
+            presetId={presetId}
+            customMb={customMb}
+            resolutionId={resolutionId}
+            fitMode={fitMode}
+            onPresetChange={setPresetId}
+            onCustomMbChange={setCustomMb}
+            onResolutionChange={setResolutionId}
+            onFitModeChange={setFitMode}
+          />
 
           <h4>Encoding</h4>
           <EncodingOptions />

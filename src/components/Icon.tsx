@@ -38,7 +38,12 @@ export type IconName =
   | "folder"
   | "clock"
   | "globe"
-  | "stop";
+  | "stop"
+  | "discord"
+  | "phone"
+  | "sliders"
+  | "plus"
+  | "grip";
 
 const PATHS: Record<IconName, string> = {
   play: "M6 4l14 8-14 8V4z",
@@ -67,6 +72,11 @@ const PATHS: Record<IconName, string> = {
   clock: "M12 21a9 9 0 100-18 9 9 0 000 18zM12 7v5l3 3",
   globe: "M12 21a9 9 0 100-18 9 9 0 000 18zM3 12h18M12 3a13 13 0 010 18M12 3a13 13 0 000 18",
   stop: "M6 6h12v12H6z",
+  discord: "M8 5.5C10 4 14 4 16 5.5c1.8 4 1.6 7.5 1.6 7.5-2 1.3-3.9 1.6-3.9 1.6l-.7-1.2c1.8-.6 2.6-1.5 2.6-1.5-.5.3-1 .6-1.6.8-1.4.6-2.7.6-4 0-.6-.2-1.1-.5-1.6-.8 0 0 .8.9 2.6 1.5l-.7 1.2s-1.9-.3-3.9-1.6c0 0-.2-3.5 1.6-7.5zM9.7 11.8a1 1 0 100-2 1 1 0 000 2zM14.3 11.8a1 1 0 100-2 1 1 0 000 2z",
+  phone: "M8 3h8a1 1 0 011 1v16a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1zM11 19h2",
+  sliders: "M6 20V13M6 9V4M12 20v-3M12 13V4M18 20v-7M18 9V4M3 13h6M9 9h6M15 17h6",
+  plus: "M12 5v14M5 12h14",
+  grip: "M9 6h.01M9 12h.01M9 18h.01M15 6h.01M15 12h.01M15 18h.01",
 };
 
 export function Icon({

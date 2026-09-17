@@ -1080,7 +1080,10 @@ kbd {
   text-decoration: line-through;
 }
 .polish-arrow {
-  color: var(--dim, var(--muted));
+  /* --dim is always defined per-theme (see :root above), so the old
+     var(--dim, var(--muted)) fallback never actually triggered - dead code,
+     simplified to what it always evaluated to. */
+  color: var(--dim);
   margin: 0 5px;
 }
 .polish-new {
@@ -2005,6 +2008,63 @@ kbd {
 }
 .enc-note {
   line-height: 1.45;
+}
+
+/* Shared destination-platform tile picker (DestinationControl.tsx) -
+   replaces the old vertical list of 6-7 preset radios (raw MB SKUs up
+   front) with platform-first tiles plus progressive disclosure. */
+.dest-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: var(--space-3);
+}
+.dest-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line);
+  background: var(--bg2);
+  color: var(--text);
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.dest-tile:hover {
+  border-color: var(--line-strong);
+}
+.dest-tile.sel {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb), 0.14);
+  box-shadow: 0 0 0 1px rgba(var(--accent-rgb), 0.35);
+}
+.dest-tile-title {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.dest-tile-badge {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent2);
+}
+.dest-tile.sel .dest-tile-badge {
+  color: var(--accent2);
+}
+/* A 4-up segmented row (Discord tiers) wraps to 2x2 rather than squashing,
+   the same real bug class this control scale was built to prevent for the
+   existing 3-up Fill/Fit/Auto-track toggle. */
+.dest-discord-tiers {
+  flex-wrap: wrap;
+  border: none;
+  gap: 6px;
+}
+.dest-discord-tiers .seg-toggle-btn {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  flex: 1 1 auto;
 }
 
 /* progress */
