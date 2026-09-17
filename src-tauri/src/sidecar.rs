@@ -110,12 +110,25 @@ pub fn command_in(subdir: &str, name: &str) -> Command {
     let cmd = {
         use std::os::windows::process::CommandExt;
         let mut c = cmd;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        c.creation_flags(CREATE_NO_WINDOW);
+        c.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
         c
     };
     cmd
 }
+
+// whisper-cli/ffmpeg/sherpa-onnx are all CPU-bound and run in the background
+// while the user is doing something else - the entire point of this app. A
+// real report: transcribing even a single short clip pegged (thread_count -
+// 1) cores at NORMAL priority, which is enough to starve the rest of the
+// system's interactive processes on a machine that's also doing other things
+// - confirmed as sustained CPU contention, not memory. BELOW_NORMAL_PRIORITY_CLASS
+// still lets these run at full speed on an otherwise-idle machine (the common
+// case for a solo recording session) but yields to foreground/interactive
+// work under contention instead of fighting it for scheduler time.
+#[cfg(windows)]
+const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Resolve a bundled data file (not an executable — e.g. the .onnx model
 /// files the speaker-diarization sidecar needs). Same search order as
@@ -141,15 +154,16 @@ pub fn resolve_data(filename: &str) -> PathBuf {
     dev
 }
 
-/// Build a Command with the console window hidden on Windows.
+/// Build a Command with the console window hidden on Windows, and its
+/// scheduler priority lowered so it doesn't starve the rest of the system
+/// (see BELOW_NORMAL_PRIORITY_CLASS above).
 pub fn command(name: &str) -> Command {
     let cmd = Command::new(resolve(name));
     #[cfg(windows)]
     let cmd = {
         use std::os::windows::process::CommandExt;
         let mut c = cmd;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        c.creation_flags(CREATE_NO_WINDOW);
+        c.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
         c
     };
     cmd

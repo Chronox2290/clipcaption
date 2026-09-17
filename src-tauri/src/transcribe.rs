@@ -479,14 +479,18 @@ fn read_wav_peaks(path: &std::path::Path, max_buckets: usize) -> Option<(Vec<f32
         return None; // matches the format we always ask ffmpeg for
     }
 
-    let samples: Vec<i16> = data
-        .chunks_exact(2)
-        .map(|b| i16::from_le_bytes([b[0], b[1]]))
-        .collect();
-    let frames = samples.len() / channels as usize;
+    // Read samples directly out of `data` rather than collecting a whole
+    // second `Vec<i16>` copy of the file first - on a long recording that
+    // briefly doubled this function's own memory use for no reason, since
+    // every sample is only ever read once, in order, right here.
+    let frames = data.len() / 2 / channels as usize;
     if frames == 0 {
         return Some((vec![], 0.0));
     }
+    let sample_at = |f: usize, c: usize| -> f64 {
+        let idx = (f * channels as usize + c) * 2;
+        i16::from_le_bytes([data[idx], data[idx + 1]]) as f64 / 32768.0
+    };
 
     let duration = frames as f64 / sample_rate as f64;
     let step = (duration / max_buckets as f64).max(0.01);
@@ -502,7 +506,7 @@ fn read_wav_peaks(path: &std::path::Path, max_buckets: usize) -> Option<(Vec<f32
             // mono-mix all channels for this frame
             let mut v = 0f64;
             for c in 0..channels as usize {
-                v += samples[f * channels as usize + c] as f64 / 32768.0;
+                v += sample_at(f, c);
             }
             v /= channels as f64;
             sum_sq += v * v;

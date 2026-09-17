@@ -5,6 +5,23 @@ Plain-language write-up of what's changed recently and where things stand. Curre
 v0.2.10 draft release described further down — that release note is kept as-is since it's still an
 accurate record of what shipped in it, not because it's the latest state.
 
+**2026-09-17 — real bug from live testing: transcribing even a single short clip could bog down the
+whole PC.** User report: "running a transcribe almost killed my PC... other processes stopped."
+Traced it to CPU scheduling, not memory - `sidecar::command()`/`command_in()` (the one shared helper
+every sidecar process goes through: whisper-cli, ffmpeg, the sherpa-onnx diarization pass, the AI
+cleanup model's `llama-server`) spawned every one of them at normal OS priority, and
+`transcribe.rs` runs whisper-cli with `available_parallelism() - 1` threads - every core but one.
+That's total CPU saturation for however long transcription takes, at a priority level that competes
+equally with everything else on the machine for scheduler time, which is exactly what "everything
+else stopped" looks like on a system that's also doing other things. **Fixed**: both helpers now
+spawn with `BELOW_NORMAL_PRIORITY_CLASS` (Windows) alongside the existing `CREATE_NO_WINDOW` flag -
+still full speed on an otherwise-idle machine (the common case for a solo recording session), but
+yields to foreground/interactive work under contention instead of fighting it. Also fixed, same
+code path: `read_wav_peaks` (the waveform-for-the-editor step, right after transcribe) was loading
+the whole audio file into memory twice - once as raw bytes, once as a full duplicate `Vec<i16>`
+copy it then never needed again - now reads samples directly from the original buffer. `cargo check`
+and the full test suite (97 tests) clean.
+
 **2026-09-17 — Gemini finally completed the original backend/codebase-health review, and it found
 four real bugs, all now fixed.** Gemini was assigned this exact review at the very start of this
 session (`brief-codebase-health.md`) but kept failing on quota before finishing it, so a Claude
