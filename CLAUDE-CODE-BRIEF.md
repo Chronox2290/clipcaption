@@ -246,6 +246,58 @@ to "offer a faster car" than "change what kind of vehicle this is." Worth decidi
 than drifting into it, given how central "your footage never leaves your machine" is to the current
 pitch.
 
+## 2026-09-17: the cloud-transcription question above, actually settled with real data
+
+Per the user's explicit go-ahead to upload clip11's real audio to real cloud APIs and measure, rather
+than keep guessing from generic benchmarks. Ran clip11.wav (the same hand-graded ground-truth clip
+every other accuracy number in this project is measured against) through three real APIs — AssemblyAI
+(Universal), Deepgram (nova-3), and ElevenLabs (Scribe v2) — scored with the exact same normalized
+word-matching technique (`score_lib.py`) used for every local number. Reproducible via
+`scratch_align/cloud_test.py`; raw responses saved next to it (gitignored, same as the rest of
+`scratch_align/`).
+
+**Result: all three cloud APIs did WORSE than local whisper.cpp large-v3-turbo (68.4%, 137 words
+emitted) on this specific hard clip — not close to the 80-85% the general "hard audio" literature
+pattern suggested might be possible:**
+
+| Engine | Word accuracy | Words emitted (of 152 ground truth) |
+| --- | ---: | ---: |
+| Local whisper.cpp large-v3-turbo (shipped default) | 68.4% | 137 |
+| ElevenLabs Scribe v2 | 65.8% | 133 |
+| AssemblyAI Universal | 56.6% | 98 |
+| Deepgram nova-3 | 52.0% | 101 |
+
+ElevenLabs came closest, still below local. AssemblyAI and Deepgram both emitted meaningfully fewer
+words than local (98 and 101 vs. local's 137), the same "missing whole stretches, not mistranscribing
+them" completeness pattern already documented for large-v3 earlier in this file — plausibly the same
+root cause (three-way overlapping proximity chat is genuinely hard for any model that wasn't trained
+heavily on exactly this kind of audio, cloud included). Timing accuracy (on the words each engine DID
+match) was reasonable across the board and best for ElevenLabs (52ms median start error, 90% within
+250ms) - close to local's forced-aligned 64ms - but this is checking timing on a smaller matched-word
+set than local's, so weight it less than the headline word-accuracy number.
+
+**One real, unresolved methodological caveat, stated plainly rather than glossed over**: clip11.wav
+was almost certainly extracted through the same ffmpeg filter chain tuned specifically for
+whisper.cpp (`highpass=f=80,dynaudnorm=f=150:g=15:p=0.9`, 16kHz mono - see the 10-clip test's own
+methodology note above) that every other local number in this file uses. That's the right choice for
+an apples-to-apples test against local whisper, but it is a preprocessing decision optimized for
+whisper.cpp specifically, not verified as neutral for cloud models trained on differently-processed
+audio. Cloud APIs conceivably could have scored differently against the raw, unprocessed source audio
+- untested here, and not assumed either direction.
+
+**Bottom line: on the single hardest real clip this project has ground truth for, cloud transcription
+does not beat the shipped local pipeline - the opposite of what the earlier speculative research
+suggested might be possible.** Per the scope note above, an online mode was already correctly framed
+as "not a wholesale pivot" and "worth deciding deliberately" - this real measurement removes the main
+reason anyone would have wanted to build one (a large assumed accuracy win on hard audio). Doesn't
+rule out cloud transcription looking better on easier, more typical clips (this was deliberately the
+hardest case, same caveat as every other number measured against clip11) - but there's no evidence
+base here for prioritizing an online mode, and real reasons not to (cost, the preprocessing caveat
+above, and the core "footage never leaves your machine" positioning this file has otherwise treated as
+worth protecting). **Recommendation: close this question - stay local, don't build an opt-in cloud
+mode on the strength of this alone.** Revisit only if a specific new signal appears (a cloud provider
+release that specifically targets overlapping/noisy speech, or a request from actual users).
+
 ## 2026-08-29: pushing word accuracy further - what was tried, real numbers, an honest ceiling
 
 Per the user's ask to keep pushing accuracy toward 85-90%. Tested the one lever left unmeasured: the
@@ -382,17 +434,84 @@ more evidence) rather than new information about turbo's own accuracy.
 
 ## Priority build order after that
 
-**2026-08-29: re-verified fresh against the actual current code (not the docs, not memory) — all
-four items below are genuinely done, in real code, right now.** Grepped for each one's real
-implementation rather than trusting an earlier claim: `AUTO_APPLY_CONFIDENCE`/tiered auto-apply
-splitting logic (#2) is live in both the single-clip and batch flows, `needs_review` confidence-gating
-(#5) holds ambiguous batch items back from export, `watchfolder.rs` (164 lines) and `montage.rs` (296
-lines, grown today with the digest-hookup and size-limit work) both exist and compile clean. Tier 0 is
-complete. Tier 1's own items (real correctness bugs, death-detector refinement, Discord webhook,
-pipeline resilience) are also all done - see `CLAUDE-CODE-STATUS.md`. What's left in the backlog below
-is genuinely blocked on real-world access (a Discord bot token, a second device, a bundled-model
-decision, real API credentials) - see this file's own "blocked on real-world access" note further
-down, not a to-do list still waiting on more code.
+**2026-09-17 correction — the 2026-08-29 "Tier 0 is complete" / "Tier 1 is all done" claims below
+undercount how done "done" actually needs to be.** A multi-AI review (Codex reviewing an in-flight
+diff, Gemini attempting a broad codebase pass, Grok doing an adversarial re-check of this exact
+paragraph against the real code) confirmed the 2026-08-29 pass checked *existence* ("the file
+exists and compiles") where it read as *fitness* ("the feature works end-to-end"). Concretely,
+verified against the code directly, not re-asserted from memory:
+- **Real bug, found and fixed today:** the watch-folder listener (`store.ts`) hardcoded its export
+  settings (`"original", 25, null, "source", "fill"`) regardless of what preset/resolution/crop/
+  output-folder was actually selected on the Batch screen — even though that screen's own UI text
+  says new clips export "using the settings below." Point a watch session at a Discord-sized preset
+  and it silently exported full-size originals instead, which is also almost certainly *why* the
+  "Discord webhook size limit — confirmed working as designed" note above kept firing: not a
+  separate confirmed-fine behavior, a symptom of this bug. **Fixed**: export settings are now lifted
+  into the store (`batchExportSettings`) so the watch-folder listener and the manual "Process N
+  clips" button read the exact same values instead of the listener's own hardcoded fallback.
+- **Real bug, found and fixed today:** Auto-track smart reframe (`export.rs`) ran its motion
+  analysis over the *entire untrimmed source file* even when exporting one short highlight out of a
+  multi-hour recording — exactly the flagship raw-footage workflow. One progress message fires, then
+  nothing, for however long the full decode takes; indistinguishable from a hang from the user's
+  side. **Fixed**: analysis now only decodes `[trim_start, trim_end)`, the same range the real
+  encode uses.
+- **Minor issues, found and fixed today:** completed jobs were never evicted from the backend's job
+  map (unbounded growth over a long unattended watch-folder session — cosmetic, not a practical OOM
+  risk, but a real gap in exactly the "long unattended session" hygiene this file calls out
+  elsewhere); the cleanup model's download had no integrity check (now SHA-256 verified against the
+  hash recorded in `docs/cleanup-model-evaluation.md`); the cleanup pass could still forward a
+  wildly over-expanded suggestion (a single flagged word like "I" answered with a whole invented
+  sentence) into the human review queue even though it was measured and known — now rejected before
+  it reaches review, not just relied on a human to notice.
+- **Still genuinely open, not fixed today, flagged for a real decision:** forced alignment silently
+  no-ops on a fresh install with no downloaded wav2vec2 model, and batch alignment failures are
+  swallowed rather than surfaced — "auto-runs by default" is true only once that one-time download
+  has happened. The montage builder still has no path from batch/watch-folder output into a montage
+  project — it's a manual `.ccproj` picker, not yet "a folder of finished clips becomes one postable
+  thing." The death detector is still exactly as experimental/unvalidated as its own code comment
+  says — Tier 1 "done" for it was premature. See `CLAUDE-CODE-STATUS.md` for the same correction
+  applied there.
+
+**Also flagged by the same review, worth a real decision rather than silent inertia:** whether the
+99% word-level accuracy target (see the 2026-08-27 entries above) should be retired. The review's
+argument: every lever this project can test has already been tried and the ceiling that keeps
+showing up (68.4% on the hardest real clip; ~95% for top open ASR models on *clean* benchmark audio)
+sits below 99% regardless of engineering effort, so keeping the number risks producing more passes
+that chase something the architecture can't reach. Not acted on here — this is a positioning call
+for the human collaborator, not something to change unilaterally — but recorded so it doesn't keep
+getting re-chased without anyone having actually decided to keep it.
+
+**Coordination gap above — now resolved by the user directly: the name is "Substrike."** Found the
+actual source of that other session's work: a "ClipCaption Launch Plan" doc (a Claude Artifact, not
+a repo file or a linkable live session — see CLAUDE-CODE-STATUS.md's 2026-09-17 entry for how that
+was tracked down) built around a full launch plan, not just a name pick. Two things from that plan
+matter more than the rename itself and are recorded here so they aren't lost between sessions again:
+- **The Qwen2.5-3B cleanup model swap (this file's earlier 2026-09-17 entries) had a real reason
+  neither this session nor Codex's diff review knew about**: Qwen2.5-3B-Instruct's actual license is
+  a non-commercial research license, a hard blocker for a paid release, confirmed by a dedicated
+  license audit in that plan. The swap to Apache-2.0-licensed Qwen2.5-1.5B wasn't just an accuracy
+  experiment — it was resolving a real legal exposure. The 0.90-threshold validation concerns raised
+  earlier in this file still stand independently; this just explains why the swap happened at all.
+- **ffmpeg's GPL-3.0 license needs real source-distribution compliance before a commercial release**
+  (not just a notices file) — flagged by the same audit, not yet acted on anywhere in this repo.
+  Whoever handles the actual rename/release work should not lose this.
+- Also worth knowing before spending more on branding: that plan's own Phase 0 status shows the
+  Substrike name/domain conflict screen has NOT actually completed (Grok's attempt failed — no
+  web-search tool in that config — and the redirect to Codex, plus the user's own real trademark
+  search, are still marked pending in that plan as of 2026-09-16). "The name is Substrike" is a real,
+  final decision on the NAME; it does not mean the trademark/domain clearance work is done.
+
+**2026-08-29 (superseded above): re-verified fresh against the actual current code (not the docs,
+not memory) — all four items below are genuinely done, in real code, right now.** Grepped for each
+one's real implementation rather than trusting an earlier claim: `AUTO_APPLY_CONFIDENCE`/tiered
+auto-apply splitting logic (#2) is live in both the single-clip and batch flows, `needs_review`
+confidence-gating (#5) holds ambiguous batch items back from export, `watchfolder.rs` (164 lines)
+and `montage.rs` (296 lines, grown today with the digest-hookup and size-limit work) both exist and
+compile clean. Tier 0 is complete. Tier 1's own items (real correctness bugs, death-detector
+refinement, Discord webhook, pipeline resilience) are also all done - see `CLAUDE-CODE-STATUS.md`.
+What's left in the backlog below is genuinely blocked on real-world access (a Discord bot token, a
+second device, a bundled-model decision, real API credentials) - see this file's own "blocked on
+real-world access" note further down, not a to-do list still waiting on more code.
 
 The north star: the whole pipeline — record → find the good moments → transcribe → collate →
 share — should need as close to zero manual editing as possible. Manual editing should be the
@@ -515,12 +634,17 @@ not something to build as customer-facing.
 Engine-style one-time-purchase utility distribution); no direct gaming-caption competitor sells
 there.
 
-## One open item, not yet decided — don't act on this yet
+## Rename — decided: "Substrike"
 
-A rename is on the table — "ClipCaption" tested well below what it could, and a long naming pass
-turned up a genuinely strong shortlist (leading candidates: NoScopeCap, Vantavox, 360NoCap). Nothing
-has been picked yet. Once it is, the actual work is real: `tauri.conf.json`'s `productName` and
-`identifier`, every in-app branding string, the README, installer artifacts, and possibly the GitHub
-repo name all need updating together, plus a real trademark/domain check on whichever name is chosen
-before committing (this session's vetting was search-engine-based, not a real USPTO/IP Australia
-search). Flagged here so it's on the map, not because it's ready to execute.
+**2026-09-17: the user decided this directly — the name is "Substrike."** Supersedes this file's
+old "NoScopeCap, Vantavox, 360NoCap, nothing picked yet" framing and the separate cloud session's
+"ClipCaption Launch Plan" doc, which had already tracked it internally as locked as of 2026-09-16
+(see the coordination-gap entry above). **Trademark clearance also confirmed by the user directly,
+same day** — the "conflict screen hasn't completed" caveat this entry originally carried is
+resolved; no further trademark/domain check is being asked for here. The rename EXECUTION is still
+real, undone work, not yet started: `tauri.conf.json`'s `productName` and `identifier`, every
+in-app branding string, the README, installer artifacts, and possibly the GitHub repo name all need
+updating together. Still worth a look, not a blocker: Grok's independent, unprompted branding
+critique (this session, 2026-09-17, before the user's decision came in) called "Substrike" itself
+"Counter-Strike cosplay" and "Valve-adjacent" — doesn't change the decision, but may be worth
+weighing when the tagline/visual identity around the name gets finalized.

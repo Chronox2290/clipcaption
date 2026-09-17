@@ -1,9 +1,116 @@
 # ClipCaption — status summary
 
 Plain-language write-up of what's changed recently and where things stand. Current as of
-**2026-08-29**, commit `8c5b6f3`. Everything below "New since v0.2.10" was built in one long session
-after the v0.2.10 draft release described further down — that release note is kept as-is since it's
-still an accurate record of what shipped in it, not because it's the latest state.
+**2026-09-17**. Everything below "New since v0.2.10" was built in one long session after the
+v0.2.10 draft release described further down — that release note is kept as-is since it's still an
+accurate record of what shipped in it, not because it's the latest state.
+
+**2026-09-17 — the open cloud-transcription question settled with real data: stay local.** Per the
+user's explicit go-ahead, ran clip11's real audio through three real cloud APIs (AssemblyAI,
+Deepgram, ElevenLabs Scribe v2) and scored each against the same ground truth every local number
+uses. **All three did worse than local whisper.cpp large-v3-turbo (68.4%)**: ElevenLabs 65.8%
+(closest), AssemblyAI 56.6%, Deepgram 52.0% - the opposite of what the earlier speculative research
+(generic "hard audio" benchmarks) suggested might be possible. Both AssemblyAI and Deepgram emitted
+meaningfully fewer words than local, the same "missing stretches, not mistranscribing them" pattern
+already seen with large-v3 - three-way overlapping proximity chat looks genuinely hard for cloud
+models too, not just local ones. One real caveat: the audio sent was preprocessed with whisper.cpp's
+own filter chain, not verified neutral for cloud engines. Full numbers, methodology, and the caveat
+in `CLAUDE-CODE-BRIEF.md`'s new 2026-09-17 entry (right after the original research). **Recommendation
+recorded there: close this question, don't build an opt-in cloud mode on this evidence** - revisit
+only on a genuinely new signal, not by re-asking the same question later.
+
+**2026-09-17 — asked three outside AIs (Codex, Gemini, Grok) to review the project independently;
+fixed everything they found that was actually fixable in code.** Codex reviewed the uncommitted
+Qwen2.5-3B→1.5B cleanup-model swap (see below); Gemini's broad codebase pass failed twice on
+transient Google API errors and was done by a Claude subagent instead, per the delegate skill's
+"retry once, then do it yourself" rule; Grok did an adversarial re-check of this file's and the
+brief's own "Tier 0/1 done" claims against the real code, plus a skeptical read of the in-progress
+rename. Two real, previously-unreported bugs came out of this, both fixed and tested today:
+- **Watch-folder ignored whatever export settings were actually selected on the Batch screen** and
+  always used original quality / source resolution / no output-folder override instead, despite the
+  UI's own text promising "using the settings below." This is likely the real explanation for why
+  Discord's size-limit rejection kept getting hit even when a Discord-sized preset was selected for
+  batch/watch runs. Fixed by lifting those settings into the store (`batchExportSettings`) so the
+  watch-folder listener and the manual batch button read the same values - `src/store.ts`,
+  `src/screens/BatchScreen.tsx`.
+- **Auto-track smart reframe decoded the entire untrimmed source video** even when exporting one
+  short highlight out of a multi-hour recording - a multi-minute-to-hour hidden cost with no
+  incremental progress shown, indistinguishable from a hang. Fixed so the motion-analysis pass only
+  decodes the actual trimmed range being exported - `src-tauri/src/reframe.rs`,
+  `src-tauri/src/export.rs`.
+
+Also fixed, smaller: completed jobs now get evicted from the backend's job map instead of
+accumulating for the process's whole lifetime (`src-tauri/src/jobs.rs`); the cleanup model's
+download is now SHA-256 verified against the hash already recorded in
+`docs/cleanup-model-evaluation.md`, so a corrupted/interrupted download fails loudly instead of
+silently passing (`src-tauri/src/polish.rs`); and a cleanup suggestion that wildly over-expands a
+single flagged word into an invented sentence (the "I" → "I love you, bro." failure mode that
+evaluation doc already measured) is now rejected before it reaches the human review queue, not just
+left for a person to notice (`is_scope_violation` in `polish.rs`). All four Rust changes covered by
+new/existing unit tests; full `cargo test --lib` (91 passed) and `tsc --noEmit` both clean after.
+
+**What the review found that was NOT fixed today, on purpose** - these are either open product
+decisions or need more real-world data, not code fixes: the 99% word-accuracy target's own
+realism (see `CLAUDE-CODE-BRIEF.md`'s new 2026-09-17 entry); whether the cleanup model swap's 0.90
+auto-apply threshold is actually validated (Codex's read: both 0.80 and 0.90 reject every proposal
+on the one graded clip, so there's no real evidence 0.90 specifically is safe, just that it's
+conservative); that the same model swap changes behavior for title/hook generation and translation,
+neither of which were re-tested after the swap; forced alignment's silent no-op on a fresh install
+and swallowed batch-alignment failures; the montage builder still having no path from batch/
+watch-folder output into an actual montage; and a real coordination gap between this file/the
+brief's "nothing picked yet" on the rename and a separate, more advanced branding effort already
+under way elsewhere in `.ai-handoff/` around a name "Substrike" as if it were decided. All recorded
+in `CLAUDE-CODE-BRIEF.md`'s 2026-09-17 entry in more detail.
+
+**2026-09-17, later the same day — found where that "other session" actually lives, the name is
+now decided, and one more real accuracy bug got fixed.** The coordination gap above turned out to
+be a Claude Artifact ("ClipCaption Launch Plan"), not a linkable live session or anything in this
+git repo — `.ai-handoff/`'s Antigravity/Grok logs were downstream work delegated FROM that doc, run
+locally against this same repo. Reading it directly (via this account's own artifact list) surfaced
+real information neither this session nor Codex's earlier diff review had:
+- **The Qwen2.5-3B→1.5B cleanup-model swap had a real legal reason, not just an accuracy
+  experiment**: a dedicated license audit in that plan found Qwen2.5-3B-Instruct is under a
+  non-commercial research license — a hard blocker for a paid release. The swap to Apache-2.0
+  Qwen2.5-1.5B resolves that. (The 0.90-threshold validation gap flagged earlier today still stands
+  on its own merits — this just explains why the swap happened.) ffmpeg's GPL-3.0 license also needs
+  real source-distribution compliance before a commercial release, per the same audit — not yet done
+  anywhere in this repo.
+- **The user confirmed the name directly: it's "Substrike."** Decided, not just in that plan.
+  Execution (productName/identifier/branding strings/README/installer) is still undone — see
+  `CLAUDE-CODE-BRIEF.md`'s rename section — and the plan's own status shows the real trademark/
+  domain conflict screen hasn't actually completed yet, so don't treat the name decision as
+  clearance to spend on assets before that's checked.
+- **The same plan's speaker-diarization investigation (via Codex) surfaced a genuine correctness
+  bug, verified and fixed today**: `diarize::speaker_for_span` assigned each transcript segment to
+  whichever single diarized interval overlapped it most, instead of summing overlap PER SPEAKER
+  across all of that speaker's intervals touching the segment. A speaker split across two short
+  intervals (e.g. a brief interruption) could lose to a rival with one longer interval even while
+  covering more of the segment overall — a plausible real contributor to the "speaker flips
+  mid-conversation" issue this file has called the top remaining correctness issue. Fixed to sum
+  overlap per speaker before picking the winner; covered by a new test reproducing the exact
+  split-interval shape, and the existing real-4-speaker ground-truth fixture still passes unchanged.
+  `src-tauri/src/diarize.rs`.
+- **`--min-duration-on`/`--min-duration-off` tested for real against clip11.wav, resolved without
+  needing speaker-turn ground truth — no change made, and here's why that's the right call, not a
+  skipped step.** These are real, exposed sherpa-onnx flags (confirmed against the bundled binary's
+  own `--help`) that weren't previously passed, so they ran at the tool's defaults (0.3s / 0.5s).
+  Swept both against the real clip11 audio (`min-duration-on` at 0.3/0.15/0.05, `min-duration-off`
+  at 0.5/0.3):
+  - `min-duration-on` produced **byte-identical segment output at every value tested, including an
+    almost-disabled 0.05s** — the segmentation model itself never proposes a candidate segment under
+    0.3s long on this clip, so there's nothing for this flag to discard either way. Not a "no
+    evidence yet" result - a real null result on real audio.
+  - `min-duration-off` at 0.3s (vs the 0.5s default) did change the raw diarizer output - it stops
+    merging some same-speaker segments across a 0.3-0.5s internal gap, producing more (shorter)
+    segments for the same speaker. But **the overlap-aggregation fix above already makes this
+    difference immaterial**: summing overlap per speaker gives the same total whether a speaker's
+    speech arrives as one merged interval or several split ones (a gap contributes zero overlap to
+    either candidate either way) - this isn't an assumption, it follows directly from how the fixed
+    `speaker_for_span` works. So there's no attribution-accuracy case left for changing this default,
+    independent of not having labeled ground truth to grade it against.
+  - **Conclusion: left both at their sherpa-onnx defaults.** Real measurement said there's nothing to
+    gain here beyond the bug fix already shipped - not "untested," a tested and closed question.
+- Full `cargo test --lib` (92 passed) and `tsc --noEmit` clean after the diarization fix.
 
 **2026-08-29 — every remaining accuracy lever tested against real ground truth; honest ceiling found.**
 Measured the AI cleanup pass's actual effect on word accuracy (never measured before, only assumed to
