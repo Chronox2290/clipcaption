@@ -5,6 +5,41 @@ Plain-language write-up of what's changed recently and where things stand. Curre
 v0.2.10 draft release described further down — that release note is kept as-is since it's still an
 accurate record of what shipped in it, not because it's the latest state.
 
+**2026-09-17 — premium UI/UX redesign, built in four phases against a real design spec, verified
+visually at every step.** Per the user's ask to go "extremely deep" on design after the two-AI UX
+review above turned up real problems (raw radio-button SKU lists, dead-void empty states, a
+help-article paragraph in Montage, a settings-form home screen capped at 860px). Antigravity
+produced a full spec + four rendered SVG mockups (`.ai-handoff/redesign-*.svg`/`.md`) that I
+verified myself by actually opening them in a browser before building anything - real, professional-
+looking comps, not just prose. Built in the phased order the spec itself proposed:
+- **Phase 1 - `DestinationControl.tsx`**, a shared platform-first tile picker (Discord/TikTok/
+  Original/Custom, with progressive disclosure - Discord reveals its upload tiers, TikTok reveals
+  the framing toggle, only once picked) replacing the 6-7-item vertical radio list duplicated across
+  BatchScreen/Montage/ExportDrawer. Pure UI layer over the same presetId/customMb/resolutionId/
+  fitMode every call site already had - the export pipeline itself didn't change.
+- **Phase 2 - Batch screen** gets a real hero/secondary split: the OBS watch-folder card (the
+  actual Tier-0 flagship workflow) is now visually dominant (elevated, green-glowing when active),
+  and the empty queue is structured ghost rows (an active drop target + dimmed phantom rows showing
+  the shape of a real row) instead of one big dashed void.
+- **Phase 3 - Montage's empty state** is now a real filmstrip (an active "+" slot + 4 ghost slots at
+  rest) that becomes the exact same object populated with real draggable cards, reusing the
+  existing reorder logic unchanged. Preserves the existing "load many highlights, choose which are
+  in the reel" behavior via a secondary "available highlights" list rather than silently changing
+  it to spec's simpler "everything visible is included" model.
+- **Phase 4 - Library home screen** is no longer capped at 860px in a much bigger window; Batch &
+  Watch Folder gets real hero-card weight over "Open a saved project" (demoted to a small ghost
+  link, since it's just File→Open); recents are a real card grid with actual 16:9 poster-frame
+  thumbnails (new `recentThumbnails` store slice + `loadRecentThumbnail`, using the existing
+  `extract_thumbnail` backend command - not fabricated metadata the app doesn't track); the speech-
+  model/vocab panel is demoted from permanent prime real estate to a compact header chip that
+  expands on click.
+
+Also finished the emoji-to-Icon migration properly (`Icon.tsx` existed for this already but was
+used in only 3 places) across every remaining screen/component, and added TranscriptPanel section
+headings matching the pattern StylePanel/ExportDrawer already used. `tsc --noEmit` and `cargo check`
+both clean after every phase; the tile matrix, progressive disclosure, ghost queue, filmstrip, and
+recents grid were all checked in the actual running dev app, not just compiled.
+
 **2026-09-17 — rename executed, pushed, and crosschecked by two independent AIs.** Everything from
 today's earlier entries (below) is now committed and pushed to `origin/master` (3 commits). The
 Substrike rename was then executed via `delegate codex --edit` (a clean, scoped, 26-file mechanical
