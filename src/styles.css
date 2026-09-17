@@ -320,9 +320,150 @@ select {
   display: flex;
   flex-direction: column;
   gap: 22px;
-  max-width: 860px;
+  max-width: 1440px;
   width: 100%;
   margin: 0 auto;
+}
+
+/* Engine status chip - replaces a big always-visible model-picker card on
+   first contact with a compact header pill that expands to the same
+   content on demand. */
+.engine-chip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--bg1);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.engine-chip:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.engine-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dim);
+}
+.engine-chip.ready .engine-chip-dot {
+  background: var(--ok);
+}
+.engine-chip.ready {
+  color: var(--text);
+}
+
+/* Hero row: the drop zone stays primary, but Batch/Watch (the actual
+   flagship Tier-0 workflow per CLAUDE.md) gets real visual weight instead
+   of matching "Open a saved project"'s File->Open-tier styling. */
+.hero-row {
+  display: grid;
+  grid-template-columns: 1.7fr 1.1fr 1fr;
+  gap: 14px;
+  align-items: stretch;
+}
+.hero-drop {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.hero-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  text-align: left;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  background: var(--bg1);
+  border: 1px solid var(--line);
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.hero-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--line-strong);
+}
+.hero-card strong {
+  font-size: 16px;
+}
+.hero-card-primary {
+  background: linear-gradient(180deg, var(--bg2) 0%, var(--bg1) 100%);
+  border-color: rgba(var(--accent-rgb), 0.4);
+  box-shadow: 0 10px 28px rgba(var(--accent-rgb), 0.12);
+}
+.hero-card-badge {
+  color: var(--accent2);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+}
+.hero-card-cta {
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--accent2);
+  font-weight: 600;
+  font-size: 13px;
+}
+.hero-card-cta-ghost {
+  color: var(--muted);
+}
+
+.recents-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.recents-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+}
+.recents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.recent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 8px;
+  text-align: left;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.recent-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
+}
+.recent-card-poster {
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--bg2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  overflow: hidden;
+}
+.recent-card-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.recent-card-name {
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 2px 2px;
 }
 
 .dropzone {

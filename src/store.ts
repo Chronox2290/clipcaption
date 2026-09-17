@@ -324,6 +324,13 @@ interface AppState {
   fpsOverride: number | null; // null = auto (source / preset default)
 
   recent: string[];
+  /** Poster-frame src (already run through fileSrc) for each recent video's
+   * own path, populated lazily as the Library screen's recents grid mounts
+   * each card - see loadRecentThumbnail. Absent while loading or on
+   * failure; the card falls back to a plain icon rather than blocking on
+   * every recent clip's thumbnail before showing anything. */
+  recentThumbnails: Record<string, string>;
+  loadRecentThumbnail: (path: string) => Promise<void>;
 
   // auto-update (GitHub Releases via tauri-plugin-updater)
   appVersion: string | null;
@@ -924,6 +931,7 @@ export const useApp = create<AppState>((set, get) => ({
     return v === "30" || v === "60" ? Number(v) : null;
   })(),
   recent: loadRecent(),
+  recentThumbnails: {},
 
   appVersion: null,
   updateStatus: "idle",
@@ -1241,6 +1249,27 @@ export const useApp = create<AppState>((set, get) => ({
       set({ models });
     } catch (e) {
       set({ error: String(e) });
+    }
+  },
+
+  loadRecentThumbnail: async (path) => {
+    if (get().recentThumbnails[path]) return; // already cached this session
+    try {
+      const info = await invoke<MediaInfo>("probe_video", { path });
+      // A couple seconds in rather than frame 0 - the very first frame of a
+      // gameplay recording is disproportionately likely to be a loading
+      // screen or black frame, same reasoning as pickThumbnail's own peak-
+      // moment logic just applied at a much cheaper fixed offset since this
+      // runs for every recent clip, not just the one open project.
+      const t = Math.min(2, Math.max(0, info.durationSec - 0.5));
+      const thumbPath = await invoke<string>("extract_thumbnail", { videoPath: path, timeSec: t });
+      const src = await fileSrc(thumbPath);
+      set({ recentThumbnails: { ...get().recentThumbnails, [path]: src } });
+    } catch {
+      // A missing/moved file, or a format ffmpeg can't probe - the card
+      // just falls back to its plain icon, same as a slow/failed network
+      // image would on a web page. Not worth surfacing as an app error for
+      // a background thumbnail on the home screen.
     }
   },
 
