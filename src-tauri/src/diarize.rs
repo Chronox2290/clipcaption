@@ -186,16 +186,28 @@ pub fn extract_speaker_embeddings(
 /// `None` if the span doesn't overlap any diarized segment at all (e.g. a
 /// transcript segment whisper produced from noise diarization didn't judge
 /// as speech).
+///
+/// Sums overlap PER SPEAKER across every one of their diarized intervals
+/// that touches the span, not just the single best-overlapping interval - a
+/// real bug this used to have. A speaker split across two short intervals
+/// inside the span (0.3s + 0.3s = 0.6s total) used to lose to a rival with
+/// one longer interval (0.5s), even though the first speaker actually
+/// covers more of the span overall. Sherpa-onnx's diarization output can
+/// genuinely include several short intervals for the same speaker within
+/// one transcript segment (a brief interruption, a re-clustered short gap),
+/// so this wasn't a rare edge case.
 pub fn speaker_for_span(segments: &[SpeakerSegment], start: f64, end: f64) -> Option<u32> {
-    segments
-        .iter()
-        .map(|s| {
-            let overlap = (end.min(s.end) - start.max(s.start)).max(0.0);
-            (overlap, s.speaker)
-        })
-        .filter(|(overlap, _)| *overlap > 0.0)
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|(_, speaker)| speaker)
+    let mut totals: HashMap<u32, f64> = HashMap::new();
+    for s in segments {
+        let overlap = (end.min(s.end) - start.max(s.start)).max(0.0);
+        if overlap > 0.0 {
+            *totals.entry(s.speaker).or_insert(0.0) += overlap;
+        }
+    }
+    totals
+        .into_iter()
+        .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(speaker, _)| speaker)
 }
 
 #[cfg(test)]
@@ -215,6 +227,24 @@ mod tests {
         assert_eq!(speaker_for_span(&segs, 4.5, 7.0), Some(1));
         // Fully inside speaker 1's window.
         assert_eq!(speaker_for_span(&segs, 6.0, 9.0), Some(1));
+    }
+
+    #[test]
+    fn sums_overlap_across_multiple_intervals_for_the_same_speaker() {
+        // Speaker 0 has two short intervals inside the span (0.3s + 0.3s =
+        // 0.6s total); speaker 1 has one longer interval (0.5s). The old
+        // per-interval max_by picked speaker 1 (0.5 > either of 0's 0.3s
+        // intervals individually) even though 0 covers more of the span
+        // overall - a real, confirmed bug (see speaker_for_span's own doc
+        // comment). This exact shape - a brief interruption splitting one
+        // speaker's coverage into two intervals - is realistic sherpa-onnx
+        // output, not a contrived edge case.
+        let segs = vec![
+            seg(0.0, 0.3, 0),  // speaker 0, first interval: 0.3s
+            seg(0.3, 0.8, 1),  // speaker 1, interruption: 0.5s
+            seg(0.8, 1.1, 0),  // speaker 0, resumes: 0.3s
+        ];
+        assert_eq!(speaker_for_span(&segs, 0.0, 1.1), Some(0));
     }
 
     #[test]

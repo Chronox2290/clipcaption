@@ -85,26 +85,38 @@ pub struct PanSample {
     pub center_frac: f64,
 }
 
-/// Decodes `video_path` at a small size/low frame rate and computes a
-/// smoothed horizontal motion-centroid track across the whole clip. Cheap:
+/// Decodes `video_path` (or just `[start, start+duration)` of it, when
+/// given) at a small size/low frame rate and computes a smoothed horizontal
+/// motion-centroid track across that range. Cheap per second decoded:
 /// SAMPLE_W*SAMPLE_H bytes/frame at SAMPLE_FPS means even a several-minute
-/// clip is a few MB of raw pixels total, not a real decode cost next to the
-/// encode that follows it.
-pub fn analyze_pan(video_path: &str) -> Result<Vec<PanSample>, String> {
-    let mut child = sidecar::command("ffmpeg")
-        .args([
-            "-v",
-            "error",
-            "-i",
-            video_path,
-            "-vf",
-            &format!("fps={SAMPLE_FPS},scale={SAMPLE_W}:{SAMPLE_H}"),
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "gray",
-            "pipe:1",
-        ])
+/// *range* is a few MB of raw pixels total, not a real decode cost next to
+/// the encode that follows it - but decoding the WHOLE source when only a
+/// short highlight is being exported out of a multi-hour recording is a
+/// real, multi-minute-to-hour cost with only one progress message before it
+/// (see export.rs's call site) - indistinguishable from a hang from the
+/// user's side. `-ss` before `-i` here (same as the real encode's own
+/// trim - see ExportRequest::input_args) means `t` in the returned samples
+/// is already relative to `start`, not the source's own 0..duration.
+pub fn analyze_pan(video_path: &str, start: f64, duration: Option<f64>) -> Result<Vec<PanSample>, String> {
+    let mut cmd = sidecar::command("ffmpeg");
+    cmd.args(["-v", "error"]);
+    if start > 0.0 {
+        cmd.args(["-ss", &format!("{start:.3}")]);
+    }
+    cmd.args(["-i", video_path]);
+    if let Some(d) = duration {
+        cmd.args(["-t", &format!("{d:.3}")]);
+    }
+    cmd.args([
+        "-vf",
+        &format!("fps={SAMPLE_FPS},scale={SAMPLE_W}:{SAMPLE_H}"),
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "gray",
+        "pipe:1",
+    ]);
+    let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -332,7 +344,7 @@ mod tests {
             .unwrap();
         assert!(status.success(), "failed to build the synthetic test clip");
 
-        let samples = analyze_pan(&src.to_string_lossy()).unwrap();
+        let samples = analyze_pan(&src.to_string_lossy(), 0.0, None).unwrap();
         assert!(samples.len() > 5, "expected several samples across a 4s clip, got {}", samples.len());
 
         // Early samples should read left-of-center, late samples right-of-

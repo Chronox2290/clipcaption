@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -86,6 +86,15 @@ pub fn emit_progress(app: &AppHandle, id: &str, stage: &str, progress: f32, mess
     );
 }
 
+/// Both terminal emitters below also evict the job from `Jobs::map` - a
+/// normally-finishing job (transcribe/align/polish/export, 4+ per clip) used
+/// to sit in that HashMap for the rest of the process's life, since the only
+/// other place anything called `Jobs::remove` was an explicit cancel. Over a
+/// long unattended watch-folder session (the flagship hands-off scenario)
+/// that grows without bound. Nothing reads a job's handle after its
+/// terminal event fires - the frontend's own `waitForJob` follows the
+/// emitted "job-progress" event, not a separate by-id lookup - so removing
+/// it here is safe.
 pub fn emit_done(app: &AppHandle, id: &str, stage: &str, result: Option<String>) {
     let _ = app.emit(
         "job-progress",
@@ -99,6 +108,7 @@ pub fn emit_done(app: &AppHandle, id: &str, stage: &str, result: Option<String>)
             result,
         },
     );
+    app.state::<Jobs>().remove(id);
 }
 
 pub fn emit_error(app: &AppHandle, id: &str, stage: &str, error: String) {
@@ -114,4 +124,5 @@ pub fn emit_error(app: &AppHandle, id: &str, stage: &str, error: String) {
             result: None,
         },
     );
+    app.state::<Jobs>().remove(id);
 }

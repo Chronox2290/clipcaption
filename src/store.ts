@@ -118,6 +118,21 @@ export type AppTheme = "precision" | "warm" | "gamer";
  * command with no translation layer. */
 export type HighlightGenre = "general" | "fps" | "battleroyale" | "moba";
 
+/** The export configuration for a batch/watch-folder run - shared between
+ * BatchScreen's UI and the watch-folder listener so both read the same
+ * values instead of the UI presenting controls a background listener can't
+ * see. Defaults match what the watch-folder path used to hardcode, so a
+ * fresh install's behavior is unchanged until the user actually touches
+ * these controls. */
+export interface BatchExportSettings {
+  presetId: string;
+  customMb: number;
+  resolutionId: string;
+  fitMode: "fill" | "fit";
+  saveMode: "beside" | "folder";
+  outputDir: string | null;
+}
+
 interface AppState {
   theme: AppTheme;
   setTheme: (t: AppTheme) => void;
@@ -214,7 +229,7 @@ interface AppState {
   polishModelJob: JobState | null;
   /** Whether the local cleanup model is installed - checked once at
    * startup so the UI can hide the action entirely rather than let someone
-   * press it and hit an error about a 2GB download they did not expect. */
+   * press it and hit an error about a 1.1GB download they did not expect. */
   polishAvailable: boolean;
   /** Proposed fixes awaiting review. Nothing here has been applied - see
    * acceptPolishSuggestion / rejectPolishSuggestion. */
@@ -449,10 +464,11 @@ interface AppState {
   addBatchFolder: (dir: string) => Promise<void>;
   /** OBS watch-folder background service (src-tauri/src/watchfolder.rs) -
    * every NEW video that lands in `watchFolderPath` gets queued into the
-   * same batch pipeline automatically, captioned+exported with sensible
-   * defaults (original quality, saved beside the source), no manual step.
-   * Existing files in the folder when watching starts are NOT queued - use
-   * "Add folder" for those. */
+   * same batch pipeline automatically, captioned+exported using whatever
+   * export settings are currently set in `batchExportSettings` (the same
+   * ones BatchScreen's UI reads/writes) - no manual step. Existing files in
+   * the folder when watching starts are NOT queued - use "Add folder" for
+   * those. */
   watching: boolean;
   watchFolderPath: string | null;
   watchFolderJobId: string | null;
@@ -462,6 +478,13 @@ interface AppState {
   watchFolderCount: number;
   startWatchFolder: (folder: string) => Promise<void>;
   stopWatchFolder: () => void;
+  /** The export settings BatchScreen's "Process N clips" button uses, lifted
+   * into the store (rather than local component state) so the watch-folder
+   * listener - which fires from here, not from a mounted BatchScreen - reads
+   * the exact same values instead of a set of hardcoded fallbacks that can
+   * silently drift from what the UI claims to use. */
+  batchExportSettings: BatchExportSettings;
+  setBatchExportSettings: (patch: Partial<BatchExportSettings>) => void;
   removeBatchItem: (id: string) => void;
   clearBatchItems: () => void;
   /** Loads a "needs_review" batch item's own transcript into the main
@@ -686,7 +709,7 @@ const BOOKMARK_AFTER = 4;
  * since Rust reports the number but this is where the tiering DECISION and
  * the actual edit both happen (polish.rs never touches segments directly).
  * If you change one, change both. */
-const AUTO_APPLY_CONFIDENCE = 0.8;
+const AUTO_APPLY_CONFIDENCE = 0.9;
 
 // ---------------- autosaved working state ----------------
 //
@@ -865,6 +888,14 @@ export const useApp = create<AppState>((set, get) => ({
   watchFolderPath: null,
   watchFolderJobId: null,
   watchFolderCount: 0,
+  batchExportSettings: {
+    presetId: "original",
+    customMb: 25,
+    resolutionId: "source",
+    fitMode: "fill",
+    saveMode: "beside",
+    outputDir: null,
+  },
   transcribeJob: null,
   exportJob: null,
   exportDone: null,
@@ -1177,7 +1208,15 @@ export const useApp = create<AppState>((set, get) => ({
       // own - only need to actually START a run when nothing's already
       // going.
       if (!get().batchRunning) {
-        void get().runFileBatch("original", 25, null, "source", "fill", true);
+        const s = get().batchExportSettings;
+        void get().runFileBatch(
+          s.presetId,
+          s.customMb,
+          s.saveMode === "folder" ? s.outputDir : null,
+          s.resolutionId,
+          s.fitMode,
+          true
+        );
       }
     });
     await get().refreshModels();
@@ -2121,6 +2160,9 @@ export const useApp = create<AppState>((set, get) => ({
     localStorage.setItem("cc.autoDigestOnBatch", v ? "1" : "0");
     set({ autoDigestOnBatch: v });
   },
+
+  setBatchExportSettings: (patch) =>
+    set({ batchExportSettings: { ...get().batchExportSettings, ...patch } }),
 
   generateMetadata: async () => {
     const { segments, speakerEmbeddings, speakerProfiles } = get();

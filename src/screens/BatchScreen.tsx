@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useApp } from "../store";
 import { pickDirectory, pickVideoFiles } from "../lib/tauri";
 import { EXPORT_PRESETS, RESOLUTION_OPTIONS } from "../lib/exportPresets";
@@ -40,6 +39,8 @@ export default function BatchScreen() {
     discordWebhook,
     autoDigestOnBatch,
     setAutoDigestOnBatch,
+    batchExportSettings,
+    setBatchExportSettings,
   } = useApp();
   const setScreen = () => useApp.setState({ screen: "library" });
 
@@ -52,12 +53,23 @@ export default function BatchScreen() {
     if (dir) void startWatchFolder(dir);
   };
 
-  const [presetId, setPresetId] = useState("original");
-  const [customMb, setCustomMb] = useState(25);
-  const [resolutionId, setResolutionId] = useState("source");
-  const [fitMode, setFitMode] = useState<"fill" | "fit">("fill");
-  const [saveMode, setSaveMode] = useState<"beside" | "folder">("beside");
-  const [outputDir, setOutputDir] = useState<string | null>(null);
+  // Lifted into the store (see batchExportSettings) rather than local state -
+  // the watch-folder listener runs from the store, not from this mounted
+  // component, and needs to see exactly what's selected here.
+  const {
+    presetId,
+    customMb,
+    resolutionId,
+    fitMode,
+    saveMode,
+    outputDir,
+  } = batchExportSettings;
+  const setPresetId = (v: string) => setBatchExportSettings({ presetId: v });
+  const setCustomMb = (v: number) => setBatchExportSettings({ customMb: v });
+  const setResolutionId = (v: string) => setBatchExportSettings({ resolutionId: v });
+  const setFitMode = (v: "fill" | "fit") => setBatchExportSettings({ fitMode: v });
+  const setSaveMode = (v: "beside" | "folder") => setBatchExportSettings({ saveMode: v });
+  const setOutputDir = (v: string | null) => setBatchExportSettings({ outputDir: v });
 
   const model = models.find((m) => m.name === selectedModel);
   const preset = EXPORT_PRESETS.find((p) => p.id === presetId)!;

@@ -298,21 +298,19 @@ fn run_single_source(
             let (tw, th) = (req.target_w.unwrap(), req.target_h.unwrap());
             let crop_w = ((info.height as f64) * (tw as f64) / (th as f64)).round() as u32;
             let crop_w = crop_w.clamp(1, info.width.max(1));
-            let samples = reframe::analyze_pan(&req.input_path)?;
-            // analyze_pan decodes the whole (untrimmed) input_path, so its
-            // samples' t values are timestamped against the FULL source's
-            // own 0..duration timeline. The actual encode below applies -ss
-            // (trim_start) before -i, which resets the filtergraph's own PTS
-            // to ~0 at the trim point - so the sendcmd schedule has to be
-            // rebased by the same offset, or every command fires against the
-            // wrong point in the trimmed output (or never fires at all, for
-            // a short highlight cut from deep inside a long recording).
+            // Only decode the range that's actually being exported - see
+            // analyze_pan's own doc comment for why this matters: this used
+            // to always decode the FULL (untrimmed) source, so exporting one
+            // short highlight out of a multi-hour recording with Auto-track
+            // on meant a full-length decode before the real encode even
+            // started, with no incremental progress in between.
             let trim_start = req.trim_start.unwrap_or(0.0);
-            let samples: Vec<reframe::PanSample> = samples
-                .into_iter()
-                .filter(|s| s.t >= trim_start)
-                .map(|s| reframe::PanSample { t: s.t - trim_start, center_frac: s.center_frac })
-                .collect();
+            let analyze_duration = req.trim_end.map(|e| (e - trim_start).max(0.1));
+            let samples = reframe::analyze_pan(&req.input_path, trim_start, analyze_duration)?;
+            // analyze_pan's own -ss already rebases t to be relative to
+            // trim_start (same PTS-reset behavior as the real encode's -ss -
+            // see ExportRequest::input_args), so no further offsetting is
+            // needed here.
             let script = reframe::build_sendcmd_script(&samples, info.width, crop_w);
             let sendcmd_path = cache.join(format!("{job_id}_pan.cmds"));
             std::fs::write(&sendcmd_path, script).map_err(|e| e.to_string())?;
